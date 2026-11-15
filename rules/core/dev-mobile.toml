@@ -105,3 +105,37 @@ cost = "redownload"
 rebuild = "Downloaded again when you open a project in a simulator or emulator"
 warm_days = 30
 description = "Expo Go builds the Expo CLI downloads per SDK version for simulators and emulators."
+
+[[rule]]
+id = "rn.expo-prebuild"
+name = "Expo prebuild native folders"
+bucket = "build"
+group = "React Native"
+kind = "artifact"
+tags = ["react-native", "expo", "build-output"]
+stacks = ["react-native", "node"]
+names = ["ios", "android"]
+parent_any = ["app.json", "app.config.js", "app.config.ts"]
+parent_all = ["package.json"]
+children_any = ["Podfile", "*.xcworkspace", "gradlew", "build.gradle", "settings.gradle"]
+# Continuous Native Generation: the folders are git-ignored and regenerated from app.json.
+# A bare React Native app commits them, so ignored = true keeps those safe.
+ignored = true
+cost = "rebuild"
+rebuild = "npx expo prebuild (then pod install runs again)"
+warm_days = 30
+description = "ios/ and android/ that npx expo prebuild generates when a project uses Continuous Native Generation. Only when git ignores them; with Pods and Gradle output inside they are often several GB."
+
+[[rule]]
+id = "rn.eas-local-builds"
+name = "EAS local build workspaces"
+bucket = "junk"
+group = "Temp"
+kind = "path"
+tags = ["react-native", "expo", "temp"]
+stacks = ["react-native", "node"]
+paths = ["$TMPDIR/eas-build-local-nodejs"]
+contents = true
+min_age_days = 1
+cost = "none"
+description = "Working copies eas build --local leaves in the temp folder after a build."

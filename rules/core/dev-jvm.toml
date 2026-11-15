@@ -459,3 +459,39 @@ paths = ["~/Library/Logs/Google/AndroidStudio*"]
 cost = "none"
 contents = true
 description = "IDE logs per Android Studio version."
+
+# ---------------------------------------------------------------------------
+# IntelliJ and sbt project output
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "jvm.intellij-out"
+name = "IntelliJ out folders"
+bucket = "build"
+group = "JVM"
+kind = "artifact"
+tags = ["jvm", "jetbrains", "build-output"]
+stacks = ["jvm"]
+names = ["out"]
+parent_any = ["*.iml", ".idea"]
+children_any = ["production", "test", "artifacts"]
+ignored = true
+cost = "rebuild"
+rebuild = "Build > Rebuild Project"
+description = "Classes and artifacts IntelliJ IDEA's own build system writes to out/. Only when git ignores it."
+
+[[rule]]
+id = "scala.sbt-project-target"
+name = "sbt meta-build output"
+bucket = "build"
+group = "JVM"
+kind = "artifact"
+tags = ["jvm", "scala", "sbt", "build-output"]
+stacks = ["scala", "jvm"]
+names = ["target", "project"]
+parent_all = ["build.properties"]
+children_any = ["scala-*", "streams", "config-classes", "target", "global-logging", "task-temp-directory"]
+children_none = ["build.properties", "*.sbt", "*.scala"]
+cost = "rebuild"
+rebuild = "sbt reload"
+description = "project/target and project/project: the compiled sbt build definition."

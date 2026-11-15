@@ -1,0 +1,151 @@
+# Embedded and WebAssembly toolchains: PlatformIO, Arduino, ESP-IDF and Emscripten.
+# Toolchains and board packages are large downloads; only their download caches
+# and build output are offered without review.
+
+[[stack]]
+id = "platformio"
+name = "PlatformIO"
+markers = ["platformio.ini"]
+
+[[stack]]
+id = "arduino"
+name = "Arduino"
+markers = ["*.ino", "sketch.yaml"]
+
+[[stack]]
+id = "esp-idf"
+name = "ESP-IDF"
+markers = ["sdkconfig", "sdkconfig.defaults", "idf_component.yml"]
+
+[[stack]]
+id = "emscripten"
+name = "Emscripten"
+markers = [".emscripten"]
+
+[[rule]]
+id = "platformio.project"
+name = "PlatformIO .pio folders"
+bucket = "build"
+group = "Embedded"
+kind = "artifact"
+tags = ["embedded", "platformio", "build-output"]
+stacks = ["platformio", "cpp"]
+names = [".pio"]
+parent_any = ["platformio.ini"]
+cost = "rebuild"
+rebuild = "pio run (libraries in .pio/libdeps download again)"
+description = "Firmware builds and per-environment library dependencies PlatformIO keeps in each project."
+
+[[rule]]
+id = "platformio.cache"
+name = "PlatformIO download cache"
+bucket = "caches"
+group = "Embedded"
+kind = "path"
+tags = ["embedded", "platformio", "cache"]
+stacks = ["platformio"]
+paths = ["~/.platformio/.cache"]
+cost = "redownload"
+rebuild = "Downloaded again on demand"
+warm_days = 30
+description = "Package archives and HTTP responses PlatformIO cached while installing platforms and libraries."
+
+[[rule]]
+id = "platformio.packages"
+name = "PlatformIO toolchains and platforms"
+bucket = "caches"
+group = "Embedded"
+kind = "path"
+tags = ["embedded", "platformio", "toolchain"]
+stacks = ["platformio"]
+paths = ["~/.platformio/packages", "~/.platformio/platforms"]
+each = true
+cost = "redownload"
+tier = "review"
+rebuild = "pio pkg install, or automatically on the next pio run"
+description = "Compilers, frameworks and board platforms PlatformIO installed, one item per package."
+
+[[rule]]
+id = "arduino.staging"
+name = "Arduino download staging"
+bucket = "caches"
+group = "Embedded"
+kind = "path"
+tags = ["embedded", "arduino", "cache"]
+stacks = ["arduino"]
+paths = ["~/Library/Arduino15/staging", "~/.arduino15/staging"]
+cost = "redownload"
+rebuild = "Downloaded again when you install a core or library"
+warm_days = 14
+description = "Archives the Arduino IDE and arduino-cli downloaded before unpacking cores, tools and libraries."
+
+[[rule]]
+id = "arduino.packages"
+name = "Arduino board cores and tools"
+bucket = "caches"
+group = "Embedded"
+kind = "path"
+tags = ["embedded", "arduino", "toolchain"]
+stacks = ["arduino"]
+paths = ["~/Library/Arduino15/packages", "~/.arduino15/packages"]
+each = true
+cost = "redownload"
+tier = "review"
+rebuild = "Boards Manager / arduino-cli core install"
+description = "Installed board cores and their compilers, one item per vendor (esp32 alone is several GB)."
+
+[[rule]]
+id = "espidf.dist"
+name = "ESP-IDF tool downloads"
+bucket = "caches"
+group = "Embedded"
+kind = "path"
+tags = ["embedded", "esp-idf", "cache"]
+stacks = ["esp-idf"]
+paths = ["~/.espressif/dist"]
+cost = "redownload"
+rebuild = "install.sh downloads them again if needed"
+warm_days = 14
+description = "Archives ESP-IDF's install script downloaded; the unpacked tools in ~/.espressif/tools stay."
+
+[[rule]]
+id = "espidf.tools"
+name = "ESP-IDF toolchains"
+bucket = "caches"
+group = "Embedded"
+kind = "path"
+tags = ["embedded", "esp-idf", "toolchain"]
+stacks = ["esp-idf"]
+paths = ["~/.espressif/tools/*"]
+cost = "redownload"
+tier = "review"
+rebuild = "./install.sh in your ESP-IDF checkout"
+description = "Cross compilers, OpenOCD and QEMU builds ESP-IDF installed, one item per tool."
+
+[[rule]]
+id = "emscripten.cache"
+name = "Emscripten caches"
+bucket = "caches"
+group = "Shared compiler caches"
+kind = "path"
+tags = ["wasm", "emscripten", "cache"]
+stacks = ["emscripten", "cpp"]
+paths = ["~/.emscripten_cache", "~/emsdk/upstream/emscripten/cache", "~/.emsdk/upstream/emscripten/cache"]
+cost = "rebuild"
+rebuild = "Rebuilt by the next emcc run that needs a system library"
+warm_days = 30
+description = "System libraries (libc, libc++, SDL ports) Emscripten compiled and cached."
+
+[[rule]]
+id = "emscripten.downloads"
+name = "emsdk downloads"
+bucket = "caches"
+group = "Shared compiler caches"
+kind = "path"
+tags = ["wasm", "emscripten", "cache"]
+stacks = ["emscripten"]
+paths = ["~/emsdk/downloads", "~/.emsdk/downloads"]
+contents = true
+cost = "redownload"
+rebuild = "emsdk install downloads them again"
+description = "Archives emsdk downloaded before installing SDK versions."

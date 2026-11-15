@@ -611,3 +611,22 @@ paths = ["~/Library/Application Support/MobileSync/Backup"]
 each = true
 cost = "data"
 description = "Local iPhone and iPad backups. Shown for awareness; poo never deletes them."
+
+# ---------------------------------------------------------------------------
+# Swift SDKs (cross compilation)
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "swift.sdks"
+name = "Swift SDKs"
+bucket = "caches"
+group = "Swift"
+kind = "path"
+tags = ["swift", "toolchain", "cross-compile"]
+stacks = ["swift"]
+paths = ["~/Library/org.swift.swiftpm/swift-sdks", "~/.swiftpm/swift-sdks"]
+each = true
+cost = "redownload"
+tier = "review"
+rebuild = "swift sdk install <url>"
+description = "Swift SDKs for cross compiling (Static Linux, WebAssembly, Android), one item per bundle. Each is several hundred MB."

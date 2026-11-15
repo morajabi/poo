@@ -1027,3 +1027,112 @@ cost = "redownload"
 rebuild = "Downloaded again by forge or hardhat when a contract needs that solc"
 warm_days = 60
 description = "solc compilers downloaded per version and Foundry's RPC and Etherscan cache."
+
+# ---------------------------------------------------------------------------
+# Lean, D, Racket
+# ---------------------------------------------------------------------------
+
+[[stack]]
+id = "lean"
+name = "Lean"
+markers = ["lakefile.lean", "lakefile.toml", "lean-toolchain"]
+
+[[stack]]
+id = "dlang"
+name = "D"
+markers = ["dub.json", "dub.sdl"]
+
+[[stack]]
+id = "racket"
+name = "Racket"
+markers = ["info.rkt", "*.rkt"]
+
+[[rule]]
+id = "lean.lake"
+name = "Lean .lake folders"
+bucket = "deps"
+group = "Lean"
+kind = "artifact"
+tags = ["lean", "build-output", "dependencies"]
+stacks = ["lean"]
+names = [".lake"]
+parent_any = ["lakefile.lean", "lakefile.toml", "lean-toolchain"]
+children_any = ["build", "packages", "config"]
+cost = "redownload"
+rebuild = "lake exe cache get && lake build"
+warm_days = 30
+description = "Lake's build output and fetched packages. With Mathlib this is several GB per project; lake exe cache get downloads the prebuilt .olean files again."
+
+[[rule]]
+id = "lean.mathlib-cache"
+name = "Mathlib cache downloads"
+bucket = "caches"
+group = "Lean"
+kind = "path"
+tags = ["lean", "cache"]
+stacks = ["lean"]
+paths = ["~/.cache/mathlib"]
+cost = "redownload"
+rebuild = "lake exe cache get"
+warm_days = 30
+description = "Compressed .olean archives lake exe cache get downloaded, shared by every Mathlib project."
+
+[[rule]]
+id = "lean.toolchains"
+name = "Lean toolchains"
+bucket = "caches"
+group = "Lean"
+kind = "path"
+tags = ["lean", "toolchain"]
+stacks = ["lean"]
+paths = ["~/.elan/toolchains"]
+each = true
+cost = "redownload"
+tier = "review"
+rebuild = "elan toolchain install <version> (or automatic from lean-toolchain)"
+description = "Lean versions elan installed, one item per toolchain. Projects pin theirs in lean-toolchain."
+recommend = "Keep the toolchains your projects' lean-toolchain files name; elan installs any other on demand."
+
+[[rule]]
+id = "dlang.dub-build"
+name = "D dub build state"
+bucket = "build"
+group = "D"
+kind = "artifact"
+tags = ["dlang", "build-output"]
+stacks = ["dlang"]
+names = [".dub"]
+parent_any = ["dub.json", "dub.sdl"]
+cost = "rebuild"
+rebuild = "dub build"
+description = "Per-project build cache dub keeps in .dub."
+
+[[rule]]
+id = "dlang.dub-packages"
+name = "D dub packages"
+bucket = "caches"
+group = "D"
+kind = "path"
+tags = ["dlang", "dependencies"]
+stacks = ["dlang"]
+paths = ["~/.dub/packages", "~/.dub/cache", "~/.local/share/dub/packages"]
+cost = "redownload"
+rebuild = "dub fetch / dub build"
+warm_days = 30
+description = "Packages and build caches dub downloaded for every project."
+
+[[rule]]
+id = "racket.compiled"
+name = "Racket compiled folders"
+bucket = "build"
+group = "Racket"
+kind = "artifact"
+tags = ["racket", "build-output"]
+stacks = ["racket"]
+names = ["compiled"]
+parent_any = ["*.rkt", "*.scrbl", "info.rkt"]
+children_any = ["*_rkt.zo", "*_rkt.dep", "*_scrbl.zo"]
+children_none = ["*.rkt"]
+cost = "rebuild"
+rebuild = "raco make / raco setup"
+description = "Bytecode raco make writes next to Racket sources."

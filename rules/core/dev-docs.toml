@@ -1,0 +1,102 @@
+# Documentation and typesetting: MkDocs, Sphinx, Jupyter Book, mdBook, Typst and
+# Tectonic. Jekyll, Eleventy, Hugo, Docusaurus and VitePress live in langs.toml
+# and dev-web.toml. Generated sites only match when git ignores them.
+
+[[stack]]
+id = "mkdocs"
+name = "MkDocs"
+markers = ["mkdocs.yml", "mkdocs.yaml"]
+
+[[stack]]
+id = "sphinx"
+name = "Sphinx / Jupyter Book"
+markers = ["conf.py", "_toc.yml", "myst.yml"]
+
+[[stack]]
+id = "mdbook"
+name = "mdBook"
+markers = ["book.toml"]
+
+[[stack]]
+id = "typst"
+name = "Typst"
+markers = ["*.typ", "typst.toml"]
+
+[[stack]]
+id = "latex"
+name = "LaTeX"
+markers = ["*.tex", "latexmkrc", ".latexmkrc", "Tectonic.toml"]
+
+[[rule]]
+id = "docs.mkdocs-site"
+name = "MkDocs sites"
+bucket = "build"
+group = "Docs sites"
+kind = "artifact"
+tags = ["docs", "mkdocs", "python", "build-output"]
+stacks = ["mkdocs", "python"]
+names = ["site"]
+parent_any = ["mkdocs.yml", "mkdocs.yaml"]
+ignored = true
+cost = "rebuild"
+rebuild = "mkdocs build"
+description = "The site/ folder mkdocs build writes. Only when git ignores it."
+
+[[rule]]
+id = "docs.sphinx-build"
+name = "Sphinx and Jupyter Book builds"
+bucket = "build"
+group = "Docs sites"
+kind = "artifact"
+tags = ["docs", "sphinx", "python", "build-output"]
+stacks = ["sphinx", "python"]
+names = ["_build"]
+parent_any = ["conf.py", "_toc.yml", "myst.yml"]
+children_any = ["html", "doctrees", ".doctrees", "latex", "dirhtml", "jupyter_execute", "site", ".jupyter_cache"]
+ignored = true
+cost = "rebuild"
+rebuild = "make html / sphinx-build / jupyter-book build"
+description = "HTML, LaTeX and doctree output (and executed notebooks) of Sphinx, Jupyter Book and MyST. Only when git ignores it."
+
+[[rule]]
+id = "docs.mdbook"
+name = "mdBook output"
+bucket = "build"
+group = "Docs sites"
+kind = "artifact"
+tags = ["docs", "mdbook", "rust", "build-output"]
+stacks = ["mdbook", "rust"]
+names = ["book"]
+parent_any = ["book.toml"]
+ignored = true
+cost = "rebuild"
+rebuild = "mdbook build"
+description = "The rendered book mdbook build writes. Only when git ignores it."
+
+[[rule]]
+id = "docs.typst-packages"
+name = "Typst package cache"
+bucket = "caches"
+group = "Documentation"
+kind = "path"
+tags = ["docs", "typst", "cache"]
+stacks = ["typst"]
+paths = ["~/Library/Caches/typst", "~/.cache/typst"]
+cost = "redownload"
+rebuild = "Downloaded again on the next compile that imports a package"
+warm_days = 30
+description = "Packages Typst downloaded from Typst Universe."
+
+[[rule]]
+id = "docs.tectonic-cache"
+name = "Tectonic TeX bundle cache"
+bucket = "caches"
+group = "Documentation"
+kind = "path"
+tags = ["docs", "latex", "tectonic", "cache"]
+stacks = ["latex"]
+paths = ["~/Library/Caches/Tectonic", "~/.cache/Tectonic"]
+cost = "redownload"
+rebuild = "Downloaded again on the next tectonic build"
+warm_days = 30
+description = "TeX support files Tectonic fetched on demand, plus its format files."

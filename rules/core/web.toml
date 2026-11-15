@@ -385,7 +385,7 @@ group = "Node"
 kind = "path"
 tags = ["node", "package-cache"]
 stacks = ["node"]
-paths = ["~/Library/Caches/node-gyp", "~/.cache/node-gyp", "~/.node-gyp/*"]
+paths = ["~/Library/Caches/node-gyp", "~/.cache/node-gyp", "~/.node-gyp/*", "~/.electron-gyp/*"]
 cost = "redownload"
 rebuild = "Downloaded again by the next native addon build"
 warm_days = 30
@@ -492,3 +492,31 @@ cost = "rebuild"
 rebuild = "Refilled by the next turbo run"
 warm_days = 14
 description = "Turborepo daemon and cache data."
+
+[[rule]]
+id = "browsers.selenium"
+name = "Selenium drivers and browsers"
+bucket = "caches"
+group = "Test browsers"
+kind = "path"
+tags = ["browsers", "testing", "selenium"]
+stacks = ["python", "java", "node"]
+paths = ["~/.cache/selenium", "~/.wdm"]
+cost = "redownload"
+rebuild = "Selenium Manager (or webdriver-manager) downloads them again on the next test run"
+warm_days = 30
+description = "ChromeDriver, GeckoDriver and the Chrome for Testing and Firefox builds Selenium Manager and webdriver-manager downloaded."
+
+[[rule]]
+id = "node.prisma-engines"
+name = "Prisma engines"
+bucket = "caches"
+group = "Node"
+kind = "path"
+tags = ["node", "prisma", "database", "toolchain"]
+stacks = ["node"]
+paths = ["~/.cache/prisma"]
+cost = "redownload"
+rebuild = "Downloaded again by the next prisma generate"
+warm_days = 30
+description = "Query and schema engine binaries Prisma downloads per version."
