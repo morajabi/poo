@@ -20,11 +20,13 @@ item gets a tier that says how much regret cleaning it causes.
 - Junk and cold items may be cleaned when the user asked you to free space.
   Idle and warm items need the user's OK unless `poo config get agents.auto_clean_max_tier`
   allows them. Hot, review and protected items: show them and let the user decide.
-- Items carry `risks`, each needing a mode: `--force` (recently used, an agent open
-  in that checkout, uncommitted work which poo stashes first, review items) or
-  `--danger` (running builds, data, protected, system paths, detached commits which
-  poo saves to a `poo/` branch first). Use a mode only after the user agreed to that
-  mode for those items; quote the warnings poo prints.
+- Items carry `risks`, each needing a mode: `--include-in-use` (used in the last hour,
+  an agent or editor open in that checkout, uncommitted work which poo stashes first,
+  check-first items) or `--dangerously-include-protected` (running builds, data, kept
+  projects, system paths, detached commits which poo saves to a `poo/` branch first).
+  Use a mode only after the user agreed to it for those items; quote poo's warnings.
+- Before cleaning, poo backs up what removal would lose (small ignored config files,
+  stashes, rescue branches) and lists them in `poo backups`. Tell the user about them.
 - Before cleaning anything beyond junk, show the user what goes: sizes, tiers and
   reasons from poo's output.
 - Use IDs and paths exactly as poo prints them. Do not predict them.

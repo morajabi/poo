@@ -48,7 +48,7 @@ fn tools() -> Value {
             "free": {"type": "string", "description": "With plan: target size"},
             "dry_run": {"type": "boolean", "default": true},
             "approved_by_user": {"type": "boolean", "default": false, "description": "Only after the user explicitly approved these items"},
-            "mode": {"type": "string", "enum": ["standard", "force", "danger"], "default": "standard", "description": "force: also items with soft risks (recent, agent working, dirty worktrees which get stashed, review). danger: hard risks too (running builds, data, protected, system paths). Both need approved_by_user and the user's explicit OK for that mode."}
+            "mode": {"type": "string", "enum": ["safe", "in-use", "dangerous"], "default": "safe", "description": "in-use: also things in use (recent, agent open, uncommitted work which poo stashes first, check-first items). dangerous: also protected things (running builds, data, system paths, detached commits). Both need approved_by_user and the user's explicit OK for that mode."}
          }}},
         {"name": "projects", "description": "Projects and worktrees with size, activity status and policy; plus repos grouped with their worktrees.",
          "inputSchema": {"type": "object", "properties": {}}},
@@ -77,6 +77,12 @@ fn tools() -> Value {
             "buckets": {"type": "array", "items": {"type": "string"}}, "exclude_buckets": {"type": "array", "items": {"type": "string"}},
             "tags": {"type": "array", "items": {"type": "string"}}, "exclude_tags": {"type": "array", "items": {"type": "string"}},
             "dry_run": {"type": "boolean", "default": true}
+         }, "required": ["action"]}},
+        {"name": "backups", "description": "What poo saved before cleaning (copies of small ignored files, stashes of uncommitted work, rescue branches). Actions: list, prune (ids or older_than_days; permanent, ask the user first), restore (id; copies files back without overwriting).",
+         "inputSchema": {"type": "object", "properties": {
+            "action": {"type": "string", "enum": ["list", "prune", "restore"]},
+            "ids": {"type": "array", "items": {"type": "string"}}, "older_than_days": {"type": "integer"},
+            "id": {"type": "string"}, "dry_run": {"type": "boolean", "default": true}
          }, "required": ["action"]}},
         {"name": "history", "description": "What poo cleaned before, newest first.",
          "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer", "default": 50}}}}
@@ -138,8 +144,8 @@ fn call(ctx: &mut Ctx, name: &str, a: &Value) -> Result<Value> {
             let dry = a.get("dry_run").and_then(|v| v.as_bool()).unwrap_or(true);
             let approved = a.get("approved_by_user").and_then(|v| v.as_bool()).unwrap_or(false);
             let mode = match s(a, "mode").as_deref() {
-                Some("force") => RiskLevel::Force,
-                Some("danger") => RiskLevel::Danger,
+                Some("in-use") | Some("force") => RiskLevel::Force,
+                Some("dangerous") | Some("danger") => RiskLevel::Danger,
                 _ => RiskLevel::Standard,
             };
             if mode > RiskLevel::Standard && !approved && !dry {
@@ -163,13 +169,8 @@ fn call(ctx: &mut Ctx, name: &str, a: &Value) -> Result<Value> {
                     "items": needs.iter().map(|i| ops::compact(i)).collect::<Vec<_>>(),
                 }));
             }
-            let opts = CleanOptions {
-                dry_run: dry,
-                trash: false,
-                max_tier: Some(if approved { Tier::Warm } else { limit }),
-                mode,
-                actor: "mcp".into(),
-            };
+            let mut opts = CleanOptions::from_config(&ctx.cfg, mode, dry, "mcp");
+            opts.max_tier = Some(if approved { Tier::Warm } else { limit });
             let _lock = if dry { None } else {
                 Some(crate::schedule::RunLock::try_acquire().ok_or_else(|| anyhow!("another poo clean or scheduled run is in progress"))?)
             };
@@ -249,6 +250,27 @@ fn call(ctx: &mut Ctx, name: &str, a: &Value) -> Result<Value> {
             Ok(json!({"brief": crate::agent::setup_brief(&ctx.cfg, &ctx.cat, &r)}))
         }
         "schedules" => schedules_tool(ctx, a),
+        "backups" => {
+            let action = s(a, "action").unwrap_or_else(|| "list".into());
+            match action.as_str() {
+                "list" => {
+                    let l = crate::backup::list();
+                    Ok(json!({"backups": l, "total_bytes": crate::backup::total_bytes(&l), "budget_bytes": ctx.cfg.backup.max_backup_bytes}))
+                }
+                "prune" => {
+                    let ids: Vec<String> = a.get("ids").and_then(|v| v.as_array()).map(|v| v.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default();
+                    let days = a.get("older_than_days").and_then(|v| v.as_u64()).map(|d| d as u32);
+                    let dry = a.get("dry_run").and_then(|v| v.as_bool()).unwrap_or(true);
+                    Ok(serde_json::to_value(crate::backup::prune(&ids, days, false, dry))?)
+                }
+                "restore" => {
+                    let id = s(a, "id").ok_or_else(|| anyhow!("id is required"))?;
+                    let (m, n) = crate::backup::restore(&id)?;
+                    Ok(json!({"ok": true, "message": m, "files": n}))
+                }
+                _ => Err(anyhow!("unknown action `{}`", action)),
+            }
+        }
         "history" => {
             let limit = a.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
             Ok(json!({"history": clean::history(limit)}))

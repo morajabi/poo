@@ -102,13 +102,13 @@ enum Cmd {
         /// Move to the Trash instead of deleting.
         #[arg(long)]
         trash: bool,
-        /// Also clean items with soft risks: used recently, an agent working there, dirty
-        /// worktrees (stashed first), review items. Prints each warning.
-        #[arg(long)]
+        /// Also clean things in use: used in the last hour, a checkout with an agent or editor
+        /// open, worktrees with uncommitted work (stashed first), check-first items.
+        #[arg(long = "include-in-use", alias = "force")]
         force: bool,
-        /// Also hard risks: running builds, data, protected items, system paths, detached
-        /// commits (saved to a branch first). Asks you to type "danger".
-        #[arg(long)]
+        /// Also protected things: running builds, data, kept projects, system paths, detached
+        /// commits (saved to a poo/ branch first). Asks you to type "dangerous".
+        #[arg(long = "dangerously-include-protected", alias = "danger")]
         danger: bool,
         /// Highest tier to clean in standard mode (default warm).
         #[arg(long)]
@@ -121,8 +121,8 @@ enum Cmd {
         dry_run: bool,
         #[arg(long, short)]
         yes: bool,
-        /// Let the emergency plan include soft-risk items too.
-        #[arg(long)]
+        /// Let the emergency plan include things in use too.
+        #[arg(long = "include-in-use", alias = "force")]
         force: bool,
     },
     /// Projects with status and policy, or set a policy.
@@ -197,6 +197,22 @@ enum Cmd {
     Schedule {
         #[command(subcommand)]
         cmd: Option<ScheduleCmd>,
+    },
+    /// What poo saved before cleaning: config file copies, stashes, rescue branches.
+    Backups {
+        #[command(subcommand)]
+        cmd: Option<BackupsCmd>,
+    },
+    /// Opt-in agent hooks: clean a worktree's build output when an agent finishes there.
+    Hooks {
+        #[command(subcommand)]
+        cmd: Option<HooksCmd>,
+    },
+    /// Entry point the agent hooks call.
+    #[command(hide = true)]
+    Hook {
+        #[command(subcommand)]
+        cmd: HookCmd,
     },
     /// Check poo's setup and environment.
     Doctor,
@@ -321,8 +337,62 @@ enum ModsCmd {
 enum ConfigCmd {
     Show,
     Path,
+    /// Every setting with its default and what it does.
+    Keys,
     Get { key: String },
     Set { key: String, value: String },
+}
+
+#[derive(Subcommand)]
+enum BackupsCmd {
+    Ls,
+    /// Delete backups by id, or all older than an age (30d).
+    Prune {
+        ids: Vec<String>,
+        #[arg(long)]
+        older_than: Option<String>,
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long, short)]
+        yes: bool,
+    },
+    /// Copy a file backup back into its folder (never overwrites).
+    Restore {
+        id: String,
+        #[arg(long, short)]
+        yes: bool,
+    },
+    /// Apply the age limit and size budget from config now.
+    Enforce,
+    /// Print the backups folder.
+    Path,
+}
+
+#[derive(Subcommand)]
+enum HooksCmd {
+    Status,
+    /// claude, codex or all
+    Install { agent: String },
+    Uninstall { agent: String },
+    /// Recent hook activity.
+    Log {
+        #[arg(long, short = 'n', default_value_t = 30)]
+        limit: usize,
+    },
+}
+
+#[derive(Subcommand)]
+enum HookCmd {
+    AgentDone {
+        #[arg(long)]
+        agent: String,
+        #[arg(long)]
+        cwd: Option<String>,
+        #[arg(long)]
+        detached: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -522,7 +592,9 @@ fn run_clean(ctx: &Ctx, out: &Out, mut report: poo::model::Report, items: Vec<po
         return Ok(());
     }
     let total: u64 = items.iter().map(|i| i.total_bytes).sum();
-    let opts = CleanOptions { dry_run: dry, trash, max_tier: Some(max_tier.unwrap_or(Tier::Warm)), mode, actor: "cli".into() };
+    let mut opts = CleanOptions::from_config(&ctx.cfg, mode, dry, "cli");
+    opts.trash = trash || ctx.cfg.backup.use_trash;
+    opts.max_tier = Some(max_tier.unwrap_or(Tier::Warm));
     let _lock = if dry { None } else {
         Some(poo::schedule::RunLock::try_acquire().ok_or_else(|| CliError::new("busy", 9, "another poo clean or scheduled run is in progress"))?)
     };
@@ -551,11 +623,11 @@ fn run_clean(ctx: &Ctx, out: &Out, mut report: poo::model::Report, items: Vec<po
             }
         }
         if mode == RiskLevel::Danger {
-            eprint!("Danger mode: {} item(s) carry warnings above. Type \"danger\" to clean {}: ", risky, bytes(total));
+            eprint!("Including protected items: {} item(s) carry warnings above. Type \"dangerous\" to clean {}: ", risky, bytes(total));
             let _ = std::io::stderr().flush();
             let mut s = String::new();
             let _ = std::io::stdin().read_line(&mut s);
-            if s.trim() != "danger" {
+            if s.trim() != "dangerous" {
                 println!("Cancelled.");
                 return Ok(());
             }
@@ -992,6 +1064,17 @@ fn real_main(cli: Cli) -> R {
                 }
             }
             ConfigCmd::Path => println!("{}", poo::config::config_path().display()),
+            ConfigCmd::Keys => {
+                let defaults = serde_json::to_value(poo::config::Config::default()).unwrap_or_default();
+                if out.json {
+                    emit(&out, &json!({"keys": poo::config::KEYS.iter().map(|(k, d)| json!({"key": k, "description": d})).collect::<Vec<_>>(), "defaults": defaults}));
+                } else {
+                    for (k, d) in poo::config::KEYS {
+                        println!("{}\n    {}", k, d);
+                    }
+                    println!("\nCurrent values: poo config show. Change: poo config set <key> <value>.");
+                }
+            }
             ConfigCmd::Get { key } => {
                 let v = serde_json::to_value(&ctx.cfg).unwrap_or_default();
                 let mut cur = &v;
@@ -1126,6 +1209,52 @@ fn real_main(cli: Cli) -> R {
             }
         }
         Cmd::Schedule { cmd } => schedule_cmd(&mut ctx, &out, cmd.unwrap_or(ScheduleCmd::Ls))?,
+        Cmd::Backups { cmd } => backups_cmd(&ctx, &out, cmd.unwrap_or(BackupsCmd::Ls))?,
+        Cmd::Hooks { cmd } => match cmd.unwrap_or(HooksCmd::Status) {
+            HooksCmd::Status => {
+                let st = poo::hooks::status();
+                if out.json {
+                    emit(&out, &json!({"targets": st, "on_agent_done": ctx.cfg.hooks.on_agent_done, "remove_landed_worktrees": ctx.cfg.hooks.remove_landed_worktrees}));
+                } else {
+                    for t in &st {
+                        println!("{:<8} {:<9} {:<13} {}", t.id, if t.detected { "found" } else { "-" }, if t.installed { "installed" } else { "not installed" }, t.file);
+                    }
+                    println!("\nWhen an agent finishes in a worktree: {} (hooks.on_agent_done: landed | always | off)", ctx.cfg.hooks.on_agent_done);
+                    println!("Hooks are off until you run `poo hooks install claude|codex|all`.");
+                }
+            }
+            HooksCmd::Install { agent } => {
+                let ids: Vec<&str> = if agent == "all" { poo::hooks::status().iter().filter(|t| t.detected).map(|t| t.id).collect() } else { vec![agent.as_str()] };
+                let mut done = vec![];
+                for id in ids {
+                    done.push(poo::hooks::install(id).map_err(|e| CliError::new("hooks", 1, format!("{:#}", e)))?);
+                }
+                if out.json { emit(&out, &json!({"done": done})); } else { for d in done { println!("{}", d); } }
+            }
+            HooksCmd::Uninstall { agent } => {
+                let ids: Vec<&str> = if agent == "all" { vec!["claude", "codex"] } else { vec![agent.as_str()] };
+                let mut done = vec![];
+                for id in ids {
+                    done.push(poo::hooks::uninstall(id).map_err(|e| CliError::new("hooks", 1, format!("{:#}", e)))?);
+                }
+                if out.json { emit(&out, &json!({"done": done})); } else { for d in done { println!("{}", d); } }
+            }
+            HooksCmd::Log { limit } => {
+                let text = std::fs::read_to_string(poo::config::state_dir().join("hooks.log")).unwrap_or_default();
+                let lines: Vec<&str> = text.lines().rev().take(limit).collect();
+                if out.json { emit(&out, &json!({"log": lines})); } else { for l in lines.into_iter().rev() { println!("{}", l); } }
+            }
+        },
+        Cmd::Hook { cmd: HookCmd::AgentDone { agent, cwd, detached } } => {
+            // Hooks must never fail the agent: log and exit 0.
+            if let Err(e) = poo::hooks::agent_done(&agent, cwd, detached) {
+                let _ = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(poo::config::state_dir().join("hooks.log"))
+                    .map(|mut f| writeln!(f, "{} {} error: {:#}", poo::util::iso8601(poo::util::now()), agent, e));
+            }
+        }
         Cmd::Doctor => {
             let (roots, detected) = ctx.cfg.effective_roots();
             let st = poo::agent::status();
@@ -1322,6 +1451,95 @@ scheduler agent: {}", if sch::agent_loaded() { "running" } else if sch::agent_in
                     println!("{}", l);
                 }
             }
+            Ok(())
+        }
+    }
+}
+
+fn backups_cmd(ctx: &Ctx, out: &Out, cmd: BackupsCmd) -> R {
+    use poo::backup;
+    match cmd {
+        BackupsCmd::Ls => {
+            let list = backup::list();
+            let total = backup::total_bytes(&list);
+            if out.json {
+                emit(out, &json!({"backups": list, "total_bytes": total, "dir": backup::dir(), "budget_bytes": ctx.cfg.backup.max_backup_bytes, "auto_prune_days": ctx.cfg.backup.auto_prune_days}));
+            } else if list.is_empty() {
+                println!("No backups. poo saves small ignored files, stashes and rescue branches here before removing worktrees.");
+            } else {
+                for b in &list {
+                    println!(
+                        "{:<12} {:<7} {:>9} {:>8}  {:<28} {}",
+                        b.id,
+                        b.kind,
+                        if b.kind == "files" { bytes(b.bytes) } else { format!("{} files", b.files) },
+                        poo::util::age(b.at),
+                        b.label,
+                        match b.kind.as_str() {
+                            "files" => b.path.as_deref().map(|p| tilde(std::path::Path::new(p))).unwrap_or_default(),
+                            _ => format!("{} in {}", b.r#ref.clone().unwrap_or_default(), b.repo.as_deref().map(|r| tilde(std::path::Path::new(r))).unwrap_or_default()),
+                        }
+                    );
+                }
+                println!(
+                    "\n{} in file backups (budget {}; {}).",
+                    bytes(total),
+                    bytes(ctx.cfg.backup.max_backup_bytes),
+                    if ctx.cfg.backup.auto_prune_days > 0 { format!("file backups older than {} days are pruned", ctx.cfg.backup.auto_prune_days) } else { "kept until you prune".into() }
+                );
+            }
+            Ok(())
+        }
+        BackupsCmd::Prune { ids, older_than, all, dry_run, yes } => {
+            let days = match older_than {
+                Some(s) => Some(s.trim_end_matches('d').parse::<u32>().map_err(|_| CliError::new("usage", 2, "use --older-than 30d"))?),
+                None if all => Some(0),
+                None => None,
+            };
+            if ids.is_empty() && days.is_none() {
+                return Err(CliError::new("usage", 2, "pass backup ids, --older-than 30d or --all"));
+            }
+            if !dry_run && !yes && (!is_tty(0) || out.json) {
+                return Err(CliError::new("needs_approval", 5, "pruning backups is permanent").hint("pass --yes"));
+            }
+            if !dry_run && !yes && !confirm("Prune these backups permanently (stashes are dropped, rescue branches deleted)?") {
+                println!("Cancelled.");
+                return Ok(());
+            }
+            let r = backup::prune(&ids, days, false, dry_run);
+            if out.json {
+                emit(out, &serde_json::to_value(&r).unwrap_or_default());
+            } else {
+                println!("{} {} backup(s), {}.", if dry_run { "Would prune" } else { "Pruned" }, r.pruned.len(), bytes(r.freed_bytes));
+                for (id, e) in &r.failed {
+                    println!("✗ {}: {}", id, e);
+                }
+            }
+            Ok(())
+        }
+        BackupsCmd::Restore { id, yes } => {
+            if !yes && !is_tty(0) {
+                return Err(CliError::new("needs_approval", 5, "restoring writes files into the original folder").hint("pass --yes"));
+            }
+            let (msg, n) = backup::restore(&id)?;
+            if out.json {
+                emit(out, &json!({"ok": true, "message": msg, "files": n}));
+            } else {
+                println!("{}", msg);
+            }
+            Ok(())
+        }
+        BackupsCmd::Enforce => {
+            let r = backup::enforce(&ctx.cfg.backup);
+            if out.json {
+                emit(out, &serde_json::to_value(&r).unwrap_or_default());
+            } else {
+                println!("Pruned {} backup(s), {}.", r.pruned.len(), bytes(r.freed_bytes));
+            }
+            Ok(())
+        }
+        BackupsCmd::Path => {
+            println!("{}", backup::dir().display());
             Ok(())
         }
     }

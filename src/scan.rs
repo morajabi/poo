@@ -573,7 +573,7 @@ pub fn scan(cfg: &Config, cat: &Catalog, opts: &ScanOptions) -> Report {
         // Whole worktrees.
         *phase.lock().unwrap() = "checking worktrees".into();
         if let Some(rule) = rule_with_provider(cat, "git-worktrees").into_iter().next() {
-            let wts = worktree_items(rule, &found_projects, &raws, &ctx);
+            let wts = worktree_items(rule, &found_projects, &raws, &ctx, cfg);
             raws.extend(wts);
         }
         done.store(true, Ordering::Relaxed);
@@ -594,7 +594,7 @@ fn path_label(path: &Path, rule: &Rule) -> String {
     }
 }
 
-fn worktree_items(rule: &Rule, projects: &[FoundProject], raws: &[Raw], ctx: &SizeCtx) -> Vec<Raw> {
+fn worktree_items(rule: &Rule, projects: &[FoundProject], raws: &[Raw], ctx: &SizeCtx, cfg: &Config) -> Vec<Raw> {
     let repos: HashMap<PathBuf, &FoundProject> = projects
         .iter()
         .filter(|p| p.kind == "repo")
@@ -664,6 +664,10 @@ fn worktree_items(rule: &Rule, projects: &[FoundProject], raws: &[Raw], ctx: &Si
                 raw.risks.push(Risk::new("locked", RiskLevel::Danger, "git worktree is locked; poo unlocks and removes it"));
             }
             let artifacts: Vec<PathBuf> = nested.iter().map(|r| r.path.clone()).collect();
+            if cfg.backup.config_files {
+                let n = git::small_ignored_files(&p.path, cfg.backup.max_file_bytes).len();
+                raw.meta.insert("config_files".into(), Value::from(n));
+            }
             raw.meta.insert(
                 "artifacts".into(),
                 Value::Array(artifacts.iter().map(|a| Value::String(a.to_string_lossy().to_string())).collect()),
@@ -733,7 +737,7 @@ fn tier_risks(tier: Tier, risks: &mut Vec<Risk>) {
     match tier {
         Tier::Hot if !has(risks, RiskLevel::Force) => risks.push(Risk::new("in-use", RiskLevel::Force, "in use right now")),
         Tier::Review if !has(risks, RiskLevel::Force) => risks.push(Risk::new("review", RiskLevel::Force, "needs a human look first")),
-        Tier::Protected if !has(risks, RiskLevel::Danger) => risks.push(Risk::new("protected", RiskLevel::Danger, "protected; only --danger cleans it")),
+        Tier::Protected if !has(risks, RiskLevel::Danger) => risks.push(Risk::new("protected", RiskLevel::Danger, "kept; only --dangerously-include-protected cleans it")),
         _ => {}
     }
 }
@@ -1021,6 +1025,7 @@ fn build_report(
         let action_kind = raw.action.unwrap_or(rule.action);
         let command = raw.command.clone().or_else(|| rule.command.clone());
         let path_s = raw.path.to_string_lossy().to_string();
+        let safeguards = safeguards_for(cfg, rule, action_kind, command.as_deref(), &raw, &risks);
         if rule.contents {
             raw.meta.insert("contents".into(), Value::Bool(true));
         }
@@ -1045,6 +1050,7 @@ fn build_report(
             agent: raw.agent.clone(),
             action: Action { kind: action_kind, command },
             risks,
+            safeguards,
             children: children.into_iter().take(16).collect(),
             meta: raw.meta,
         });
@@ -1166,6 +1172,62 @@ fn build_report(
     };
     report.plans = crate::plan::summaries(cat, &report);
     report
+}
+
+/// Plain sentences about what poo does before and while cleaning an item.
+fn safeguards_for(cfg: &Config, rule: &Rule, action: ActionKind, command: Option<&[String]>, raw: &Raw, risks: &[Risk]) -> Vec<String> {
+    let b = &cfg.backup;
+    let has = |t: &str| risks.iter().any(|r| r.tag == t);
+    let mut v = vec![];
+    match action {
+        ActionKind::WorktreeRemove => {
+            let n = raw.meta.get("config_files").and_then(|x| x.as_u64()).unwrap_or(0);
+            if b.config_files && n > 0 {
+                v.push(format!("Backs up {} ignored config file{} (.env, Local.xcconfig...) to Backups first", n, if n == 1 { "" } else { "s" }));
+            }
+            if has("dirty") {
+                v.push(if b.stash_dirty {
+                    "Stashes uncommitted work first; restore it with git stash apply".to_string()
+                } else {
+                    "Discards uncommitted work (backup.stash_dirty is off)".to_string()
+                });
+            }
+            if has("unreachable-commits") {
+                v.push(if b.rescue_branches {
+                    "Saves detached commits to a poo/ branch first".to_string()
+                } else {
+                    "Leaves detached commits to the reflog (backup.rescue_branches is off)".to_string()
+                });
+            }
+            if raw.meta.get("merged").and_then(|x| x.as_bool()) == Some(true) {
+                v.push("Its commits are already in the main branch".into());
+            } else if raw.meta.contains_key("branch") {
+                v.push("Its branch and commits stay; only the checkout folder goes".into());
+            }
+            v.push("Removed with git worktree remove; recreate with git worktree add".into());
+        }
+        ActionKind::Delete | ActionKind::Trash if b.use_trash || action == ActionKind::Trash => {
+            v.push("Moves to the Trash".into());
+        }
+        ActionKind::Delete => {
+            let contents = rule.contents;
+            let what = if contents { "Empties the folder (the folder itself stays)" } else { "Deleted permanently" };
+            match (&rule.rebuild, raw.cost.unwrap_or(rule.cost)) {
+                (_, Cost::None) => v.push(format!("{}; nothing to rebuild", what)),
+                (Some(r), _) => v.push(format!("{}; comes back with: {}", what, r)),
+                (None, Cost::Redownload) => v.push(format!("{}; downloaded again when needed", what)),
+                (None, _) => v.push(format!("{}; regenerated when needed", what)),
+            }
+        }
+        ActionKind::Command => {
+            if let Some(c) = command {
+                v.push(format!("Runs `{}`", c.join(" ")));
+            }
+        }
+        ActionKind::None => v.push("Poo shows it but leaves cleaning to you".into()),
+        _ => {}
+    }
+    v
 }
 
 pub fn report_path() -> PathBuf {

@@ -19,17 +19,39 @@ pub struct CleanOptions {
     pub trash: bool,
     /// Highest tier allowed (plans and agent autonomy). Risk mode still applies.
     pub max_tier: Option<Tier>,
-    /// standard: only risk-free items. force: soft risks (recent, agent working, dirty
-    /// worktrees which get stashed, review). danger: hard risks too (running builds, data,
-    /// protected, system paths, unreachable commits).
+    /// safe: only risk-free items. in-use: also recent, agent working, dirty worktrees
+    /// (stashed first), check-first. dangerous: also running builds, data, protected,
+    /// system paths, unreachable commits.
     pub mode: RiskLevel,
     /// Who asked: cli, app, mcp, schedule:<id>.
     pub actor: String,
+    pub backup: crate::config::BackupConfig,
 }
 
 impl Default for CleanOptions {
     fn default() -> Self {
-        Self { dry_run: false, trash: false, max_tier: None, mode: RiskLevel::Standard, actor: "cli".into() }
+        Self {
+            dry_run: false,
+            trash: false,
+            max_tier: None,
+            mode: RiskLevel::Standard,
+            actor: "cli".into(),
+            backup: Default::default(),
+        }
+    }
+}
+
+impl CleanOptions {
+    /// Options for a caller, with the user's backup settings applied.
+    pub fn from_config(cfg: &crate::config::Config, mode: RiskLevel, dry_run: bool, actor: &str) -> Self {
+        Self {
+            dry_run,
+            trash: cfg.backup.use_trash,
+            max_tier: Some(Tier::Warm),
+            mode,
+            actor: actor.into(),
+            backup: cfg.backup.clone(),
+        }
     }
 }
 
@@ -117,7 +139,7 @@ pub fn floor_check(item: &Item, rule_kind: Option<RuleKind>, rule_system: bool, 
     let inside_tmp = p.starts_with(&tmp) && p != tmp;
     if !(inside_home || inside_tmp || rule_system) {
         if mode < RiskLevel::Danger {
-            return Err("outside your home and temp folders (needs --danger)".into());
+            return Err("outside your home and temp folders (needs --dangerously-include-protected)".into());
         }
         let ps = p.to_string_lossy();
         let under_usr = p.starts_with("/usr") && !p.starts_with("/usr/local");
@@ -151,7 +173,7 @@ pub fn floor_check(item: &Item, rule_kind: Option<RuleKind>, rule_system: bool, 
     }
     if rule_kind == Some(RuleKind::Artifact) && md.is_dir() && p.join(".git").exists() {
         if mode < RiskLevel::Danger {
-            return Err("contains a .git entry (needs --danger)".into());
+            return Err("contains a .git entry (needs --dangerously-include-protected)".into());
         }
         warnings.push("contains a .git entry".into());
     }
@@ -254,9 +276,6 @@ fn graveyard() -> PathBuf {
     state_dir().join("graveyard")
 }
 
-pub fn backups_dir() -> PathBuf {
-    state_dir().join("backups")
-}
 
 /// Renames into the graveyard (instant, same volume) then deletes.
 fn delete_path(p: &Path, contents_only: bool) -> Result<(), String> {
@@ -325,25 +344,54 @@ fn git_out(dir: &str, args: &[&str]) -> Result<String, String> {
 }
 
 /// Removes a linked worktree while keeping everything recoverable.
-fn remove_worktree(item: &Item, mode: RiskLevel, notes: &mut Vec<String>) -> Result<(), String> {
+fn remove_worktree(item: &Item, opts: &CleanOptions, notes: &mut Vec<String>) -> Result<(), String> {
+    let mode = opts.mode;
+    let cfgb = &opts.backup;
     let repo = item.repo.clone().ok_or("worktree has no repo")?;
     let wt = Path::new(&item.path);
     let label = wt.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "worktree".into());
-    // 1. Back up small ignored files (.env, Local.xcconfig...) that removal would delete.
-    let small = git::small_ignored_files(wt, 1_000_000);
-    if !small.is_empty() {
-        let dest = backups_dir().join(format!("{}-{}", iso8601(now()).replace(':', ""), label));
-        let mut copied = 0;
-        for f in small.iter().take(500) {
-            if let Ok(rel) = f.strip_prefix(wt) {
-                let to = dest.join(rel);
-                if std::fs::create_dir_all(to.parent().unwrap()).is_ok() && std::fs::copy(f, &to).is_ok() {
-                    copied += 1;
+    let label = if label == Path::new(&repo).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default() {
+        // ~/.codex/worktrees/<task>/<repo>: the task folder names it.
+        wt.parent().and_then(|p| p.file_name()).map(|n| format!("{}-{}", n.to_string_lossy(), label)).unwrap_or(label)
+    } else {
+        label
+    };
+    // 1. Copy small ignored files (.env, Local.xcconfig...) that removal would delete.
+    if cfgb.config_files {
+        let small = git::small_ignored_files(wt, cfgb.max_file_bytes);
+        if !small.is_empty() {
+            let dest = crate::backup::new_folder(&label);
+            let (mut copied, mut total) = (0u64, 0u64);
+            for f in small.iter() {
+                let size = std::fs::metadata(f).map(|m| m.len()).unwrap_or(0);
+                if total + size > cfgb.max_total_bytes {
+                    break;
+                }
+                if let Ok(rel) = f.strip_prefix(wt) {
+                    let to = dest.join(rel);
+                    if std::fs::create_dir_all(to.parent().unwrap()).is_ok() && std::fs::copy(f, &to).is_ok() {
+                        copied += 1;
+                        total += size;
+                    }
                 }
             }
-        }
-        if copied > 0 {
-            notes.push(format!("backed up {} ignored config file(s) to {}", copied, tilde(&dest)));
+            if copied > 0 {
+                let b = crate::backup::record(crate::backup::Backup {
+                    id: String::new(),
+                    at: now(),
+                    kind: "files".into(),
+                    label: label.clone(),
+                    source: item.path.clone(),
+                    item: Some(item.id.clone()),
+                    path: Some(dest.to_string_lossy().to_string()),
+                    repo: Some(repo.clone()),
+                    r#ref: None,
+                    files: copied,
+                    bytes: total,
+                    exists: true,
+                });
+                notes.push(format!("backed up {} ignored config file(s) to {} (backup {})", copied, tilde(&dest), b.id));
+            }
         }
     }
     let has = |tag: &str| item.risks.iter().any(|r| r.tag == tag);
@@ -357,28 +405,66 @@ fn remove_worktree(item: &Item, mode: RiskLevel, notes: &mut Vec<String>) -> Res
     let dirty = git::dirty_state(wt, &artifacts).ok_or("could not read git status")?;
     if dirty.is_dirty() {
         if mode < RiskLevel::Force {
-            return Err(format!("has uncommitted work ({}); needs --force, which stashes it first", dirty.summary()));
+            return Err(format!("has uncommitted work ({}); needs --include-in-use, which stashes it first", dirty.summary()));
         }
-        // Stash only the real work, never untracked build output, into the stash every
-        // checkout of the repo shares.
-        let msg = format!("poo: {} {}", label, iso8601(now()));
-        let mut args: Vec<String> = vec!["stash".into(), "push".into(), "--include-untracked".into(), "-m".into(), msg.clone(), "--".into()];
-        args.extend(dirty.modified.iter().cloned());
-        args.extend(dirty.untracked.iter().cloned());
-        let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-        git_out(&item.path, &refs)?;
-        let again = git::dirty_state(wt, &artifacts).ok_or("could not read git status after stashing")?;
-        if again.is_dirty() {
-            return Err(format!("stashed, but work remains ({}); left the worktree in place", again.summary()));
+        if cfgb.stash_dirty {
+            // Stash only the real work, never untracked build output, into the stash every
+            // checkout of the repo shares.
+            let msg = format!("poo: {} {}", label, iso8601(now()));
+            let mut args: Vec<String> = vec!["stash".into(), "push".into(), "--include-untracked".into(), "-m".into(), msg.clone(), "--".into()];
+            args.extend(dirty.modified.iter().cloned());
+            args.extend(dirty.untracked.iter().cloned());
+            let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+            git_out(&item.path, &refs)?;
+            let again = git::dirty_state(wt, &artifacts).ok_or("could not read git status after stashing")?;
+            if again.is_dirty() {
+                return Err(format!("stashed, but work remains ({}); left the worktree in place", again.summary()));
+            }
+            let b = crate::backup::record(crate::backup::Backup {
+                id: String::new(),
+                at: now(),
+                kind: "stash".into(),
+                label: label.clone(),
+                source: item.path.clone(),
+                item: Some(item.id.clone()),
+                path: None,
+                repo: Some(repo.clone()),
+                r#ref: Some(msg.clone()),
+                files: (dirty.modified.len() + dirty.untracked.len()) as u64,
+                bytes: 0,
+                exists: true,
+            });
+            notes.push(format!("stashed uncommitted work as \"{}\" in {} (backup {})", msg, tilde(Path::new(&repo)), b.id));
+        } else if mode < RiskLevel::Danger {
+            return Err("has uncommitted work and backup.stash_dirty is off; needs --dangerously-include-protected, which discards it".into());
+        } else {
+            notes.push(format!("discarded uncommitted work ({}) because backup.stash_dirty is off", dirty.summary()));
         }
-        notes.push(format!("stashed uncommitted work as \"{}\" (`git stash list` in {})", msg, tilde(Path::new(&repo))));
     }
     // 3. Detached commits on no branch get a rescue branch.
     if has("unreachable-commits") {
-        let head = git_out(&item.path, &["rev-parse", "HEAD"])?;
-        let branch = format!("poo/{}-{}", label, now());
-        git_out(&repo, &["branch", &branch, &head])?;
-        notes.push(format!("kept detached commits on branch {}", branch));
+        if cfgb.rescue_branches {
+            let head = git_out(&item.path, &["rev-parse", "HEAD"])?;
+            let branch = format!("poo/{}-{}", label, now());
+            git_out(&repo, &["branch", &branch, &head])?;
+            let b = crate::backup::record(crate::backup::Backup {
+                id: String::new(),
+                at: now(),
+                kind: "branch".into(),
+                label: label.clone(),
+                source: item.path.clone(),
+                item: Some(item.id.clone()),
+                path: None,
+                repo: Some(repo.clone()),
+                r#ref: Some(branch.clone()),
+                files: 0,
+                bytes: 0,
+                exists: true,
+            });
+            notes.push(format!("kept detached commits on branch {} (backup {})", branch, b.id));
+        } else {
+            notes.push("detached commits left to the reflog because backup.rescue_branches is off".into());
+        }
     }
     if has("locked") {
         let _ = git_out(&repo, &["worktree", "unlock", &item.path]);
@@ -411,7 +497,7 @@ fn perform(item: &Item, opts: &CleanOptions, notes: &mut Vec<String>) -> Result<
             let refs: Vec<&str> = argv.iter().map(|s| s.as_str()).collect();
             run_capture(&refs, 600).map(|_| ()).ok_or_else(|| format!("`{}` failed", argv.join(" ")))
         }
-        ActionKind::WorktreeRemove => remove_worktree(item, opts.mode, notes),
+        ActionKind::WorktreeRemove => remove_worktree(item, opts, notes),
     }
 }
 
@@ -420,12 +506,12 @@ pub fn admit(item: &Item, cat: &Catalog, opts: &CleanOptions, procs_list: &[Proc
     let mut warnings = vec![];
     if let Some(limit) = opts.max_tier {
         if item.tier.rank() > limit.rank() && opts.mode == RiskLevel::Standard {
-            return Err(format!("{} item; above the allowed tier `{}`", item.tier.as_str(), limit.as_str()));
+            return Err(format!("{} item; plans and schedules stop at `{}` (pick it explicitly with --include-in-use)", item.tier.label(), limit.label()));
         }
     }
     for r in &item.risks {
         if r.level > opts.mode {
-            return Err(format!("{} (needs --{})", r.message, r.level.as_str()));
+            return Err(format!("{} (needs {})", r.message, r.level.flag()));
         }
         if r.level > RiskLevel::Standard {
             warnings.push(format!("{}: {}", r.tag, r.message));
@@ -443,7 +529,7 @@ pub fn admit(item: &Item, cat: &Catalog, opts: &CleanOptions, procs_list: &[Proc
     }
     if let Err(e) = run_guards(item, &cat.guards, procs_list) {
         if opts.mode < RiskLevel::Danger {
-            return Err(format!("{} (needs --danger)", e));
+            return Err(format!("{} (needs --dangerously-include-protected)", e));
         }
         warnings.push(e);
     }
@@ -451,6 +537,9 @@ pub fn admit(item: &Item, cat: &Catalog, opts: &CleanOptions, procs_list: &[Proc
 }
 
 pub fn clean(items: &[Item], cat: &Catalog, opts: &CleanOptions) -> CleanResult {
+    if !opts.dry_run {
+        crate::backup::enforce(&opts.backup);
+    }
     let before = crate::fsutil::disk_info(&home()).free;
     let procs_list = procs::list();
     let mut results = vec![];
@@ -502,6 +591,10 @@ pub fn clean(items: &[Item], cat: &Catalog, opts: &CleanOptions) -> CleanResult 
         }
         res.notes = notes;
         results.push(res);
+    }
+    if !opts.dry_run {
+        // New backups may push past the budget.
+        crate::backup::enforce(&opts.backup);
     }
     let after = crate::fsutil::disk_info(&home()).free;
     let cleaned_bytes: u64 = results.iter().filter(|r| r.status == "cleaned").map(|r| r.bytes).sum();

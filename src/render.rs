@@ -27,16 +27,13 @@ impl Style {
         self.wrap("2", s)
     }
     pub fn tier(&self, t: Tier) -> String {
+        // Calm colors: cleanable things green, everything else neutral.
         let code = match t {
-            Tier::Junk => "33",
-            Tier::Cold => "36",
-            Tier::Idle => "96",
-            Tier::Warm => "35",
-            Tier::Hot => "31",
+            Tier::Junk | Tier::Cold | Tier::Idle => "32",
             Tier::Review => "34",
-            Tier::Protected => "32",
+            _ => "2",
         };
-        self.wrap(code, &format!("{:<9}", t.as_str()))
+        self.wrap(code, &format!("{:<11}", t.label()))
     }
     pub fn hex(&self, hex: &str, s: &str) -> String {
         if !self.on {
@@ -124,8 +121,8 @@ pub fn items(list: &[&Item], show_bucket: bool) {
     println!(
         "{}",
         st.dim(&format!(
-            "{:<12} {:>9} {:<9} {:>8}  {:<52} {}",
-            "ID", "SIZE", "TIER", "USED", "NAME", if show_bucket { "BUCKET / GROUP" } else { "GROUP" }
+            "{:<12} {:>9} {:<11} {:>8}  {:<52} {}",
+            "ID", "SIZE", "STATUS", "USED", "NAME", if show_bucket { "BUCKET / GROUP" } else { "GROUP" }
         ))
     );
     for i in list {
@@ -151,7 +148,13 @@ pub fn item_detail(i: &Item, rule: Option<&crate::catalog::Rule>) {
     println!("{}  {}", st.bold(&i.name), st.dim(&i.id));
     println!("  path      {}", tilde(Path::new(&i.path)));
     println!("  size      {}  ({} files){}", bytes(i.bytes), i.files, if i.total_bytes > i.bytes { format!(", {} with nested items", bytes(i.total_bytes)) } else { String::new() });
-    println!("  tier      {} {}", st.tier(i.tier), st.dim(i.tier.describe()));
+    println!("  status    {} {}", st.tier(i.tier), st.dim(i.tier.describe()));
+    for r in i.risks.iter().filter(|r| r.level > poo_level_safe()) {
+        println!("  note      {} {}", r.message, st.dim(&format!("(cleans with {})", r.level.flag())));
+    }
+    for g in &i.safeguards {
+        println!("  safe      {}", g);
+    }
     println!("  cost      {}", i.cost.as_str());
     if let Some(t) = i.last_used {
         println!("  used      {}", age(t));
@@ -233,4 +236,8 @@ pub fn projects(list: &[Project]) {
             st.dim(&p.stacks.join(","))
         );
     }
+}
+
+fn poo_level_safe() -> crate::model::RiskLevel {
+    crate::model::RiskLevel::Standard
 }

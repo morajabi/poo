@@ -2,10 +2,12 @@
 //! simulators and the rest. Every piece of knowledge lives in mods (`rules/core`).
 
 pub mod agent;
+pub mod backup;
 pub mod catalog;
 pub mod clean;
 pub mod config;
 pub mod fsutil;
+pub mod hooks;
 pub mod mcp;
 pub mod ops;
 pub mod render;

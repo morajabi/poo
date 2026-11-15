@@ -120,6 +120,64 @@ pub struct SetupState {
     pub notes: Option<String>,
 }
 
+/// What poo saves before cleaning, and for how long.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct BackupConfig {
+    /// Copy small ignored files (.env, Local.xcconfig) before removing a worktree.
+    pub config_files: bool,
+    /// Largest single file copied.
+    pub max_file_bytes: u64,
+    /// Most copied per worktree.
+    pub max_total_bytes: u64,
+    /// Stash uncommitted work before a forced worktree removal (off: refuse instead).
+    pub stash_dirty: bool,
+    /// Save detached commits to a poo/ branch before a danger-mode removal.
+    pub rescue_branches: bool,
+    /// Move deleted folders to the Trash instead of deleting them.
+    pub use_trash: bool,
+    /// Delete poo's file backups older than this many days (0 keeps them until you prune).
+    pub auto_prune_days: u32,
+    /// Also drop poo's stashes and rescue branches after `auto_prune_days`.
+    pub auto_prune_git: bool,
+    /// Total size budget for file backups; the oldest go first when it is exceeded.
+    pub max_backup_bytes: u64,
+}
+
+impl Default for BackupConfig {
+    fn default() -> Self {
+        Self {
+            config_files: true,
+            max_file_bytes: 1_000_000,
+            max_total_bytes: 50_000_000,
+            stash_dirty: true,
+            rescue_branches: true,
+            use_trash: false,
+            auto_prune_days: 90,
+            auto_prune_git: false,
+            max_backup_bytes: 2_000_000_000,
+        }
+    }
+}
+
+/// What happens when a coding agent finishes in a worktree (only once `poo hooks install` ran).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct HooksConfig {
+    /// landed: clean a worktree's build output once its commits are in the main branch.
+    /// always: whenever a Claude Code session ends in a worktree. off: do nothing.
+    pub on_agent_done: String,
+    /// Also remove the worktree itself when its work landed and nothing is uncommitted.
+    pub remove_landed_worktrees: bool,
+    pub notify: bool,
+}
+
+impl Default for HooksConfig {
+    fn default() -> Self {
+        Self { on_agent_done: "landed".into(), remove_landed_worktrees: false, notify: true }
+    }
+}
+
 /// A routine cleanup the scheduler runs on its own (standard mode only).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -175,8 +233,40 @@ pub struct Config {
     pub scan: ScanConfig,
     pub updates: UpdatesConfig,
     pub setup: SetupState,
+    pub backup: BackupConfig,
+    pub hooks: HooksConfig,
     pub schedule: Vec<Schedule>,
 }
+
+/// Every setting with its default and a plain explanation, for `poo config keys`.
+pub const KEYS: &[(&str, &str)] = &[
+    ("roots", "Folders poo walks for projects. Empty: auto-detected (~/dev, ~/Developer, ~/code...)."),
+    ("disabled_rules / disabled_mods / disabled_guards", "Turned-off rules, mods and guards. Prefer `poo rules disable --tag <pack>`."),
+    ("rule_overrides.<id>.<field>", "Change any field of a built-in rule: warm_days, idle_days, bucket, enabled, tier..."),
+    ("bucket / bucket_overrides.<id>", "Add buckets or rename, recolor, reorder or hide built-in ones."),
+    ("plan_overrides.<id>", "Change a plan's tiers, max_cost, exclude_buckets or target."),
+    ("projects.<path>.policy", "auto | active (keep warm) | stale (treat as unused) | protected (never touch)."),
+    ("agents.auto_clean_max_tier", "Highest tier an agent may clean through MCP without asking (default cold)."),
+    ("scan.warm_days", "Unused this many days counts as unused (default 14, rules can override)."),
+    ("scan.idle_days", "Untouched this many days with nobody working there counts as idle (default 3)."),
+    ("scan.keep_recent_checkouts", "Per repo, this many most recent checkouts keep their builds in use (default 2)."),
+    ("scan.idle_hours", "Builds of other checkouts go idle after this many hours (default 6)."),
+    ("scan.landed_idle_hours", "Builds of worktrees whose work landed go unused after this many hours (default 2)."),
+    ("scan.max_depth / scan.exclude / scan.min_item_bytes / scan.cache_minutes", "How deep and where poo walks, the smallest item shown, how long a scan is reused."),
+    ("backup.config_files", "Copy small ignored files (.env, Local.xcconfig) before removing a worktree (default on)."),
+    ("backup.max_file_bytes / backup.max_total_bytes", "Largest file and most per worktree copied (1 MB / 50 MB)."),
+    ("backup.stash_dirty", "Stash uncommitted work before an --include-in-use worktree removal (default on; off refuses)."),
+    ("backup.rescue_branches", "Save detached commits to a poo/ branch before removing (default on)."),
+    ("backup.use_trash", "Move deleted folders to the Trash instead of deleting (default off)."),
+    ("backup.max_backup_bytes", "Budget for file backups; the oldest go first (default 2 GB)."),
+    ("backup.auto_prune_days", "Drop file backups older than this (default 90; 0 keeps them until you prune)."),
+    ("backup.auto_prune_git", "Also drop poo's stashes and rescue branches after auto_prune_days (default off)."),
+    ("hooks.on_agent_done", "After `poo hooks install`: landed (default) | always | off."),
+    ("hooks.remove_landed_worktrees", "Also remove a landed, clean worktree from the hook (default off)."),
+    ("hooks.notify", "Show a notification after a hook cleans something (default on)."),
+    ("schedule", "Routine cleanups; manage with `poo schedule` (presets nightly, quick, guard, weekly)."),
+    ("updates.check", "Check for new versions once a day (default on)."),
+];
 
 /// Common places developers keep projects. Used when no roots are configured.
 pub const CANDIDATE_ROOTS: &[&str] = &[

@@ -26,6 +26,7 @@ fn item(path: &str, kind: ActionKind) -> Item {
         agent: None,
         action: Action { kind, command: None },
         risks: vec![],
+        safeguards: vec![],
         children: vec![],
         meta: BTreeMap::new(),
     }
@@ -135,11 +136,11 @@ fn risks_gate_cleaning_modes() {
     let opts = |mode| CleanOptions { mode, max_tier: Some(Tier::Warm), ..Default::default() };
     assert!(admit(&it, &cat, &opts(RiskLevel::Standard), &[]).is_ok());
     it.risks.push(Risk::new("recent", RiskLevel::Force, "used in the last hour"));
-    assert!(admit(&it, &cat, &opts(RiskLevel::Standard), &[]).unwrap_err().contains("--force"));
+    assert!(admit(&it, &cat, &opts(RiskLevel::Standard), &[]).unwrap_err().contains("--include-in-use"));
     let warnings = admit(&it, &cat, &opts(RiskLevel::Force), &[]).unwrap();
     assert!(warnings.iter().any(|w| w.contains("recent")));
     it.risks.push(Risk::new("data", RiskLevel::Danger, "real data"));
-    assert!(admit(&it, &cat, &opts(RiskLevel::Force), &[]).unwrap_err().contains("--danger"));
+    assert!(admit(&it, &cat, &opts(RiskLevel::Force), &[]).unwrap_err().contains("--dangerously-include-protected"));
     assert!(admit(&it, &cat, &opts(RiskLevel::Danger), &[]).is_ok());
     std::fs::remove_dir_all(&base).unwrap();
 }

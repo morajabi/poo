@@ -55,26 +55,54 @@ impl Tier {
             Tier::Warm => "in active use, will be rebuilt or redownloaded soon",
             Tier::Hot => "in use right now",
             Tier::Review => "needs a human look",
-            Tier::Protected => "never cleaned without --danger",
+            Tier::Protected => "kept; only --dangerously-include-protected cleans it",
         }
     }
 }
 
 /// How much risk a clean may take. Items carry risks; each needs a mode to be allowed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
 pub enum RiskLevel {
+    /// Only items without risks.
+    #[serde(rename = "safe", alias = "standard")]
     Standard,
+    /// Also items in use: recent, agent open, uncommitted work (stashed first), check-first.
+    #[serde(rename = "in-use", alias = "force")]
     Force,
+    /// Also protected things: running builds, data, system paths, detached commits.
+    #[serde(rename = "dangerous", alias = "danger")]
     Danger,
 }
 
 impl RiskLevel {
     pub fn as_str(&self) -> &'static str {
         match self {
-            RiskLevel::Standard => "standard",
-            RiskLevel::Force => "force",
-            RiskLevel::Danger => "danger",
+            RiskLevel::Standard => "safe",
+            RiskLevel::Force => "in-use",
+            RiskLevel::Danger => "dangerous",
+        }
+    }
+    /// The CLI flag that allows this level.
+    pub fn flag(&self) -> &'static str {
+        match self {
+            RiskLevel::Standard => "",
+            RiskLevel::Force => "--include-in-use",
+            RiskLevel::Danger => "--dangerously-include-protected",
+        }
+    }
+}
+
+impl Tier {
+    /// Calm, human label. Ids stay stable in JSON.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Tier::Junk => "junk",
+            Tier::Cold => "unused",
+            Tier::Idle => "idle",
+            Tier::Warm => "in use",
+            Tier::Hot => "active now",
+            Tier::Review => "check first",
+            Tier::Protected => "kept",
         }
     }
 }
@@ -362,6 +390,9 @@ pub struct Item {
     /// What could go wrong cleaning this, and which mode allows it.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub risks: Vec<Risk>,
+    /// What poo does before and while cleaning this: backups, stashes, kept branches.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub safeguards: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub children: Vec<Child>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty", default)]

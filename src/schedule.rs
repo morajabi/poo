@@ -5,7 +5,7 @@
 use crate::catalog::Catalog;
 use crate::clean::{self, CleanOptions};
 use crate::config::{state_dir, Config, Schedule};
-use crate::model::{RiskLevel, Tier};
+use crate::model::RiskLevel;
 use crate::ops::Ctx;
 use crate::plan::Filter;
 use crate::scan::ScanOptions;
@@ -152,7 +152,7 @@ pub fn presets() -> Vec<(&'static str, &'static str, Schedule)> {
     vec![
         ("nightly", "Every night at 03:30, clean everything nothing is using (plan `stale`).", mk("nightly", "stale", "1d", Some("03:30"), None, None)),
         ("quick", "Every 6 hours, clean junk only: logs, temp, crash reports.", mk("quick", "quick", "6h", None, None, None)),
-        ("guard", "Every 30 minutes, if free space drops below 10%, free least-regret items until 20% is free.", mk("guard", "emergency", "30m", None, Some("10%"), Some("20%"))),
+        ("guard", "Low-disk guard: every 15 minutes, if free space drops below 20 GB, clean what is not in use until 50 GB are free.", mk("guard", "emergency", "15m", None, Some("20G"), Some("50G"))),
         ("weekly", "Every Sunday-ish, a weekly `stale` run for machines that sleep at night.", mk("weekly", "stale", "7d", Some("12:00"), None, None)),
     ]
 }
@@ -248,7 +248,7 @@ pub fn sync_agent(cfg: &Config) -> Result<Option<String>> {
     }
 }
 
-fn notify(title: &str, body: &str) {
+pub fn notify(title: &str, body: &str) {
     let script = format!(
         "display notification \"{}\" with title \"{}\"",
         body.replace('\\', "").replace('"', "'"),
@@ -320,13 +320,7 @@ pub fn run(ctx: &Ctx, s: &Schedule, dry_run: bool) -> Result<RunRecord> {
             true
         });
     }
-    let opts = CleanOptions {
-        dry_run,
-        trash: false,
-        max_tier: Some(Tier::Warm),
-        mode: RiskLevel::Standard,
-        actor: format!("schedule:{}", s.id),
-    };
+    let opts = CleanOptions::from_config(&ctx.cfg, RiskLevel::Standard, dry_run, &format!("schedule:{}", s.id));
     let res = clean::clean(&plan.items, &ctx.cat, &opts);
     let mut report = report;
     if !dry_run {
