@@ -143,9 +143,112 @@ const CRITICAL_TREES: &[&str] = &[
     "/Library/LaunchAgents", "/Library/PrivilegedHelperTools", "/Applications/Utilities",
 ];
 
+/// Trees under your home that poo never enters or deletes from, in any mode. OrbStack mounts
+/// container and VM filesystems at ~/OrbStack; their space lives in its disk image.
+const NEVER_HOME_TREES: &[&str] = &["OrbStack"];
+
+/// Symlinks macOS itself puts at the top of the disk; an ancestor through one of these is fine.
+const SYSTEM_LINKS: &[&str] = &["/var", "/tmp", "/etc"];
+
+/// The first folder above `p` that is a symlink, other than macOS's own /var, /tmp and /etc.
+pub fn symlinked_ancestor(p: &Path) -> Option<PathBuf> {
+    let mut cur = PathBuf::new();
+    for c in p.parent()?.components() {
+        cur.push(c);
+        if SYSTEM_LINKS.iter().any(|s| Path::new(s) == cur) {
+            continue;
+        }
+        if std::fs::symlink_metadata(&cur).map_or(false, |m| m.file_type().is_symlink()) {
+            return Some(cur);
+        }
+    }
+    None
+}
+
+/// The app bundle `p` sits inside (not `p` itself when it is the bundle).
+pub fn enclosing_app_bundle(p: &Path) -> Option<PathBuf> {
+    let mut cur = PathBuf::new();
+    let parent = p.parent()?;
+    for c in parent.components() {
+        cur.push(c);
+        if c.as_os_str().to_string_lossy().to_lowercase().ends_with(".app") {
+            return Some(cur);
+        }
+    }
+    None
+}
+
+/// The one way into an app bundle: a `versions` rule whose folder of versions lives inside
+/// one (browser framework versions), deleting a direct child of that folder. The provider
+/// itself always keeps the current version.
+fn bundle_exception(item: &Item, rule: Option<&crate::catalog::Rule>) -> bool {
+    let Some(rule) = rule else { return false };
+    if rule.kind != RuleKind::Provider || rule.provider.as_deref() != Some("versions") {
+        return false;
+    }
+    let Some(dir) = rule.param_str("path").map(|d| expand(&d)) else { return false };
+    let dir = std::fs::canonicalize(&dir).unwrap_or(dir);
+    let p = Path::new(&item.path);
+    let parent = p.parent().and_then(|d| std::fs::canonicalize(d).ok());
+    parent.as_deref() == Some(dir.as_path()) && p.file_name().map_or(false, |n| n != "Current")
+}
+
+/// Local snapshots are someone's backups: the only snapshot command poo runs is
+/// `tmutil deletelocalsnapshots <date>` for one Time Machine snapshot older than a day.
+fn snapshot_command_check(item: &Item) -> Result<(), String> {
+    let Some(cmd) = &item.action.command else { return Ok(()) };
+    let bin = cmd.first().map(|b| Path::new(b).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default());
+    let touches = |words: &[&str]| cmd.iter().any(|a| words.contains(&a.as_str()));
+    match bin.as_deref() {
+        Some("tmutil") => {
+            if !touches(&["deletelocalsnapshots"]) {
+                return if touches(&["thinlocalsnapshots", "delete", "disable", "disablelocal", "removedestination"]) {
+                    Err("poo only removes single Time Machine snapshots older than a day".into())
+                } else {
+                    Ok(())
+                };
+            }
+            let date = match cmd.as_slice() {
+                [_, sub, date] if sub == "deletelocalsnapshots" => date,
+                _ => return Err("poo removes one Time Machine snapshot at a time, by date".into()),
+            };
+            let at = crate::providers::snapshots::parse_snapshot_date(date)
+                .ok_or_else(|| format!("`{}` is not a snapshot date", date))?;
+            if now() - at < 24 * 3600 {
+                return Err("this Time Machine snapshot is less than a day old; poo leaves it".into());
+            }
+            Ok(())
+        }
+        Some("diskutil") if touches(&["deleteSnapshot", "deletesnapshot"]) => {
+            Err("poo does not delete APFS snapshots made by other apps; use the app that made them".into())
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Why poo will not clean a report-only item, and where to manage it instead.
+pub fn report_only_message(item: &Item) -> String {
+    match &item.recommend {
+        Some(r) => format!("report only: poo shows this but does not clean it. {}", r),
+        None => "report only: poo shows this but does not clean it".to_string(),
+    }
+}
+
 /// The floor. In danger mode a few checks loosen; the rest always hold.
 pub fn floor_check(item: &Item, rule_kind: Option<RuleKind>, rule_system: bool, mode: RiskLevel) -> Result<Vec<String>, String> {
+    floor_check_inner(item, rule_kind, rule_system, false, mode)
+}
+
+/// The floor for an item and the rule that found it (what `clean` uses).
+pub fn floor_check_rule(item: &Item, rule: Option<&crate::catalog::Rule>, mode: RiskLevel) -> Result<Vec<String>, String> {
+    floor_check_inner(item, rule.map(|r| r.kind), rule.map_or(false, |r| r.system), bundle_exception(item, rule), mode)
+}
+
+fn floor_check_inner(item: &Item, rule_kind: Option<RuleKind>, rule_system: bool, in_bundle_ok: bool, mode: RiskLevel) -> Result<Vec<String>, String> {
     let mut warnings = vec![];
+    if item.action.kind == ActionKind::Command {
+        snapshot_command_check(item)?;
+    }
     if item.path.contains("://") {
         return match item.action.kind {
             ActionKind::Command => Ok(warnings),
@@ -158,6 +261,10 @@ pub fn floor_check(item: &Item, rule_kind: Option<RuleKind>, rule_system: bool, 
     }
     if raw.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
         return Err("path contains `..`".into());
+    }
+    // A symlinked folder above the item could point anywhere; only macOS's own links pass.
+    if let Some(link) = symlinked_ancestor(&raw) {
+        return Err(format!("a folder above it is a symlink ({})", link.display()));
     }
     // Resolve symlinked parents (/var -> /private/var) but never the item itself.
     let p = match (raw.parent().and_then(|d| std::fs::canonicalize(d).ok()), raw.file_name()) {
@@ -192,6 +299,18 @@ pub fn floor_check(item: &Item, rule_kind: Option<RuleKind>, rule_system: bool, 
         let depth = p.strip_prefix(&h).map(|r| r.components().count()).unwrap_or(0);
         if depth < 2 {
             return Err("too close to your home folder".into());
+        }
+    }
+    for t in NEVER_HOME_TREES {
+        let tree = h.join(t).to_string_lossy().to_lowercase();
+        let ps = p.to_string_lossy().to_lowercase();
+        if ps == tree || ps.starts_with(&format!("{}/", tree)) {
+            return Err(format!("inside ~/{}, which poo never touches", t));
+        }
+    }
+    if let Some(app) = enclosing_app_bundle(&p) {
+        if !in_bundle_ok {
+            return Err(format!("inside the app bundle {}; poo never changes app bundles", app.display()));
         }
     }
     for c in p.components() {
@@ -250,6 +369,9 @@ fn still_matches(item: &Item, cat: &Catalog) -> Result<(), String> {
     Ok(())
 }
 
+/// An exec guard that has not answered by then counts as "could not tell".
+const GUARD_TIMEOUT_SECS: u64 = 30;
+
 /// Guards veto cleaning. In danger mode they warn instead.
 fn run_guards(item: &Item, guards: &[Guard], procs_list: &[Proc]) -> Result<(), String> {
     let project = item.project.clone().unwrap_or_else(|| item.path.clone());
@@ -281,25 +403,15 @@ fn run_guards(item: &Item, guards: &[Guard], procs_list: &[Proc]) -> Result<(), 
                     }
                 }
                 let json = serde_json::to_string(item).unwrap_or_default();
-                let out = std::process::Command::new(&argv[0])
-                    .args(&argv[1..])
-                    .stdin(std::process::Stdio::piped())
-                    .stdout(std::process::Stdio::piped())
-                    .stderr(std::process::Stdio::null())
-                    .spawn()
-                    .and_then(|mut c| {
-                        if let Some(mut s) = c.stdin.take() {
-                            let _ = s.write_all(json.as_bytes());
-                        }
-                        c.wait_with_output()
-                    });
-                match out {
-                    Ok(o) if o.status.success() => {}
-                    Ok(o) => {
-                        let msg = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                // Three answers: yes cleans, no blocks, and "could not tell" blocks too.
+                match crate::util::run_probe(&argv, Some(json.as_bytes()), GUARD_TIMEOUT_SECS) {
+                    crate::util::Probe::Yes => {}
+                    crate::util::Probe::No(msg) => {
                         return Err(format!("guard `{}`: {}", g.id, if msg.is_empty() { "blocked".into() } else { msg }));
                     }
-                    Err(e) => return Err(format!("guard `{}` failed to run: {}", g.id, e)),
+                    crate::util::Probe::Unknown(why) => {
+                        return Err(format!("guard `{}` could not tell ({}); skipped to be safe", g.id, why));
+                    }
                 }
             }
             _ => {}
@@ -512,36 +624,118 @@ fn remove_worktree(item: &Item, opts: &CleanOptions, notes: &mut Vec<String>) ->
     git_out(&repo, &["worktree", "remove", "--force", &item.path]).map(|_| ())
 }
 
-fn perform(item: &Item, opts: &CleanOptions, notes: &mut Vec<String>) -> Result<(), String> {
+/// Cleans one item. Returns the bytes measured as freed when the item says how to measure
+/// (owner commands re-measure their folder, snapshots the free space), otherwise None.
+fn perform(item: &Item, cat: &Catalog, opts: &CleanOptions, notes: &mut Vec<String>) -> Result<Option<u64>, String> {
     let p = Path::new(&item.path);
     match item.action.kind {
         ActionKind::None => Err("this item has no clean action".into()),
-        ActionKind::Delete if opts.trash => trash_path(p),
-        ActionKind::Trash => trash_path(p),
+        ActionKind::Delete if opts.trash => trash_path(p).map(|_| None),
+        ActionKind::Trash => trash_path(p).map(|_| None),
         ActionKind::Delete => {
             let contents = item.meta.get("contents").and_then(|v| v.as_bool()).unwrap_or(false);
-            delete_path(p, contents, opts.background_delete)
+            delete_path(p, contents, opts.background_delete).map(|_| None)
         }
         ActionKind::Command => {
-            let cmd = item.action.command.clone().ok_or("no command")?;
-            let argv: Vec<String> = cmd
-                .iter()
-                .map(|a| {
-                    a.replace("{path}", &item.path)
-                        .replace("{id}", item.meta.get("udid").and_then(|v| v.as_str()).unwrap_or(&item.id))
-                        .replace("{name}", &item.name)
-                })
-                .collect();
-            let refs: Vec<&str> = argv.iter().map(|s| s.as_str()).collect();
-            run_capture(&refs, 600).map(|_| ()).ok_or_else(|| format!("`{}` failed", argv.join(" ")))
+            let argv = command_argv(item).ok_or("no command")?;
+            let timeout = cat.rule(&item.rule).map_or(600, |r| r.timeout_secs);
+            let before = measure(item);
+            match crate::util::run_probe(&argv, None, timeout) {
+                crate::util::Probe::Yes => {}
+                crate::util::Probe::No(msg) if msg.is_empty() => return Err(format!("`{}` failed", shown(&argv))),
+                crate::util::Probe::No(msg) => return Err(format!("`{}` failed: {}", shown(&argv), msg)),
+                crate::util::Probe::Unknown(why) => return Err(why),
+            }
+            let after = measure(item);
+            let freed = match (item.meta.get("measure").and_then(|m| m.as_str()), before, after) {
+                (Some("purgeable"), Some(b), Some(a)) => Some(a.saturating_sub(b)),
+                (_, Some(b), Some(a)) => Some(b.saturating_sub(a)),
+                _ => None,
+            };
+            if let Some(f) = freed {
+                notes.push(format!("measured {} freed", crate::util::bytes(f)));
+            }
+            Ok(freed)
         }
-        ActionKind::WorktreeRemove => remove_worktree(item, opts, notes),
+        ActionKind::WorktreeRemove => remove_worktree(item, opts, notes).map(|_| None),
     }
 }
+
+/// The command an item runs, with {path}, {id} and {name} filled in. Never through a shell.
+pub fn command_argv(item: &Item) -> Option<Vec<String>> {
+    let cmd = item.action.command.clone()?;
+    Some(
+        cmd.iter()
+            .map(|a| {
+                a.replace("{path}", &item.path)
+                    .replace("{id}", item.meta.get("udid").and_then(|v| v.as_str()).unwrap_or(&item.id))
+                    .replace("{name}", &item.name)
+            })
+            .collect(),
+    )
+}
+
+/// A command for messages: the tool's name, not its full path.
+fn shown(argv: &[String]) -> String {
+    let mut v = argv.to_vec();
+    if let Some(first) = v.first_mut() {
+        if let Some(n) = Path::new(first.as_str()).file_name() {
+            *first = n.to_string_lossy().to_string();
+        }
+    }
+    v.join(" ")
+}
+
+/// What an item's `measure` hint says to look at: its folder's size, or free disk space.
+fn measure(item: &Item) -> Option<u64> {
+    match item.meta.get("measure").and_then(|m| m.as_str())? {
+        "path" => Some(
+            crate::fsutil::SizeCtx::default()
+                .size_path(Path::new(&item.path), &Default::default())
+                .map_or(0, |s| s.0.bytes),
+        ),
+        "purgeable" => Some(crate::fsutil::disk_info(&home()).free),
+        _ => None,
+    }
+}
+
+/// The rule's probe must say yes before its command runs. Three answers: yes runs, no and
+/// "could not tell" (error, timeout, tool missing) both skip, with the reason.
+pub fn probe_ok(item: &Item, cat: &Catalog) -> Result<(), String> {
+    if item.action.kind != ActionKind::Command {
+        return Ok(());
+    }
+    let Some(probe) = cat.rule(&item.rule).and_then(|r| r.probe.clone()).filter(|p| !p.is_empty()) else { return Ok(()) };
+    let mut argv = probe.clone();
+    if let Some(bin) = crate::util::which(&argv[0]) {
+        argv[0] = bin.to_string_lossy().to_string();
+    }
+    match crate::util::run_probe(&argv, None, PROBE_TIMEOUT_SECS) {
+        crate::util::Probe::Yes => Ok(()),
+        crate::util::Probe::No(msg) => Err(format!(
+            "`{}` said no{}; skipped",
+            probe.join(" "),
+            if msg.is_empty() { String::new() } else { format!(" ({})", msg) }
+        )),
+        crate::util::Probe::Unknown(why) => Err(format!("could not tell whether `{}` is ready ({}); skipped to be safe", probe.join(" "), why)),
+    }
+}
+
+/// How long a probe may take before poo treats it as "could not tell".
+const PROBE_TIMEOUT_SECS: u64 = 30;
 
 /// Why an item cannot be cleaned in this mode, or the warnings accepted to clean it.
 pub fn admit(item: &Item, cat: &Catalog, opts: &CleanOptions, procs_list: &[Proc]) -> Result<Vec<String>, String> {
     let mut warnings = vec![];
+    // Report-only items are never cleaned, in any mode.
+    if item.report_only || cat.rule(&item.rule).map_or(false, |r| r.report_only) {
+        return Err(report_only_message(item));
+    }
+    // Snapshots are backups: never removed by a schedule or a hook, only when someone asks.
+    let snapshot_cmd = item.action.command.as_ref().map_or(false, |c| c.iter().any(|a| a == "deletelocalsnapshots"));
+    if snapshot_cmd && (opts.actor.starts_with("schedule") || opts.actor.starts_with("hook")) {
+        return Err("Time Machine snapshots are only removed when you ask, never on a schedule".into());
+    }
     if let Some(limit) = opts.max_tier {
         if item.tier.rank() > limit.rank() && opts.mode == RiskLevel::Standard {
             return Err(format!("{} item; plans and schedules stop at `{}` (pick it explicitly with --include-in-use)", item.tier.label(), limit.label()));
@@ -556,7 +750,7 @@ pub fn admit(item: &Item, cat: &Catalog, opts: &CleanOptions, procs_list: &[Proc
         }
     }
     let rule = cat.rule(&item.rule);
-    warnings.extend(floor_check(item, rule.map(|r| r.kind), rule.map_or(false, |r| r.system), opts.mode)?);
+    warnings.extend(floor_check_rule(item, rule, opts.mode)?);
     if !item.path.contains("://") {
         if let Err(e) = still_matches(item, cat) {
             if opts.mode < RiskLevel::Danger || e == "no longer exists" {
@@ -586,7 +780,11 @@ pub fn clean_with(items: &[Item], cat: &Catalog, opts: &CleanOptions, progress: 
         crate::backup::enforce(&opts.backup);
     }
     let before = crate::fsutil::disk_info(&home()).free;
-    let procs_list = procs::list();
+    // Unknown means skip: without the process list poo cannot tell whether a build or an
+    // app is using an item.
+    let procs_known = procs::try_list();
+    let procs_unknown = procs_known.is_none();
+    let procs_list = procs_known.unwrap_or_default();
     let mut results = vec![];
     let mut freed = 0u64;
     // Bytes of batch items nested in a worktree are counted on their own, not twice.
@@ -615,13 +813,29 @@ pub fn clean_with(items: &[Item], cat: &Catalog, opts: &CleanOptions, progress: 
             warnings: vec![],
             notes: vec![],
         };
-        match admit(item, cat, opts, &procs_list) {
+        let admitted = if procs_unknown {
+            Err("could not read the list of running processes, so poo cannot tell whether something is using this; skipped to be safe".to_string())
+        } else {
+            admit(item, cat, opts, &procs_list)
+        };
+        match admitted {
             Err(e) => {
+                if !opts.dry_run && (e.contains("could not tell") || procs_unknown) {
+                    log_skip(item, &opts.actor, opts.mode, &e);
+                }
                 res.reason = Some(e);
                 results.push(res);
                 continue;
             }
             Ok(w) => res.warnings = w,
+        }
+        if let Err(e) = probe_ok(item, cat) {
+            if !opts.dry_run && e.contains("could not tell") {
+                log_skip(item, &opts.actor, opts.mode, &e);
+            }
+            res.reason = Some(e);
+            results.push(res);
+            continue;
         }
         if opts.dry_run {
             res.status = "would-clean".into();
@@ -630,8 +844,11 @@ pub fn clean_with(items: &[Item], cat: &Catalog, opts: &CleanOptions, progress: 
             continue;
         }
         let mut notes = vec![];
-        match perform(item, opts, &mut notes) {
-            Ok(()) => {
+        match perform(item, cat, opts, &mut notes) {
+            Ok(measured) => {
+                if let Some(m) = measured {
+                    res.bytes = m;
+                }
                 res.status = "cleaned".into();
                 freed += res.bytes;
                 log_history(item, &opts.actor, opts.mode, &notes);
@@ -694,6 +911,33 @@ pub fn snapshot_hint() -> Option<String> {
             n
         )
     })
+}
+
+/// Items skipped because a probe or guard could not answer are kept in the history with
+/// zero bytes, so "why was this left?" has an answer later.
+fn log_skip(item: &Item, actor: &str, mode: RiskLevel, reason: &str) {
+    append_history(serde_json::json!({
+        "at": now(),
+        "actor": actor,
+        "mode": mode,
+        "status": "skipped",
+        "reason": reason,
+        "id": item.id,
+        "path": item.path,
+        "name": item.name,
+        "rule": item.rule,
+        "bucket": item.bucket,
+        "tier": item.tier,
+        "bytes": 0,
+    }));
+}
+
+fn append_history(line: serde_json::Value) {
+    let p = state_dir().join("history.jsonl");
+    let _ = std::fs::create_dir_all(p.parent().unwrap());
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(p) {
+        let _ = writeln!(f, "{}", line);
+    }
 }
 
 fn log_history(item: &Item, actor: &str, mode: RiskLevel, notes: &[String]) {

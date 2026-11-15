@@ -11,6 +11,7 @@ pub mod config;
 pub mod contrib;
 pub mod fsevents;
 pub mod fsutil;
+pub mod growth;
 pub mod hooks;
 pub mod mcp;
 pub mod ops;

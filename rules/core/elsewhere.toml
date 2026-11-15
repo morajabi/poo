@@ -1,0 +1,43 @@
+# Elsewhere on this Mac: space poo explains but never cleans. Every rule in a
+# report-only bucket is report-only: shown and sized, never in plans, refused by clean.
+# Each item says where to manage it instead (`recommend`).
+
+[[bucket]]
+id = "elsewhere"
+name = "Elsewhere on this Mac"
+order = 95
+color = "#A1A1AA"
+symbol = "externaldrive"
+description = "Space outside developer tools: snapshots, purgeable space, backups and media. poo shows where it is and who manages it; it never cleans it."
+report_only = true
+
+# ---------------------------------------------------------------------------
+# Snapshots and purgeable space
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "system.purgeable"
+name = "Purgeable space and snapshots"
+bucket = "elsewhere"
+group = "Snapshots & purgeable"
+kind = "provider"
+provider = "snapshots"
+cost = "data"
+tags = ["macos", "snapshots", "purgeable"]
+stacks = ["macos"]
+description = "Space macOS can reclaim on its own (local snapshots, iCloud-optimized files, system caches) and the APFS snapshots behind it, with the app that made each."
+recommend = "Nothing to do: macOS frees purgeable space when it needs room. Snapshots from backup apps are managed in those apps."
+
+[[rule]]
+id = "system.time-machine-snapshots"
+name = "Time Machine local snapshots"
+bucket = "system"
+group = "Time Machine snapshots"
+kind = "provider"
+provider = "snapshots"
+params.only = "time-machine"
+cost = "data"
+tags = ["macos", "snapshots", "time-machine"]
+stacks = ["macos"]
+description = "Local Time Machine snapshots older than a day. Your backup disk keeps its own copy; macOS also thins these on its own."
+recommend = "Usually nothing to do. To get the space back now, remove old ones here with --include-in-use; snapshots from the last day always stay."

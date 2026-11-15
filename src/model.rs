@@ -250,6 +250,17 @@ pub struct RuleSpec {
     pub idle_days: Option<u32>,
     pub action: Option<ActionKind>,
     pub command: Option<Vec<String>>,
+    /// Shown and sized but never cleaned by poo: never in plans, refused by clean. Point
+    /// people at the owner's own UI with `recommend`.
+    pub report_only: Option<bool>,
+    /// Clean by running the owning tool's command (argv, no shell) instead of deleting,
+    /// when that tool is installed. poo measures the path before and after.
+    pub clean_command: Option<Vec<String>>,
+    /// A command that must exit 0 before `clean_command` (or a provider's command) runs,
+    /// for example `["docker", "info"]`. A failure or timeout skips the item.
+    pub probe: Option<Vec<String>>,
+    /// Time limit for `clean_command` or a provider's command (default 600 seconds).
+    pub timeout_secs: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -263,6 +274,8 @@ pub struct BucketSpec {
     pub symbol: Option<String>,
     pub description: Option<String>,
     pub hidden: Option<bool>,
+    /// A bucket for awareness only ("Elsewhere on this Mac"): its items are report-only.
+    pub report_only: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -421,6 +434,13 @@ pub struct Item {
     pub children: Vec<Child>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty", default)]
     pub meta: BTreeMap<String, serde_json::Value>,
+    /// Shown and sized, never in plans and never cleaned by poo; `recommend` says where to
+    /// manage it instead.
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+    pub report_only: bool,
+    /// What to do about it, often the owner's own UI.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub recommend: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -439,6 +459,9 @@ pub struct BucketSummary {
     pub symbol: String,
     pub description: String,
     pub hidden: bool,
+    /// Awareness only: nothing in it is cleanable by poo.
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+    pub report_only: bool,
     pub bytes: u64,
     pub count: usize,
     pub tiers: BTreeMap<String, u64>,
@@ -515,4 +538,10 @@ pub struct Report {
     /// Rules that matched something, with item count and bytes.
     #[serde(default)]
     pub rule_hits: BTreeMap<String, (usize, u64)>,
+    /// Bytes of report-only items (shown, not counted in `total_bytes`, never cleaned).
+    #[serde(default)]
+    pub report_only_bytes: u64,
+    /// Growth per bucket, anomalies and a free-space forecast from the daily history.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub growth: Option<serde_json::Value>,
 }

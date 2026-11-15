@@ -84,6 +84,8 @@ fn tools() -> Value {
             "ids": {"type": "array", "items": {"type": "string"}}, "older_than_days": {"type": "integer"},
             "id": {"type": "string"}, "dry_run": {"type": "boolean", "default": true}
          }, "required": ["action"]}},
+        {"name": "growth", "description": "What grew since a point in time (per bucket and group), unusual growth such as a cache that grew many GB today, and a free-space forecast (days until full). Read-only.",
+         "inputSchema": {"type": "object", "properties": {"since": {"type": "string", "description": "24h, 7d (default), 2w"}}}},
         {"name": "history", "description": "What poo cleaned before, newest first.",
          "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer", "default": 50}}}}
     ])
@@ -109,6 +111,12 @@ fn call(ctx: &mut Ctx, name: &str, a: &Value) -> Result<Value> {
     let full = a.get("full").and_then(|v| v.as_bool()).unwrap_or(false);
     let rescan = full || a.get("rescan").and_then(|v| v.as_bool()).unwrap_or(false);
     match name {
+        "growth" => {
+            let r = ops::report(ctx, false, ScanOptions::default())?;
+            let since = s(a, "since").unwrap_or_else(|| "7d".into());
+            let secs = crate::growth::parse_since(&since).ok_or_else(|| anyhow!("since is like 24h, 7d or 2w"))?;
+            Ok(crate::growth::report(&r, secs))
+        }
         "overview" => {
             let r = ops::report(ctx, rescan, ScanOptions { full, ..Default::default() })?;
             let mut v = ops::overview(&r);

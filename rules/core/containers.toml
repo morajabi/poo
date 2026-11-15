@@ -14,6 +14,9 @@ group = "Docker"
 kind = "provider"
 provider = "docker"
 cost = "rebuild"
+# Only when the Docker engine answers; poo never starts Docker.
+probe = ["docker", "info"]
+timeout_secs = 900
 tags = ["containers", "docker"]
 stacks = ["docker"]
 description = "Build cache, unused images and stopped containers reported by `docker system df`; volumes are shown but never removed."

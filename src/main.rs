@@ -193,6 +193,13 @@ enum Cmd {
         #[arg(long, short = 'n', default_value_t = 30)]
         limit: usize,
     },
+    /// What grew: per bucket and group since a point in time, unusual growth, and how long
+    /// the free space lasts at this pace.
+    Growth {
+        /// How far back to compare: 24h, 7d, 2w...
+        #[arg(long, default_value = "7d")]
+        since: String,
+    },
     /// Set up poo: choose dev roots (humans) or print the agent setup brief.
     Setup {
         /// Print the brief an AI agent follows to configure poo.
@@ -619,6 +626,41 @@ fn filter(f: &FilterArgs) -> Result<Filter, CliError> {
     })
 }
 
+/// `poo growth` for people: calm, a few lines.
+fn print_growth(g: &Value) {
+    let signed = |v: &Value| -> Option<String> {
+        let d = v.as_i64()?;
+        Some(format!("{}{}", if d < 0 { "-" } else { "+" }, bytes(d.unsigned_abs())))
+    };
+    if g["from"].is_null() {
+        println!("Not enough history for that range yet; poo keeps a sample each time it scans.");
+    } else {
+        let days = (g["to"].as_i64().unwrap_or(0) - g["from"].as_i64().unwrap_or(0)) as f64 / 86400.0;
+        println!("Since {} ({:.0} days ago)", poo::util::iso8601(g["from"].as_i64().unwrap_or(0)).get(..10).unwrap_or(""), days);
+        if let Some(f) = signed(&g["free_delta"]) {
+            println!("  free space   {}", f);
+        }
+        for b in g["buckets"].as_array().into_iter().flatten() {
+            if let Some(d) = signed(&b["delta"]).filter(|_| b["delta"].as_i64().unwrap_or(0).unsigned_abs() >= 50_000_000) {
+                println!("  {:<28} {:>10}  (now {})", b["name"].as_str().unwrap_or(""), d, bytes(b["bytes"].as_u64().unwrap_or(0)));
+            }
+        }
+        let groups = g["groups"].as_array().cloned().unwrap_or_default();
+        if !groups.is_empty() {
+            println!("Grew the most");
+            for x in groups.iter().take(5) {
+                println!("  {:<28} {:>10}", x["group"].as_str().unwrap_or(""), signed(&x["delta"]).unwrap_or_default());
+            }
+        }
+    }
+    for a in g["anomalies"].as_array().into_iter().flatten() {
+        println!("Note: {}", a["message"].as_str().unwrap_or(""));
+    }
+    if let Some(m) = g["forecast"]["message"].as_str() {
+        println!("{}", m);
+    }
+}
+
 fn scan_opts(out: &Out, progress_json: bool) -> ScanOptions {
     let human = !out.json && is_tty(2);
     ScanOptions {
@@ -877,7 +919,10 @@ fn real_main(cli: Cli) -> R {
             clear_progress(&out);
             let target = free.as_ref().and_then(|s| parse_bytes(s));
             let items = if !ids.is_empty() {
-                ops::resolve_ids(&r, &ids).map_err(|e| CliError::new("not_found", 3, e.to_string()))?
+                ops::resolve_ids(&r, &ids).map_err(|e| match e.downcast_ref::<ops::ReportOnlyError>() {
+                    Some(ro) => CliError::new("report_only", 2, ro.0.clone()).hint("poo never cleans report-only items; manage them where the message says"),
+                    None => CliError::new("not_found", 3, e.to_string()),
+                })?
             } else if let Some(p) = plan {
                 let f = Filter { buckets: bucket, tags: tag, ..Default::default() };
                 ops::make_plan(&ctx, &r, &p, target, &f).map_err(|e| CliError::new("not_found", 3, e.to_string()))?.items
@@ -1173,12 +1218,34 @@ fn real_main(cli: Cli) -> R {
                 save(&cfg, &out, &format!("{} = {}", key, value))?;
             }
         },
+        Cmd::Growth { since } => {
+            let secs = poo::growth::parse_since(&since).ok_or_else(|| CliError::new("usage", 2, format!("bad duration `{}`", since)).hint("use 24h, 7d or 2w"))?;
+            let r = ops::report(&ctx, false, scan_opts(&out, false))?;
+            clear_progress(&out);
+            let g = poo::growth::report(&r, secs);
+            if out.json {
+                emit(&out, &g);
+            } else {
+                print_growth(&g);
+            }
+        }
         Cmd::History { limit } => {
             let h = clean::history(limit);
             if out.json {
                 emit(&out, &json!({"history": h}));
             } else {
                 for e in h {
+                    if e["status"].as_str() == Some("skipped") {
+                        println!(
+                            "{}  {:>9}  {:<6} {}  ({})",
+                            poo::util::iso8601(e["at"].as_i64().unwrap_or(0)),
+                            "skipped",
+                            e["actor"].as_str().unwrap_or(""),
+                            tilde(std::path::Path::new(e["path"].as_str().unwrap_or(""))),
+                            e["reason"].as_str().unwrap_or("")
+                        );
+                        continue;
+                    }
                     println!(
                         "{}  {:>9}  {:<6} {}",
                         poo::util::iso8601(e["at"].as_i64().unwrap_or(0)),

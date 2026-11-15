@@ -29,6 +29,8 @@ fn item(path: &str, kind: ActionKind) -> Item {
         safeguards: vec![],
         children: vec![],
         meta: BTreeMap::new(),
+        report_only: false,
+        recommend: None,
     }
 }
 

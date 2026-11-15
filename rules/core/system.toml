@@ -15,11 +15,12 @@ group = "Homebrew"
 kind = "path"
 paths = ["~/Library/Caches/Homebrew/downloads", "~/Library/Caches/Homebrew/Cask"]
 cost = "redownload"
+clean_command = ["brew", "cleanup", "--prune=14"]
 warm_days = 14
 tags = ["homebrew", "downloads"]
 stacks = ["homebrew", "macos"]
 description = "Bottles and cask installers Homebrew downloaded; its api and bootsnap caches stay so brew remains fast."
-recommend = "`brew cleanup --prune=all` does the same and also drops old versions."
+recommend = "poo runs `brew cleanup --prune=14`, which keeps the last two weeks of downloads and also drops old versions."
 
 [[rule]]
 id = "system.homebrew-old"

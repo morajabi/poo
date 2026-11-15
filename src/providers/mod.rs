@@ -2,6 +2,7 @@
 //! provider runs, with which parameters, and in which bucket results land.
 
 pub mod git;
+pub mod snapshots;
 
 use crate::catalog::Rule;
 use crate::fsutil::Sized;
@@ -41,6 +42,9 @@ pub struct Raw {
     /// Sized without its claimed descendants, so nested items are not double counted.
     pub disjoint: bool,
     pub risks: Vec<crate::model::Risk>,
+    /// Shown and sized, never cleaned by poo (its owner manages it).
+    #[serde(default)]
+    pub report_only: bool,
 }
 
 pub fn parse_iso(s: &str) -> Option<i64> {
@@ -518,7 +522,7 @@ pub fn docker(rule: &Rule) -> Vec<Raw> {
         let reclaim = parse_docker_size(v.get("Reclaimable").and_then(|v| v.as_str()).unwrap_or("0B"));
         let total = parse_docker_size(v.get("Size").and_then(|v| v.as_str()).unwrap_or("0B"));
         let (name, tier, cost, cmd): (&str, Tier, Cost, Vec<&str>) = match ty {
-            "Build Cache" => ("Docker build cache", Tier::Cold, Cost::Rebuild, vec!["docker", "builder", "prune", "-f"]),
+            "Build Cache" => ("Docker build cache", Tier::Cold, Cost::Rebuild, vec!["docker", "builder", "prune", "-f", "--filter", "until=168h"]),
             "Images" => ("Unused Docker images", Tier::Warm, Cost::Redownload, vec!["docker", "image", "prune", "-a", "-f"]),
             "Containers" => ("Stopped Docker containers", Tier::Review, Cost::Data, vec!["docker", "container", "prune", "-f"]),
             "Local Volumes" => ("Unused Docker volumes", Tier::Protected, Cost::Data, vec![]),
@@ -538,6 +542,9 @@ pub fn docker(rule: &Rule) -> Vec<Raw> {
             ..Default::default()
         };
         raw.meta.insert("docker_total".into(), Value::from(total));
+        if ty == "Build Cache" {
+            raw.reasons.push("keeps build cache used in the last week".into());
+        }
         if cmd.is_empty() {
             raw.action = Some(ActionKind::None);
             raw.reasons.push("volumes hold data; remove them yourself with docker volume rm".into());
