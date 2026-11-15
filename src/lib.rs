@@ -22,6 +22,7 @@ pub mod scan;
 pub mod schedule;
 pub mod update;
 pub mod util;
+pub mod watch;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const REPO: &str = "morajabi/poo";

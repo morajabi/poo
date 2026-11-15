@@ -50,7 +50,9 @@ Output is JSON when piped; add `--text` for tables. Errors are
 
 ```
 poo                         overview: free space, buckets, plan sizes
-poo scan                    rescan (results are cached for an hour)
+poo scan                    update now (from the file-change journal, usually <1s)
+poo scan --full             walk everything again (5-20s)
+poo watch                   keep the report current as files change (JSON lines when piped)
 poo ls [bucket] [--tier cold] [--project PATH] [--min 1G] [--query text]
 poo show <id|path>          reasons, rebuild cost, what is inside
 poo plan quick|stale|deep|emergency [--free 30G]

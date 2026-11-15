@@ -34,7 +34,7 @@ fn tools() -> Value {
     plan_props["free"] = json!({"type": "string", "description": "Target to free, e.g. 30G. Makes the plan pick least-regret items until reached."});
     json!([
         {"name": "overview", "description": "Disk usage, buckets with tier breakdown, plan sizes and the biggest items. Uses the cached scan when fresh.",
-         "inputSchema": {"type": "object", "properties": {"rescan": {"type": "boolean", "description": "Force a new scan (takes 10-60s)"}}}},
+         "inputSchema": {"type": "object", "properties": {"rescan": {"type": "boolean", "description": "Update the report now (from the file-change journal, usually under a second; a full walk when the journal cannot help)"}, "full": {"type": "boolean", "description": "Walk everything (10-60s)"}}}},
         {"name": "list_items", "description": "Items (folders, simulators, images...) with size, tier, reasons. Filter by bucket, tier, project, size or text.",
          "inputSchema": {"type": "object", "properties": list_props}},
         {"name": "inspect", "description": "Full detail for one item by id or path: reasons, rebuild cost, rule, what is inside.",
@@ -106,10 +106,11 @@ fn filter_from(a: &Value) -> Filter {
 }
 
 fn call(ctx: &mut Ctx, name: &str, a: &Value) -> Result<Value> {
-    let rescan = a.get("rescan").and_then(|v| v.as_bool()).unwrap_or(false);
+    let full = a.get("full").and_then(|v| v.as_bool()).unwrap_or(false);
+    let rescan = full || a.get("rescan").and_then(|v| v.as_bool()).unwrap_or(false);
     match name {
         "overview" => {
-            let r = ops::report(ctx, rescan, ScanOptions::default())?;
+            let r = ops::report(ctx, rescan, ScanOptions { full, ..Default::default() })?;
             let mut v = ops::overview(&r);
             v["setup_completed"] = json!(ctx.cfg.setup.completed_at.is_some());
             v["autonomy_max_tier"] = json!(ctx.cfg.agents.auto_clean_max_tier);

@@ -1,7 +1,7 @@
 use crate::model::{Child, DiskInfo};
 use crate::util::system_time_secs;
 use rayon::prelude::*;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -53,6 +53,10 @@ pub fn names(entries: &[Entry]) -> Vec<String> {
     entries.iter().map(|e| e.name.clone()).collect()
 }
 
+/// Folders at least this big are remembered between scans, so a rescan re-measures only the
+/// branches that changed.
+pub const MEMO_MIN_BYTES: u64 = 32_000_000;
+
 /// Shared state for one scan: hardlink dedupe, progress counters and cancellation.
 #[derive(Default)]
 pub struct SizeCtx {
@@ -60,6 +64,11 @@ pub struct SizeCtx {
     pub files: AtomicU64,
     pub bytes: AtomicU64,
     pub cancel: AtomicBool,
+    /// Record big folders into `big` while sizing.
+    pub record: bool,
+    pub big: Mutex<Vec<(PathBuf, Sized)>>,
+    /// Sizes of big folders from the last scan (incremental scans).
+    pub memo: HashMap<PathBuf, Sized>,
 }
 
 #[derive(Debug, Default, Clone, Copy, serde::Serialize, serde::Deserialize)]
@@ -79,6 +88,11 @@ impl Sized {
 }
 
 impl SizeCtx {
+    /// A context that records big folders and reuses `memo` for untouched branches.
+    pub fn recording(memo: HashMap<PathBuf, Sized>) -> Self {
+        SizeCtx { record: true, memo, ..Default::default() }
+    }
+
     fn file_bytes(&self, e: &Entry) -> u64 {
         if e.nlink > 1 && !e.is_dir {
             let mut seen = self.seen.lock().unwrap();
@@ -128,6 +142,7 @@ impl SizeCtx {
                 let mut s = self.size_dir(&d.path, dev, exclude);
                 s.bytes += d.alloc;
                 s.newest = s.newest.max(d.mtime);
+                self.remember(&d.path, s);
                 (d.name.clone(), s)
             })
             .collect();
@@ -137,6 +152,77 @@ impl SizeCtx {
         }
         children.sort_by(|a, b| b.bytes.cmp(&a.bytes));
         (total, children)
+    }
+
+    fn remember(&self, path: &Path, s: Sized) {
+        if self.record && s.bytes >= MEMO_MIN_BYTES {
+            self.big.lock().unwrap().push((path.to_path_buf(), s));
+        }
+    }
+
+    /// Like `size_entries`, but subfolders with no change below them reuse their size from
+    /// `memo`. `changed` lists folders whose contents changed, all inside the folder.
+    fn size_entries_delta(&self, entries: &[Entry], dev: u64, exclude: &HashSet<PathBuf>, changed: &[&Path]) -> (Sized, Vec<Child>) {
+        let mut total = Sized::default();
+        let mut children = Vec::with_capacity(entries.len());
+        let mut dirs = vec![];
+        for e in entries {
+            if !exclude.is_empty() && exclude.contains(&e.path) {
+                continue;
+            }
+            if e.is_dir && !e.is_symlink {
+                if e.dev == dev {
+                    dirs.push(e);
+                }
+                continue;
+            }
+            let b = self.file_bytes(e);
+            total.bytes += b;
+            total.files += 1;
+            total.newest = total.newest.max(e.mtime);
+            children.push(Child { name: e.name.clone(), bytes: b });
+        }
+        let sub: Vec<(String, Sized)> = dirs
+            .par_iter()
+            .map(|d| {
+                let below: Vec<&Path> = changed.iter().copied().filter(|c| c.starts_with(&d.path)).collect();
+                let s = match self.memo.get(&d.path) {
+                    Some(m) if below.is_empty() => *m,
+                    _ => {
+                        let mut s = if below.is_empty() {
+                            self.size_dir(&d.path, dev, exclude)
+                        } else {
+                            self.size_entries_delta(&read_entries(&d.path), dev, exclude, &below).0
+                        };
+                        s.bytes += d.alloc;
+                        s.newest = s.newest.max(d.mtime);
+                        s
+                    }
+                };
+                self.remember(&d.path, s);
+                (d.name.clone(), s)
+            })
+            .collect();
+        for (name, s) in sub {
+            children.push(Child { name, bytes: s.bytes });
+            total = total.add(s);
+        }
+        children.sort_by(|a, b| b.bytes.cmp(&a.bytes));
+        (total, children)
+    }
+
+    /// Re-measures a folder after `changed` folders inside it changed, reusing remembered
+    /// sizes of untouched branches.
+    pub fn size_path_delta(&self, path: &Path, exclude: &HashSet<PathBuf>, changed: &[&Path]) -> Option<(Sized, Vec<Child>)> {
+        let md = std::fs::symlink_metadata(path).ok()?;
+        if !md.is_dir() || md.file_type().is_symlink() {
+            return self.size_path(path, exclude);
+        }
+        let entries = read_entries(path);
+        let (mut s, children) = self.size_entries_delta(&entries, md.dev(), exclude, changed);
+        s.bytes += md.blocks() * 512;
+        s.newest = s.newest.max(md.mtime());
+        Some((s, children))
     }
 
     /// Sizes a path that may be a file or a directory.
