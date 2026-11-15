@@ -26,6 +26,9 @@ final class Store {
     /// Free space is below the low-disk guard's threshold.
     var lowDisk = false
     @ObservationIgnored private var diskGuard: LowDiskGuard?
+    var launchers: LauncherList?
+    /// Shown briefly after "Copy prompt".
+    var toast: String?
 
     /// Item ids the user ticked in the window.
     var selection: Set<String> = []
@@ -33,9 +36,12 @@ final class Store {
     init() {
         // First frame from the cached report; rescan in the background when stale.
         report = PooCLI.cachedReport()
-        Task { await refreshIfStale() }
-        diskGuard = LowDiskGuard(store: self)
-        diskGuard?.start()
+        // No scan before setup: the first scan waits for dev folders and permissions.
+        if Onboarding.isDone {
+            Task { await refreshIfStale() }
+            diskGuard = LowDiskGuard(store: self)
+            diskGuard?.start()
+        }
     }
 
     var freeText: String {
@@ -117,6 +123,10 @@ final class Store {
         selection.removeAll()
     }
 
+    var selectedItems: [Item] {
+        selection.isEmpty ? [] : (report?.items.filter { selection.contains($0.id) } ?? [])
+    }
+
     func toggle(_ id: String) {
         if selection.contains(id) { selection.remove(id) } else { selection.insert(id) }
     }
@@ -174,6 +184,47 @@ final class Store {
             self.error = error.localizedDescription
         }
         await loadBackupConfig()
+    }
+
+    func startGuard() {
+        guard diskGuard == nil else { return }
+        diskGuard = LowDiskGuard(store: self)
+        diskGuard?.start()
+    }
+
+    // MARK: Ask your agent
+
+    func loadLaunchers(force: Bool = false) async {
+        guard force || launchers == nil else { return }
+        launchers = try? await PooCLI.json(LauncherList.self, ["ask", "--list"])
+    }
+
+    /// Opens an agent with poo's brief about `target` (item id, project:<path>, bucket:<id>, overview).
+    func ask(_ target: String, with launcher: String) async {
+        do {
+            _ = try await PooCLI.run(["ask", target, "--with", launcher])
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    func copyPrompt(_ target: String) async {
+        do {
+            let p = try await PooCLI.json(AgentPrompt.self, ["prompt", target])
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(p.prompt, forType: .string)
+            flash("Prompt copied. Paste it into your agent.")
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    func flash(_ message: String) {
+        toast = message
+        Task {
+            try? await Task.sleep(for: .seconds(2.5))
+            if toast == message { toast = nil }
+        }
     }
 
     // MARK: Agent hooks

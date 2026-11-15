@@ -1,9 +1,9 @@
-import Charts
 import SwiftUI
 
 struct MainWindow: View {
     @Environment(Store.self) private var store
     @Environment(Navigation.self) private var nav
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         @Bindable var nav = nav
@@ -39,6 +39,20 @@ struct MainWindow: View {
                 case .backups: BackupsView()
                 }
             }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if nav.section != .backups { SelectionBar() }
+            }
+            .overlay(alignment: .bottom) { ToastOverlay().animation(.default, value: store.toast) }
+            .onDeleteCommand {
+                if nav.section != .backups { nav.review(items: store.selectedItems) }
+            }
+            .sheet(item: $nav.review) { r in
+                CleanConfirmView(planID: r.planID, free: r.free, items: r.items)
+            }
+            .task {
+                LaunchFlow.run(openWindow)
+                await store.loadLaunchers()
+            }
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     if store.scanning {
@@ -50,6 +64,8 @@ struct MainWindow: View {
                         }
                     } else {
                         Button { Task { await store.scan() } } label: { Label("Rescan", systemImage: "arrow.clockwise") }
+                            .keyboardShortcut("r")
+                            .help("Rescan (⌘R)")
                     }
                 }
             }
@@ -59,78 +75,82 @@ struct MainWindow: View {
 
 struct ItemInspector: View {
     @Environment(Store.self) private var store
+    @Environment(Navigation.self) private var nav
     var item: Item
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                Text(item.name).font(.headline).textSelection(.enabled)
-                HStack {
-                    TierBadge(tier: item.tier)
-                    Text(item.tier.explanation).font(.caption).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(item.name).font(.headline).textSelection(.enabled)
+                    Text(Fmt.tilde(item.path)).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+                    HStack(spacing: 6) {
+                        TierBadge(tier: item.tier)
+                        Text(item.tier.explanation).font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
-                Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 6) {
+                HStack(spacing: 8) {
+                    Button(store.selection.contains(item.id) ? "Deselect" : "Select") { store.toggle(item.id) }
+                        .disabled(!item.isCleanable)
+                    Button("Reveal") { store.reveal(item) }.disabled(item.isVirtual)
+                    AskAgentButton(target: item.id, title: "Ask")
+                    Spacer()
+                }
+                .controlSize(.small)
+                Divider()
+                Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 4) {
                     row("Size", Fmt.bytes(item.total_bytes) + (item.total_bytes > item.bytes ? " (incl. nested)" : ""))
-                    row("Files", "\(item.files)")
+                    row("Files", item.files.formatted())
                     row("Used", Fmt.ago(item.lastUsedDate))
                     row("Cost", item.cost)
-                    row("Rule", item.rule)
                     if let p = item.project { row("Project", Fmt.tilde(p)) }
                     if let a = item.agent { row("Agent", a) }
                     if let rb = item.rebuild { row("Rebuild", rb) }
-                    row("Clean", actionText)
+                    row("Rule", item.rule)
                 }
                 .font(.callout)
-                Text(Fmt.tilde(item.path)).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
                 if !item.reasons.isEmpty {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Why").font(.subheadline.weight(.semibold))
-                        ForEach(item.reasons, id: \.self) { Text("• \($0)").font(.callout) }
+                    section("Why") {
+                        ForEach(item.reasons, id: \.self) { Text($0).font(.callout).fixedSize(horizontal: false, vertical: true) }
                     }
                 }
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("When cleaned").font(.subheadline.weight(.semibold))
+                section("When cleaned") {
                     ForEach(SafeguardSummary.sentences(for: item), id: \.self) { s in
-                        Label(s, systemImage: "checkmark.shield").font(.callout)
+                        Label(s, systemImage: SafeguardSummary.symbol(for: s, rebuild: item.rebuild))
+                            .font(.callout)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 if let risks = item.risks?.filter(\.isWarning), !risks.isEmpty {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Skipped unless you include it").font(.subheadline.weight(.semibold))
+                    section("Skipped unless you include it") {
                         ForEach(risks, id: \.tag) { r in
-                            Label(r.message, systemImage: "info.circle").font(.callout).foregroundStyle(.secondary)
+                            Text(r.message).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         }
                     }
                 }
                 if let kids = item.children, !kids.isEmpty {
-                    Text("Inside").font(.subheadline.weight(.semibold))
-                    Chart(kids.prefix(10), id: \.name) { c in
-                        BarMark(x: .value("MB", Double(c.bytes) / 1e6), y: .value("Name", c.name))
-                            .annotation(position: .trailing) { Text(Fmt.bytes(c.bytes)).font(.caption2).foregroundStyle(.secondary) }
+                    let biggest = kids.map(\.bytes).max() ?? 1
+                    section("Inside") {
+                        ForEach(kids.prefix(10), id: \.name) { c in
+                            HStack(spacing: 8) {
+                                Text(c.name).lineLimit(1).truncationMode(.middle).frame(maxWidth: .infinity, alignment: .leading)
+                                PartBar(part: c.bytes, whole: biggest, height: 4).frame(width: 60)
+                                Text(Fmt.bytes(c.bytes)).monospacedDigit().foregroundStyle(.secondary).frame(width: 64, alignment: .trailing)
+                            }
+                            .font(.caption)
+                        }
                     }
-                    .chartXAxis(.hidden)
-                    .frame(height: CGFloat(min(kids.count, 10)) * 24 + 10)
-                }
-                HStack {
-                    Button("Reveal in Finder") { store.reveal(item) }.disabled(item.isVirtual)
-                    Spacer()
-                    Button(store.selection.contains(item.id) ? "Deselect" : "Select") {
-                        if store.selection.contains(item.id) { store.selection.remove(item.id) } else { store.selection.insert(item.id) }
-                    }
-                    .disabled(item.action.kind == "none")
                 }
             }
-            .padding(16)
+            .padding(14)
         }
     }
 
-    private var actionText: String {
-        switch item.action.kind {
-        case "command": return (item.action.command ?? []).joined(separator: " ")
-        case "worktree-remove": return "git worktree remove"
-        case "trash": return "Move to Trash"
-        case "none": return "Manage it yourself"
-        default: return "Delete"
+    private func section<C: View>(_ title: String, @ViewBuilder _ content: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.subheadline.weight(.semibold))
+            content()
         }
     }
 
@@ -155,7 +175,10 @@ struct ProjectsView: View {
                     ProjectRow(project: p, items: items)
                 } else {
                     DisclosureGroup {
-                        ForEach(items) { i in ItemRow(item: i, subtitle: "\(i.group) · \(i.reasons.first ?? Fmt.tilde(i.path))") }
+                        ForEach(items) { i in
+                            ItemRow(item: i, subtitle: "\(i.group) · \(i.reasons.first ?? Fmt.tilde(i.path))")
+                                .contextMenu { ItemContextMenu(item: i) }
+                        }
                     } label: {
                         ProjectRow(project: p, items: items)
                     }
@@ -168,7 +191,6 @@ struct ProjectsView: View {
         }
         .navigationTitle("Projects")
         .navigationSubtitle("\(projects.count) projects")
-        .safeAreaInset(edge: .bottom, spacing: 0) { SelectionBar() }
     }
 }
 
@@ -194,19 +216,19 @@ struct ProjectRow: View {
                 Text(Fmt.tilde(p.path)).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
             }
             Spacer(minLength: 8)
-            if !p.stacks.isEmpty {
-                Text(p.stacks.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-            }
+            Text(p.stacks.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                .frame(width: 140, alignment: .trailing)
             Text(statusText(p))
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .frame(width: 92, alignment: .trailing)
                 .help("Last activity \(Fmt.ago(p.last_activity.map { Date(timeIntervalSince1970: TimeInterval($0)) }))")
-            if !notInUse.isEmpty {
-                Button { store.select(notInUse, true) } label: { Image(systemName: "checklist") }
-                    .buttonStyle(.borderless)
-                    .help("Select the \(notInUse.count) items not in use (\(Fmt.bytes(notInUse.reduce(0) { $0 + $1.total_bytes })))")
-            }
+            Button { store.select(notInUse, true) } label: { Image(systemName: "checklist") }
+                .buttonStyle(.borderless)
+                .help("Select the \(notInUse.count) items not in use (\(Fmt.bytes(notInUse.reduce(0) { $0 + $1.total_bytes })))")
+                .opacity(notInUse.isEmpty ? 0 : 1)
+                .disabled(notInUse.isEmpty)
+            AskAgentButton(target: "project:\(p.path)")
             Picker("", selection: Binding(get: { p.policy }, set: { new in Task { await store.setPolicy(p.path, new) } })) {
                 Text("Auto").tag("auto")
                 Text("Active").tag("active")
@@ -222,6 +244,18 @@ struct ProjectRow: View {
                 .frame(width: 72, alignment: .trailing)
         }
         .padding(.vertical, 2)
+        .contextMenu { ProjectRow.menu(p.path) }
+    }
+
+    @ViewBuilder
+    static func menu(_ path: String) -> some View {
+        Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }
+        Button("Copy path") {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(path, forType: .string)
+        }
+        Divider()
+        AskAgentItems(target: "project:\(path)")
     }
 
     private func statusText(_ p: Project) -> String {
@@ -272,7 +306,6 @@ struct WorktreesView: View {
             }
         }
         .navigationTitle("Worktrees")
-        .safeAreaInset(edge: .bottom, spacing: 0) { SelectionBar() }
     }
 }
 
@@ -305,19 +338,19 @@ struct WorktreeRow: View {
                 Text(subtitle).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            if let item { TierBadge(tier: item.tier) }
-            Text(Fmt.bytes(item?.total_bytes ?? project.artifact_bytes)).monospacedDigit().frame(width: 80, alignment: .trailing)
-            if let item {
-                Toggle("", isOn: Binding(
-                    get: { store.selection.contains(item.id) },
-                    set: { on in
-                        if on { store.selection.insert(item.id) } else { store.selection.remove(item.id) }
-                    }
-                ))
-                .toggleStyle(.checkbox)
-                .labelsHidden()
-                .disabled(item.action.kind == "none")
+            AskAgentButton(target: item?.id ?? "project:\(project.path)")
+            Group {
+                if let item { TierBadge(tier: item.tier) } else { Color.clear }
             }
+            .frame(width: 92, height: 16, alignment: .leading)
+            Text(Fmt.bytes(item?.total_bytes ?? project.artifact_bytes)).monospacedDigit().frame(width: 80, alignment: .trailing)
+            Group {
+                if let item { SelectBox(item: item) } else { Color.clear }
+            }
+            .frame(width: 18)
+        }
+        .contextMenu {
+            if let item { ItemContextMenu(item: item) } else { ProjectRow.menu(project.path) }
         }
     }
 }

@@ -166,6 +166,20 @@ enum SafeguardSummary {
         }
     }
 
+    /// Sentences that say something is saved or left in place.
+    static func isProtective(_ text: String) -> Bool {
+        let t = text.lowercased()
+        return ["backs up", "backed up", "backup", "stash", "branch", "kept", "stays", "keeps"].contains { t.contains($0) }
+    }
+
+    static func symbol(for sentence: String, rebuild: String?) -> String {
+        let t = sentence.lowercased()
+        if isProtective(t) { return "checkmark.shield" }
+        if t.contains("trash") { return "trash" }
+        if rebuild != nil || t.contains("rebuild") { return "hammer" }
+        return "xmark.bin"
+    }
+
     static func title(for item: Item, count: Int) -> String {
         if item.isWorktree { return "\(count) worktree\(count == 1 ? "" : "s")" }
         return "\(item.group) · \(count) item\(count == 1 ? "" : "s")"
@@ -193,8 +207,7 @@ enum SafeguardSummary {
             let raw = sentences(for: first)
             let shown = members.count == 1 ? raw.map { s in s.hasSuffix(".") ? String(s.dropLast()) : s } : raw.map(normalize)
             let text = shown.joined(separator: " · ").lowercased()
-            let protective = text.contains("back") || text.contains("stash") || text.contains("branch") || text.contains("kept") || text.contains("stays")
-            let symbol = protective ? "checkmark.shield" : text.contains("trash") ? "trash" : first.rebuild != nil ? "hammer" : "xmark.bin"
+            let symbol = isProtective(text) ? "checkmark.shield" : text.contains("trash") ? "trash" : (first.rebuild != nil || text.contains("rebuild") || text.contains("comes back")) ? "hammer" : "xmark.bin"
             return Line(
                 id: key,
                 title: title(for: first, count: members.count),
@@ -202,7 +215,7 @@ enum SafeguardSummary {
                 symbol: symbol,
                 bytes: members.reduce(0) { $0 + $1.total_bytes },
                 count: members.count,
-                keepsBackup: text.contains("back") || text.contains("stash") || text.contains("poo/")
+                keepsBackup: ["backs up", "backed up", "backup", "stash", "poo/"].contains { text.contains($0) }
             )
         }
         .sorted { $0.bytes > $1.bytes }

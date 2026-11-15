@@ -353,6 +353,29 @@ struct Catalog: Codable {
     var buckets: [CatalogBucket]
     var rules: [CatalogRule]
     var errors: [String]
+    /// Whether the CLI can read folders macOS guards (Mail, Safari, app containers).
+    var full_disk_access: Bool?
+}
+
+/// An agent `poo ask` can open with a brief (`poo ask --list`).
+struct Launcher: Codable, Identifiable, Hashable {
+    var id: String
+    var name: String
+    var kind: String?
+    var available: Bool
+}
+
+struct LauncherList: Codable {
+    var launchers: [Launcher]
+    var `default`: String?
+    var skill_installed: Bool?
+}
+
+/// `poo prompt <target>`: a brief an agent can start from.
+struct AgentPrompt: Codable {
+    var title: String?
+    var prompt: String
+    var cwd: String?
 }
 
 struct ScheduleSpec: Codable, Hashable {
@@ -487,8 +510,15 @@ struct HookStatus: Codable {
 // MARK: - Formatting
 
 enum Fmt {
+    private static let byteFormatter: ByteCountFormatter = {
+        let f = ByteCountFormatter()
+        f.countStyle = .file
+        f.allowsNonnumericFormatting = false
+        return f
+    }()
+
     static func bytes(_ n: UInt64) -> String {
-        ByteCountFormatter.string(fromByteCount: Int64(clamping: n), countStyle: .file)
+        n == 0 ? "0 KB" : byteFormatter.string(fromByteCount: Int64(clamping: n))
     }
 
     static func ago(_ date: Date?) -> String {

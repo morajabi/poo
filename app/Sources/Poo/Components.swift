@@ -28,6 +28,8 @@ struct TierBadge: View {
 /// Disk usage: used (gray), the part nothing is using (accent), free.
 struct DiskBar: View {
     var report: Report
+    /// Just the bar, for dense layouts that show the numbers elsewhere.
+    var compact = false
 
     var body: some View {
         let total = Double(max(report.disk.total, 1))
@@ -47,7 +49,8 @@ struct DiskBar: View {
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 4))
             }
-            .frame(height: 10)
+            .frame(height: compact ? 6 : 10)
+            if !compact {
             HStack(spacing: 14) {
                 Text("\(Fmt.bytes(report.disk.free)) free")
                     .fontWeight(.semibold)
@@ -58,6 +61,7 @@ struct DiskBar: View {
             }
             .font(.callout)
             .monospacedDigit()
+            }
         }
     }
 

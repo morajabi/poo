@@ -36,6 +36,7 @@ struct BrowseView: View {
                         ForEach(g.items) { i in
                             ItemRow(item: i, subtitle: subtitle(i, filter.grouping))
                                 .tag(i.id as String?)
+                                .contextMenu { ItemContextMenu(item: i) }
                         }
                     }
                 } header: {
@@ -52,7 +53,6 @@ struct BrowseView: View {
             }
         }
         .safeAreaInset(edge: .top, spacing: 0) { filterBar(bucket: bucket) }
-        .safeAreaInset(edge: .bottom, spacing: 0) { SelectionBar() }
         .searchable(text: $nav.browse.query, placement: .toolbar, prompt: "Name or path")
         .navigationTitle(lockedBucket != nil ? (bucket?.name ?? "Bucket") : "Browse")
         .navigationSubtitle(subtitle(groups))
@@ -102,6 +102,8 @@ struct BrowseView: View {
         }
     }
 
+    private var filterGrouping: BrowseFilter.Grouping { nav.browse.grouping }
+
     private func header(_ g: ItemGroup, grouped: Bool) -> some View {
         let isCollapsed = collapsed.contains(g.id)
         return HStack(spacing: 8) {
@@ -131,6 +133,15 @@ struct BrowseView: View {
             Text(Fmt.bytes(g.bytes)).font(.headline).monospacedDigit().foregroundStyle(.primary)
         }
         .contentShape(Rectangle())
+        .contextMenu {
+            if !g.notInUse.isEmpty { Button("Select not in use") { store.select(g.notInUse, true) } }
+            Button("Deselect all") { store.select(g.items, false) }
+            if let p = g.items.first?.project, filterGrouping == .project {
+                AskAgentItems(target: "project:\(p)")
+            } else if let b = g.items.first?.bucket {
+                AskAgentItems(target: "bucket:\(b)")
+            }
+        }
         .onTapGesture(count: 2) {
             if isCollapsed { collapsed.remove(g.id) } else { collapsed.insert(g.id) }
         }
@@ -165,6 +176,7 @@ struct BrowseView: View {
                 .fixedSize()
             } else if let bucket {
                 Text(bucket.description).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    .help(bucket.description)
             }
             if let g = nav.browse.group {
                 Button { nav.browse.group = nil } label: {
@@ -175,6 +187,10 @@ struct BrowseView: View {
                 .help("Show every group")
             }
             Spacer()
+            if let id = lockedBucket ?? nav.browse.bucket {
+                AskAgentButton(target: "bucket:\(id)", title: "Ask")
+                    .controlSize(.small)
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
@@ -268,30 +284,28 @@ struct BrowseView: View {
     }
 }
 
-/// Bottom bar for whatever is ticked, shared by Browse, Projects and Worktrees.
+/// Bottom bar for whatever is ticked, shared by every list in the window.
 struct SelectionBar: View {
     @Environment(Store.self) private var store
-    @State private var confirming = false
+    @Environment(Navigation.self) private var nav
 
     var body: some View {
-        let items = store.selection.isEmpty ? [] : (store.report?.items.filter { store.selection.contains($0.id) } ?? [])
+        let items = store.selectedItems
         if !items.isEmpty {
-            HStack {
+            HStack(spacing: 12) {
                 Text("\(items.count) selected").foregroundStyle(.secondary)
                 Button("Deselect all") { store.selection.removeAll() }
                     .buttonStyle(.link)
                 Spacer()
-                Button("Clean \(items.count) selected (\(Fmt.bytes(items.reduce(0) { $0 + $1.total_bytes })))…") { confirming = true }
+                Button("Clean \(items.count) selected (\(Fmt.bytes(items.reduce(0) { $0 + $1.total_bytes })))…") { nav.review(items: items) }
                     .buttonStyle(.borderedProminent)
                     .disabled(store.busy)
+                    .help("Review first (⌫)")
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .padding(.vertical, 8)
             .background(.bar)
             .overlay(alignment: .top) { Divider() }
-            .sheet(isPresented: $confirming) {
-                CleanConfirmView(planID: nil, free: nil, items: items)
-            }
         }
     }
 }

@@ -1,18 +1,20 @@
 import AppKit
+import ServiceManagement
 import SwiftUI
 
 struct SettingsView: View {
     @Environment(Store.self) private var store
+    @AppStorage("settingsTab") private var tab = "general"
 
     var body: some View {
-        TabView {
-            GeneralSettings().tabItem { Label("General", systemImage: "gearshape") }
-            SafetySettings().tabItem { Label("Safety & backups", systemImage: "checkmark.shield") }
-            AutomationSettings().tabItem { Label("Automation", systemImage: "clock.arrow.2.circlepath") }
-            BucketSettings().tabItem { Label("Buckets", systemImage: "square.stack.3d.up") }
-            RuleSettings().tabItem { Label("Rules", systemImage: "list.bullet.rectangle") }
-            AgentSettings().tabItem { Label("Agents", systemImage: "sparkles") }
-            ModSettings().tabItem { Label("Mods", systemImage: "puzzlepiece.extension") }
+        TabView(selection: $tab) {
+            GeneralSettings().tabItem { Label("General", systemImage: "gearshape") }.tag("general")
+            SafetySettings().tabItem { Label("Safety & backups", systemImage: "checkmark.shield") }.tag("safety")
+            AutomationSettings().tabItem { Label("Automation", systemImage: "clock.arrow.2.circlepath") }.tag("automation")
+            BucketSettings().tabItem { Label("Buckets", systemImage: "square.stack.3d.up") }.tag("buckets")
+            RuleSettings().tabItem { Label("Rules", systemImage: "list.bullet.rectangle") }.tag("rules")
+            AgentSettings().tabItem { Label("Agents", systemImage: "sparkles") }.tag("agents")
+            ModSettings().tabItem { Label("Mods", systemImage: "puzzlepiece.extension") }.tag("mods")
         }
         .task { await store.loadSettings() }
     }
@@ -21,6 +23,7 @@ struct SettingsView: View {
 struct GeneralSettings: View {
     @Environment(Store.self) private var store
     @Environment(Updater.self) private var updater
+    @AppStorage("showInMenuBar") private var showInMenuBar = true
 
     var body: some View {
         Form {
@@ -53,6 +56,16 @@ struct GeneralSettings: View {
                     }
                 }
                 if let s = updater.status { Text(s).font(.caption).foregroundStyle(.secondary) }
+            }
+            Section("App") {
+                Toggle("Show in menu bar", isOn: $showInMenuBar)
+                    .onChange(of: showInMenuBar) { _, _ in AppDelegate.updateActivationPolicy(windowOpen: true) }
+                Toggle("Open at login", isOn: Binding(
+                    get: { SMAppService.mainApp.status == .enabled },
+                    set: { on in try? on ? SMAppService.mainApp.register() : SMAppService.mainApp.unregister() }
+                ))
+                .disabled(!Onboarding.isBundled)
+                Button("Run setup again…") { AppDelegate.shared?.show("onboarding", title: "Set Up Poo") }
             }
             Section("Data") {
                 Button("Rescan now") { Task { await store.scan() } }
