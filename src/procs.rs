@@ -9,16 +9,22 @@ pub struct Proc {
     pub cwd: PathBuf,
 }
 
-/// Build tools whose working directory marks a project as hot.
+/// Build tools: a project where one of these runs is hot, and cleaning it would break a build.
 pub const BUILD_TOOLS: &[&str] = &[
-    "xcodebuild", "XCBBuildService", "swift-build", "swift-frontend", "swift-test", "swift",
-    "cargo", "rustc", "rust-analyzer", "clippy-driver", "node", "bun", "deno", "npm", "pnpm",
-    "yarn", "tsc", "vite", "next-server", "esbuild", "webpack", "turbo", "nx", "python",
-    "python3", "pip", "uv", "poetry", "pytest", "gradle", "gradlew", "java", "kotlin-daemon",
-    "mvn", "go", "gopls", "make", "ninja", "cmake", "clang", "clang++", "ld", "ld64",
-    "bazel", "buck2", "zig", "dotnet", "msbuild", "flutter", "dart", "pod", "carthage",
-    "mix", "beam.smp", "elixir", "ruby", "bundle", "rake", "composer", "php", "docker-buildx",
-    "claude", "codex", "opencode", "cursor-agent", "gemini", "aider",
+    "xcodebuild", "swift-build", "swift-frontend", "swift-test", "swift-driver", "swiftc",
+    "cargo", "rustc", "clippy-driver", "cargo-nextest", "clang", "clang++", "cc", "c++", "ld",
+    "ld64", "lld", "gradlew", "mvn", "make", "gmake", "ninja", "cmake", "bazel", "buck2", "zig",
+    "tsc", "esbuild", "webpack", "rollup", "vite", "turbo", "nx", "next-server", "pod",
+    "carthage", "flutter", "dart", "dotnet", "msbuild", "mix", "pip", "uv", "poetry", "go",
+    "xcrun", "ibtool", "actool", "codesign", "lipo", "docker-buildx", "pnpm", "yarn", "npm",
+];
+
+/// Agents, editors, shells and dev servers: a project where one runs is in use (warm), but
+/// nothing is being built, so a forced clean only costs a rebuild.
+pub const PRESENCE: &[&str] = &[
+    "claude", "codex", "opencode", "cursor-agent", "gemini", "aider", "amp", "goose", "copilot",
+    "node", "bun", "deno", "python", "python3", "ruby", "java", "zsh", "bash", "fish", "sh", "nu",
+    "nvim", "vim", "emacs", "hx", "tmux", "rust-analyzer", "sourcekit-lsp", "gopls",
 ];
 
 #[cfg(target_os = "macos")]
@@ -82,10 +88,26 @@ pub fn is_build_tool(name: &str, extra: &[String]) -> bool {
     BUILD_TOOLS.iter().any(|t| *t == name) || extra.iter().any(|t| t == name)
 }
 
+pub fn is_presence(name: &str) -> bool {
+    PRESENCE.iter().any(|t| *t == name)
+}
+
 /// Build processes whose working directory is inside `path`.
 pub fn builds_inside<'a>(procs: &'a [Proc], path: &std::path::Path, extra: &[String]) -> Vec<&'a Proc> {
     procs
         .iter()
         .filter(|p| p.cwd.starts_with(path) && is_build_tool(&p.name, extra))
         .collect()
+}
+
+/// Names of agents, editors and shells working inside `path`.
+pub fn presence_inside(procs: &[Proc], path: &std::path::Path) -> Vec<String> {
+    let mut v: Vec<String> = procs
+        .iter()
+        .filter(|p| p.cwd.starts_with(path) && is_presence(&p.name))
+        .map(|p| p.name.clone())
+        .collect();
+    v.sort();
+    v.dedup();
+    v
 }

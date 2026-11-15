@@ -20,6 +20,7 @@ pub const PROVIDERS: &[(&str, &str)] = &[
     ("docker", "Docker build cache, images, containers and volumes from docker system df"),
     ("homebrew", "Old Homebrew versions and downloads that brew cleanup would remove"),
     ("versions", "Old versions in a versions folder, keeping the active one (symlink target) and the newest N"),
+    ("app-leftovers", "Caches, logs and support folders of apps that are no longer installed"),
     ("exec", "Any executable in a mod that prints {\"items\": [...]} as JSON"),
 ];
 
@@ -85,6 +86,7 @@ pub struct Rule {
     pub description: String,
     pub recommend: Option<String>,
     pub tags: Vec<String>,
+    pub stacks: Vec<String>,
     pub enabled: bool,
     pub names: NameSet,
     pub parent_any: NameSet,
@@ -112,6 +114,7 @@ pub struct Rule {
     pub tier: Option<Tier>,
     pub rebuild: Option<String>,
     pub warm_days: u32,
+    pub idle_days: u32,
     pub action: ActionKind,
     pub command: Option<Vec<String>>,
     pub source: String,
@@ -272,14 +275,29 @@ fn parse_file(label: &str, text: &str, errors: &mut Vec<String>) -> Option<ModFi
 fn load_core(errors: &mut Vec<String>) -> LoadedMod {
     let mut files = vec![];
     let mut manifest = ModFile::default();
-    let mut entries: Vec<_> = CORE.files().collect();
-    entries.sort_by_key(|f| f.path().to_path_buf());
-    for f in entries {
-        let name = f.path().to_string_lossy().to_string();
+    // POO_CORE_DIR loads the core mod from disk, for developing rules without rebuilding.
+    let mut sources: Vec<(String, String)> = match std::env::var_os("POO_CORE_DIR") {
+        Some(dir) => std::fs::read_dir(&dir)
+            .map(|rd| {
+                rd.flatten()
+                    .filter_map(|e| {
+                        let n = e.file_name().to_string_lossy().to_string();
+                        std::fs::read_to_string(e.path()).ok().map(|t| (n, t))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        None => CORE
+            .files()
+            .map(|f| (f.path().to_string_lossy().to_string(), f.contents_utf8().unwrap_or_default().to_string()))
+            .collect(),
+    };
+    sources.sort();
+    for (name, text) in sources {
         if !name.ends_with(".toml") {
             continue;
         }
-        let text = f.contents_utf8().unwrap_or_default();
+        let text = text.as_str();
         if let Some(parsed) = parse_file(&format!("core/{}", name), text, errors) {
             if name == "mod.toml" {
                 manifest = parsed.clone();
@@ -384,10 +402,10 @@ macro_rules! merge_opt {
 
 pub fn merge_rule(base: &mut RuleSpec, o: &RuleSpec) {
     merge_opt!(
-        base, o, name, bucket, group, kind, description, recommend, tags, enabled, names, parent_any,
+        base, o, name, bucket, group, kind, description, recommend, tags, stacks, enabled, names, parent_any,
         parent_all, parent_none, children_any, children_all, children_none, path_contains,
         path_excludes, ignored, paths, each, files, extensions, exclude, min_age_days, min_bytes, system, contents, running_apps,
-        provider, params, cost, tier, rebuild, warm_days, action, command
+        provider, params, cost, tier, rebuild, warm_days, idle_days, action, command
     );
 }
 
@@ -655,6 +673,7 @@ fn compile_rule(s: &RuleSpec, src: &str, dir: Option<PathBuf>, buckets: &[Bucket
         description: s.description.clone().unwrap_or_default(),
         recommend: s.recommend.clone(),
         tags: s.tags.clone().unwrap_or_default(),
+        stacks: s.stacks.clone().unwrap_or_default(),
         enabled: s.enabled.unwrap_or(true),
         names: ns(&s.names)?,
         parent_any: ns(&s.parent_any)?,
@@ -682,6 +701,7 @@ fn compile_rule(s: &RuleSpec, src: &str, dir: Option<PathBuf>, buckets: &[Bucket
         tier: s.tier,
         rebuild: s.rebuild.clone(),
         warm_days: s.warm_days.unwrap_or(0),
+        idle_days: s.idle_days.unwrap_or(0),
         action,
         command: s.command.clone(),
         source: src.to_string(),

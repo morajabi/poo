@@ -12,6 +12,7 @@ fn item(path: &str, kind: ActionKind) -> Item {
         rule: "rust.target".into(),
         bucket: "build".into(),
         group: "Rust".into(),
+        tags: vec![],
         bytes: 1,
         total_bytes: 1,
         files: 1,
@@ -24,6 +25,7 @@ fn item(path: &str, kind: ActionKind) -> Item {
         repo: None,
         agent: None,
         action: Action { kind, command: None },
+        risks: vec![],
         children: vec![],
         meta: BTreeMap::new(),
     }
@@ -83,12 +85,14 @@ fn safety_floor_refuses_dangerous_paths() {
         format!("{}/.ssh/keys", h),
         "/usr/local/lib".to_string(),
         format!("{}/dev/../.ssh", h),
+        "/System/Library".to_string(),
+        "/usr".to_string(),
     ] {
-        assert!(floor_check(&item(&bad, ActionKind::Delete), Some(RuleKind::Artifact), false).is_err(), "allowed {}", bad);
+        assert!(floor_check(&item(&bad, ActionKind::Delete), Some(RuleKind::Artifact), false, RiskLevel::Danger).is_err(), "allowed {}", bad);
     }
     // Virtual items only through commands.
-    assert!(floor_check(&item("docker://images", ActionKind::Delete), None, false).is_err());
-    assert!(floor_check(&item("docker://images", ActionKind::Command), None, false).is_ok());
+    assert!(floor_check(&item("docker://images", ActionKind::Delete), None, false, RiskLevel::Standard).is_err());
+    assert!(floor_check(&item("docker://images", ActionKind::Command), None, false, RiskLevel::Standard).is_ok());
 }
 
 #[test]
@@ -98,8 +102,55 @@ fn safety_floor_refuses_symlinks_and_repos() {
     std::fs::create_dir_all(base.join("proj/target/.git")).unwrap();
     std::os::unix::fs::symlink(base.join("proj"), base.join("link")).unwrap();
     let t = base.join("proj/target").to_string_lossy().to_string();
-    assert!(floor_check(&item(&t, ActionKind::Delete), Some(RuleKind::Artifact), false).unwrap_err().contains(".git"));
+    assert!(floor_check(&item(&t, ActionKind::Delete), Some(RuleKind::Artifact), false, RiskLevel::Force).unwrap_err().contains(".git"));
     let l = base.join("link").to_string_lossy().to_string();
-    assert!(floor_check(&item(&l, ActionKind::Delete), Some(RuleKind::Path), false).unwrap_err().contains("symlink"));
+    assert!(floor_check(&item(&l, ActionKind::Delete), Some(RuleKind::Path), false, RiskLevel::Danger).unwrap_err().contains("symlink"));
     std::fs::remove_dir_all(&base).unwrap();
+}
+
+#[test]
+fn schedule_parsing() {
+    use poo::schedule::{parse_amount, parse_every};
+    assert_eq!(parse_every("30m").unwrap(), 1800);
+    assert_eq!(parse_every("1d").unwrap(), 86400);
+    assert!(parse_every("5m").is_err(), "faster than the 15 minute tick");
+    assert!(parse_every("soon").is_err());
+    assert_eq!(parse_amount("50G", 0).unwrap(), 50_000_000_000);
+    assert_eq!(parse_amount("10%", 1_000).unwrap(), 100);
+    let cat = catalog::load(&Config::default());
+    for (id, _, s) in poo::schedule::presets() {
+        poo::schedule::validate(&s, &cat).unwrap_or_else(|e| panic!("preset {} invalid: {}", id, e));
+    }
+}
+
+#[test]
+fn risks_gate_cleaning_modes() {
+    use poo::clean::{admit, CleanOptions};
+    let cat = catalog::load(&Config::default());
+    let base = std::env::temp_dir().join(format!("poo-risk-{}", std::process::id()));
+    std::fs::create_dir_all(base.join("app/target/debug")).unwrap();
+    std::fs::write(base.join("app/Cargo.toml"), "[package]\n").unwrap();
+    std::fs::write(base.join("app/target/.rustc_info.json"), "{}").unwrap();
+    let mut it = item(&base.join("app/target").to_string_lossy(), ActionKind::Delete);
+    let opts = |mode| CleanOptions { mode, max_tier: Some(Tier::Warm), ..Default::default() };
+    assert!(admit(&it, &cat, &opts(RiskLevel::Standard), &[]).is_ok());
+    it.risks.push(Risk::new("recent", RiskLevel::Force, "used in the last hour"));
+    assert!(admit(&it, &cat, &opts(RiskLevel::Standard), &[]).unwrap_err().contains("--force"));
+    let warnings = admit(&it, &cat, &opts(RiskLevel::Force), &[]).unwrap();
+    assert!(warnings.iter().any(|w| w.contains("recent")));
+    it.risks.push(Risk::new("data", RiskLevel::Danger, "real data"));
+    assert!(admit(&it, &cat, &opts(RiskLevel::Force), &[]).unwrap_err().contains("--danger"));
+    assert!(admit(&it, &cat, &opts(RiskLevel::Danger), &[]).is_ok());
+    std::fs::remove_dir_all(&base).unwrap();
+}
+
+#[test]
+fn plan_filters_by_bucket_and_tag() {
+    use poo::plan::Filter;
+    let mut it = item("/x/app/target", ActionKind::Delete);
+    it.tags = vec!["rust".into(), "build-output".into()];
+    assert!(Filter { buckets: vec!["build".into()], ..Default::default() }.matches(&it));
+    assert!(!Filter { exclude_buckets: vec!["build".into()], ..Default::default() }.matches(&it));
+    assert!(Filter { tags: vec!["rust".into()], ..Default::default() }.matches(&it));
+    assert!(!Filter { exclude_tags: vec!["build-output".into()], ..Default::default() }.matches(&it));
 }

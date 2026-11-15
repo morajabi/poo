@@ -30,6 +30,7 @@ impl Style {
         let code = match t {
             Tier::Junk => "33",
             Tier::Cold => "36",
+            Tier::Idle => "96",
             Tier::Warm => "35",
             Tier::Hot => "31",
             Tier::Review => "34",
@@ -75,16 +76,19 @@ pub fn overview(r: &Report) {
         used_pct,
         st.dim(&format!("scanned {} in {:.1}s", age(r.scanned_at), r.duration_ms as f64 / 1000.0))
     );
+    if !r.detected.is_empty() {
+        println!("{}", st.dim(&format!("found on this Mac: {}", r.detected.join(" · "))));
+    }
     println!();
     let max = r.buckets.iter().map(|b| b.bytes).max().unwrap_or(1).max(1);
     for b in r.buckets.iter().filter(|b| !b.hidden && b.count > 0) {
-        let cold: u64 = ["junk", "cold"].iter().filter_map(|t| b.tiers.get(*t)).sum();
+        let cold: u64 = ["junk", "cold", "idle"].iter().filter_map(|t| b.tiers.get(*t)).sum();
         println!(
             "  {} {:>9}  {}  {}",
             trunc(&b.name, 24),
             bytes(b.bytes),
             st.hex(&b.color, &bar(b.bytes as f64 / max as f64, 22)),
-            st.dim(&format!("{} items, {} stale", b.count, bytes(cold)))
+            st.dim(&format!("{} items, {} not in use", b.count, bytes(cold)))
         );
     }
     let hidden: u64 = r.buckets.iter().filter(|b| b.hidden).map(|b| b.bytes).sum();

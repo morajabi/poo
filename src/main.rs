@@ -1,6 +1,6 @@
 use clap::{Args, Parser, Subcommand};
 use poo::clean::{self, CleanOptions};
-use poo::model::{ProjectPolicy, Tier};
+use poo::model::{ProjectPolicy, RiskLevel, Tier};
 use poo::ops::{self, BucketEdit, Ctx};
 use poo::plan::Filter;
 use poo::render;
@@ -102,10 +102,15 @@ enum Cmd {
         /// Move to the Trash instead of deleting.
         #[arg(long)]
         trash: bool,
-        /// Allow hot and review items you named explicitly.
+        /// Also clean items with soft risks: used recently, an agent working there, dirty
+        /// worktrees (stashed first), review items. Prints each warning.
         #[arg(long)]
         force: bool,
-        /// Highest tier to clean (default warm).
+        /// Also hard risks: running builds, data, protected items, system paths, detached
+        /// commits (saved to a branch first). Asks you to type "danger".
+        #[arg(long)]
+        danger: bool,
+        /// Highest tier to clean in standard mode (default warm).
         #[arg(long)]
         max_tier: Option<String>,
     },
@@ -116,6 +121,9 @@ enum Cmd {
         dry_run: bool,
         #[arg(long, short)]
         yes: bool,
+        /// Let the emergency plan include soft-risk items too.
+        #[arg(long)]
+        force: bool,
     },
     /// Projects with status and policy, or set a policy.
     Projects {
@@ -185,6 +193,11 @@ enum Cmd {
         #[arg(long)]
         force: bool,
     },
+    /// Routine cleanups that run on their own (launchd).
+    Schedule {
+        #[command(subcommand)]
+        cmd: Option<ScheduleCmd>,
+    },
     /// Check poo's setup and environment.
     Doctor,
     /// Empty leftovers from interrupted deletes.
@@ -247,15 +260,43 @@ enum BucketsCmd {
     },
 }
 
+#[derive(Args, Clone, Default)]
+struct RuleSelect {
+    /// Rule id (or use --tag, --group, --bucket, --stack to select many).
+    id: Option<String>,
+    #[arg(long)]
+    tag: Option<String>,
+    #[arg(long)]
+    group: Option<String>,
+    #[arg(long)]
+    bucket: Option<String>,
+    #[arg(long)]
+    stack: Option<String>,
+}
+
 #[derive(Subcommand)]
 enum RulesCmd {
     Ls {
         #[arg(long)]
         bucket: Option<String>,
+        #[arg(long)]
+        tag: Option<String>,
+        #[arg(long)]
+        stack: Option<String>,
+        /// Only rules that matched something in the last scan.
+        #[arg(long)]
+        hits: bool,
     },
     Show { id: String },
-    Disable { id: String },
-    Enable { id: String },
+    /// Disable one rule, or every rule with a tag, group, bucket or stack.
+    Disable {
+        #[command(flatten)]
+        sel: RuleSelect,
+    },
+    Enable {
+        #[command(flatten)]
+        sel: RuleSelect,
+    },
     /// Override fields: poo rules set rust.target warm_days=7 bucket=work
     Set { id: String, values: Vec<String> },
     /// Drop your overrides for a rule.
@@ -282,6 +323,68 @@ enum ConfigCmd {
     Path,
     Get { key: String },
     Set { key: String, value: String },
+}
+
+#[derive(Subcommand)]
+enum ScheduleCmd {
+    Ls,
+    /// Add a schedule. With only an id that names a preset (nightly, quick, guard, weekly), uses it.
+    Add {
+        id: String,
+        /// Start from a preset: nightly, quick, guard, weekly.
+        #[arg(long)]
+        preset: Option<String>,
+        #[arg(long)]
+        plan: Option<String>,
+        /// 30m, 6h, 1d, 7d
+        #[arg(long)]
+        every: Option<String>,
+        /// Local time for daily runs, e.g. 03:30
+        #[arg(long)]
+        at: Option<String>,
+        /// Only run when free space is below this (50G or 10%).
+        #[arg(long)]
+        when_free_below: Option<String>,
+        /// Free least-regret items until this much is free (80G or 20%).
+        #[arg(long)]
+        target_free: Option<String>,
+        /// Clean at most this much per run.
+        #[arg(long)]
+        max: Option<String>,
+        #[arg(long)]
+        bucket: Vec<String>,
+        #[arg(long)]
+        exclude_bucket: Vec<String>,
+        #[arg(long)]
+        tag: Vec<String>,
+        #[arg(long)]
+        exclude_tag: Vec<String>,
+        #[arg(long)]
+        no_notify: bool,
+    },
+    Rm { id: String },
+    Enable { id: String },
+    Disable { id: String },
+    /// Run a schedule now.
+    Run {
+        id: String,
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// List presets.
+    Presets,
+    /// Called by launchd every 15 minutes.
+    #[command(hide = true)]
+    Tick,
+    /// Reinstall the launchd agent.
+    Install,
+    /// Remove the launchd agent (schedules stay in config).
+    Uninstall,
+    /// Recent scheduler activity.
+    Log {
+        #[arg(long, short = 'n', default_value_t = 30)]
+        limit: usize,
+    },
 }
 
 #[derive(Subcommand)]
@@ -351,6 +454,7 @@ fn filter(f: &FilterArgs) -> Result<Filter, CliError> {
             None => 0,
         },
         query: f.query.clone(),
+        ..Default::default()
     })
 }
 
@@ -407,7 +511,8 @@ fn save(cfg: &poo::config::Config, out: &Out, what: &str) -> R {
     Ok(())
 }
 
-fn run_clean(ctx: &Ctx, out: &Out, mut report: poo::model::Report, items: Vec<poo::model::Item>, dry: bool, yes: bool, trash: bool, force: bool, max_tier: Option<Tier>) -> R {
+#[allow(clippy::too_many_arguments)]
+fn run_clean(ctx: &Ctx, out: &Out, mut report: poo::model::Report, items: Vec<poo::model::Item>, dry: bool, yes: bool, trash: bool, mode: RiskLevel, max_tier: Option<Tier>) -> R {
     if items.is_empty() {
         if out.json {
             emit(out, &json!({"freed_bytes": 0, "results": []}));
@@ -417,6 +522,10 @@ fn run_clean(ctx: &Ctx, out: &Out, mut report: poo::model::Report, items: Vec<po
         return Ok(());
     }
     let total: u64 = items.iter().map(|i| i.total_bytes).sum();
+    let opts = CleanOptions { dry_run: dry, trash, max_tier: Some(max_tier.unwrap_or(Tier::Warm)), mode, actor: "cli".into() };
+    let _lock = if dry { None } else {
+        Some(poo::schedule::RunLock::try_acquire().ok_or_else(|| CliError::new("busy", 9, "another poo clean or scheduled run is in progress"))?)
+    };
     if !dry && !yes {
         if !is_tty(0) || out.json {
             return Err(CliError::new("needs_approval", 5, format!("cleaning {} items ({}) needs confirmation", items.len(), bytes(total)))
@@ -424,12 +533,37 @@ fn run_clean(ctx: &Ctx, out: &Out, mut report: poo::model::Report, items: Vec<po
         }
         let refs: Vec<&poo::model::Item> = items.iter().collect();
         render::items(&refs, true);
-        if !confirm(&format!("Clean {} items, {}?", items.len(), bytes(total))) {
+        // Show every risk this mode accepts before asking.
+        let procs_list = poo::procs::list();
+        let st = render::Style::new();
+        let mut risky = 0;
+        for i in &items {
+            match clean::admit(i, &ctx.cat, &opts, &procs_list) {
+                Ok(w) if !w.is_empty() => {
+                    risky += 1;
+                    eprintln!("{} {}", st.bold("⚠"), i.name);
+                    for x in w {
+                        eprintln!("    {}", x);
+                    }
+                }
+                Err(e) => eprintln!("{} {}  {}", st.dim("–"), i.name, st.dim(&format!("skipped: {}", e))),
+                _ => {}
+            }
+        }
+        if mode == RiskLevel::Danger {
+            eprint!("Danger mode: {} item(s) carry warnings above. Type \"danger\" to clean {}: ", risky, bytes(total));
+            let _ = std::io::stderr().flush();
+            let mut s = String::new();
+            let _ = std::io::stdin().read_line(&mut s);
+            if s.trim() != "danger" {
+                println!("Cancelled.");
+                return Ok(());
+            }
+        } else if !confirm(&format!("Clean {} items, {}{}?", items.len(), bytes(total), if risky > 0 { format!(" ({} with warnings)", risky) } else { String::new() })) {
             println!("Cancelled.");
             return Ok(());
         }
     }
-    let opts = CleanOptions { dry_run: dry, trash, max_tier: Some(max_tier.unwrap_or(Tier::Warm)), force, actor: "cli".into() };
     let res = clean::clean(&items, &ctx.cat, &opts);
     if !dry {
         ops::forget_cleaned(ctx, &mut report, &res);
@@ -452,6 +586,12 @@ fn run_clean(ctx: &Ctx, out: &Out, mut report: poo::model::Report, items: Vec<po
                 r.name,
                 r.reason.as_ref().map(|x| st.dim(&format!("  ({})", x))).unwrap_or_default()
             );
+            for n in &r.notes {
+                println!("            {}", st.dim(n));
+            }
+        }
+        if let Some(n) = &res.snapshot_note {
+            println!("\nnote: {}", n);
         }
         if dry {
             println!("\nDry run: would free about {} ({} items, {} skipped).", bytes(res.freed_bytes), res.cleaned, res.skipped);
@@ -560,7 +700,7 @@ fn real_main(cli: Cli) -> R {
                 render::plan(&p);
             }
         }
-        Cmd::Clean { ids, plan, free, dry_run, yes, trash, force, max_tier } => {
+        Cmd::Clean { ids, plan, free, dry_run, yes, trash, force, danger, max_tier } => {
             let r = ops::report(&ctx, false, scan_opts(&out, false))?;
             clear_progress(&out);
             let target = free.as_ref().and_then(|s| parse_bytes(s));
@@ -572,9 +712,10 @@ fn real_main(cli: Cli) -> R {
                 return Err(CliError::new("usage", 2, "pass item ids or --plan").hint("poo plan stale shows what --plan stale would clean"));
             };
             let mt = max_tier.as_deref().and_then(Tier::parse);
-            run_clean(&ctx, &out, r, items, dry_run, yes, trash, force, mt)?;
+            let mode = if danger { RiskLevel::Danger } else if force { RiskLevel::Force } else { RiskLevel::Standard };
+            run_clean(&ctx, &out, r, items, dry_run, yes, trash, mode, mt)?;
         }
-        Cmd::Free { size, dry_run, yes } => {
+        Cmd::Free { size, dry_run, yes, force } => {
             let target = parse_bytes(&size).ok_or_else(|| CliError::new("usage", 2, format!("bad size `{}`", size)))?;
             let r = ops::report(&ctx, false, scan_opts(&out, false))?;
             clear_progress(&out);
@@ -582,7 +723,8 @@ fn real_main(cli: Cli) -> R {
             if p.bytes < target && !out.json {
                 eprintln!("Only {} can be freed without touching hot, review or protected items.", bytes(p.bytes));
             }
-            run_clean(&ctx, &out, r, p.items, dry_run, yes, false, false, None)?;
+            let mode = if force { RiskLevel::Force } else { RiskLevel::Standard };
+            run_clean(&ctx, &out, r, p.items, dry_run, yes, false, mode, None)?;
         }
         Cmd::Projects { cmd } => match cmd.unwrap_or(ProjectsCmd::Ls) {
             ProjectsCmd::Ls => {
@@ -689,21 +831,44 @@ fn real_main(cli: Cli) -> R {
                 save(&cfg, &out, &format!("removed bucket {}", id))?;
             }
         },
-        Cmd::Rules { cmd } => match cmd.unwrap_or(RulesCmd::Ls { bucket: None }) {
-            RulesCmd::Ls { bucket } => {
-                let rules: Vec<_> = ctx.cat.rules.iter().filter(|r| bucket.as_ref().map_or(true, |b| &r.bucket == b)).collect();
+        Cmd::Rules { cmd } => match cmd.unwrap_or(RulesCmd::Ls { bucket: None, tag: None, stack: None, hits: false }) {
+            RulesCmd::Ls { bucket, tag, stack, hits } => {
+                let report = poo::scan::load_report();
+                let hit = |id: &str| report.as_ref().and_then(|r| r.rule_hits.get(id).copied());
+                let keep = |r: &&poo::catalog::Rule| {
+                    bucket.as_ref().map_or(true, |b| &r.bucket == b)
+                        && tag.as_ref().map_or(true, |t| r.tags.contains(t))
+                        && stack.as_ref().map_or(true, |s| r.stacks.contains(s))
+                        && (!hits || hit(&r.id).is_some())
+                };
+                let rules: Vec<_> = ctx.cat.rules.iter().filter(keep).collect();
                 if out.json {
                     let all = ops::catalog_json(&ctx.cat);
-                    let v: Vec<&Value> = all["rules"].as_array().unwrap().iter().filter(|r| bucket.as_ref().map_or(true, |b| r["bucket"] == b.as_str())).collect();
+                    let ids: std::collections::HashSet<&str> = rules.iter().map(|r| r.id.as_str()).collect();
+                    let v: Vec<Value> = all["rules"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .filter(|r| ids.contains(r["id"].as_str().unwrap_or("")))
+                        .map(|r| {
+                            let mut r = r.clone();
+                            if let Some((n, b)) = hit(r["id"].as_str().unwrap_or("")) {
+                                r["hits"] = json!({"items": n, "bytes": b});
+                            }
+                            r
+                        })
+                        .collect();
                     emit(&out, &json!({"rules": v}));
                 } else {
                     let st = render::Style::new();
                     for r in rules {
+                        let h = hit(&r.id).map(|(n, b)| format!("{} in {}", bytes(b), n)).unwrap_or_default();
                         println!(
-                            "{:<30} {:<10} {:<11} {}{}",
+                            "{:<32} {:<10} {:<10} {:>14}  {}{}",
                             r.id,
                             r.bucket,
                             r.cost.as_str(),
+                            h,
                             r.name,
                             if r.enabled { String::new() } else { st.dim(" (off)") }
                         );
@@ -719,21 +884,18 @@ fn real_main(cli: Cli) -> R {
                     println!("{}", serde_json::to_string_pretty(&rule).unwrap_or_default());
                 }
             }
-            RulesCmd::Disable { id } | RulesCmd::Enable { id } if ctx.cat.rule(&id).is_none() => {
-                return Err(CliError::new("not_found", 3, format!("no rule `{}`", id)));
+            RulesCmd::Disable { sel } | RulesCmd::Enable { sel } if select_rules(&ctx, &sel).is_empty() => {
+                return Err(CliError::new("not_found", 3, "no rule matches that selection").hint("poo rules ls --tag <tag> shows what a tag selects"));
             }
-            RulesCmd::Disable { id } => {
-                let mut cfg = ctx.cfg.clone();
-                if !cfg.disabled_rules.contains(&id) {
-                    cfg.disabled_rules.push(id.clone());
-                }
-                save(&cfg, &out, &format!("disabled {}", id))?;
+            RulesCmd::Disable { sel } => {
+                let ids = select_rules(&ctx, &sel);
+                let cfg = ops::toggle_rules(&ctx.cfg, &ids, false);
+                save(&cfg, &out, &format!("disabled {} rule(s): {}", ids.len(), ids.join(", ")))?;
             }
-            RulesCmd::Enable { id } => {
-                let mut cfg = ctx.cfg.clone();
-                cfg.disabled_rules.retain(|r| r != &id);
-                cfg.rule_overrides.entry(id.clone()).or_default().enabled = Some(true);
-                save(&cfg, &out, &format!("enabled {}", id))?;
+            RulesCmd::Enable { sel } => {
+                let ids = select_rules(&ctx, &sel);
+                let cfg = ops::toggle_rules(&ctx.cfg, &ids, true);
+                save(&cfg, &out, &format!("enabled {} rule(s): {}", ids.len(), ids.join(", ")))?;
             }
             RulesCmd::Set { id, values } => {
                 let cfg = ops::set_rule(&ctx, &id, &values)?;
@@ -963,6 +1125,7 @@ fn real_main(cli: Cli) -> R {
                 }
             }
         }
+        Cmd::Schedule { cmd } => schedule_cmd(&mut ctx, &out, cmd.unwrap_or(ScheduleCmd::Ls))?,
         Cmd::Doctor => {
             let (roots, detected) = ctx.cfg.effective_roots();
             let st = poo::agent::status();
@@ -998,6 +1161,174 @@ fn real_main(cli: Cli) -> R {
         }
     }
     Ok(())
+}
+
+fn schedule_cmd(ctx: &mut Ctx, out: &Out, cmd: ScheduleCmd) -> R {
+    use poo::schedule as sch;
+    let save_sync = |cfg: &poo::config::Config, what: String| -> R {
+        cfg.save()?;
+        let note = sch::sync_agent(cfg).map_err(|e| CliError::new("schedule", 1, format!("{:#}", e)))?;
+        if out.json {
+            emit(out, &json!({"ok": true, "changed": what, "agent": note}));
+        } else {
+            println!("{}", what);
+            if let Some(n) = note {
+                println!("{}", n);
+            }
+        }
+        Ok(())
+    };
+    match cmd {
+        ScheduleCmd::Ls => {
+            let state = sch::load_state();
+            let list: Vec<Value> = ctx
+                .cfg
+                .schedule
+                .iter()
+                .map(|s| {
+                    let last = state.last_run.get(&s.id);
+                    json!({"schedule": s, "last_run": last, "next_run": s.enabled.then(|| sch::next_run(s, last.map(|l| l.at)))})
+                })
+                .collect();
+            if out.json {
+                emit(out, &json!({"schedules": list, "agent_installed": sch::agent_installed(), "agent_loaded": sch::agent_loaded(), "last_tick": state.last_tick}));
+            } else if ctx.cfg.schedule.is_empty() {
+                println!("No schedules. Try `poo schedule add nightly` (see `poo schedule presets`).");
+            } else {
+                for s in &ctx.cfg.schedule {
+                    let last = state.last_run.get(&s.id);
+                    println!(
+                        "{:<10} {:<9} plan {:<10} every {:<4}{}{}{}  {}",
+                        s.id,
+                        if s.enabled { "on" } else { "off" },
+                        s.plan,
+                        s.every,
+                        s.at.as_ref().map(|a| format!(" at {}", a)).unwrap_or_default(),
+                        s.when_free_below.as_ref().map(|a| format!(" when free < {}", a)).unwrap_or_default(),
+                        s.target_free.as_ref().map(|a| format!(" to {} free", a)).unwrap_or_default(),
+                        last.map(|l| format!("last: {} {} {}", poo::util::age(l.at), l.status, bytes(l.freed_bytes))).unwrap_or_else(|| "never ran".into())
+                    );
+                }
+                println!("
+scheduler agent: {}", if sch::agent_loaded() { "running" } else if sch::agent_installed() { "installed, not loaded" } else { "not installed" });
+            }
+            Ok(())
+        }
+        ScheduleCmd::Presets => {
+            let p: Vec<Value> = sch::presets().into_iter().map(|(id, d, s)| json!({"id": id, "description": d, "schedule": s})).collect();
+            if out.json {
+                emit(out, &json!({"presets": p}));
+            } else {
+                for (id, d, _) in sch::presets() {
+                    println!("{:<8} {}", id, d);
+                }
+            }
+            Ok(())
+        }
+        ScheduleCmd::Add { id, preset, plan, every, at, when_free_below, target_free, max, bucket, exclude_bucket, tag, exclude_tag, no_notify } => {
+            let base = preset
+                .as_deref()
+                .or(if plan.is_none() && every.is_none() { Some(id.as_str()) } else { None })
+                .and_then(|p| sch::presets().into_iter().find(|(pid, _, _)| *pid == p).map(|(_, _, s)| s));
+            let mut s = base.unwrap_or(poo::config::Schedule {
+                id: id.clone(),
+                plan: "stale".into(),
+                every: "1d".into(),
+                at: None,
+                when_free_below: None,
+                target_free: None,
+                max_bytes: None,
+                buckets: vec![],
+                exclude_buckets: vec![],
+                tags: vec![],
+                exclude_tags: vec![],
+                enabled: true,
+                notify: true,
+            });
+            s.id = id.clone();
+            if let Some(v) = plan { s.plan = v; }
+            if let Some(v) = every { s.every = v; }
+            if at.is_some() { s.at = at; }
+            if when_free_below.is_some() { s.when_free_below = when_free_below; }
+            if target_free.is_some() { s.target_free = target_free; }
+            if max.is_some() { s.max_bytes = max; }
+            if !bucket.is_empty() { s.buckets = bucket; }
+            if !exclude_bucket.is_empty() { s.exclude_buckets = exclude_bucket; }
+            if !tag.is_empty() { s.tags = tag; }
+            if !exclude_tag.is_empty() { s.exclude_tags = exclude_tag; }
+            if no_notify { s.notify = false; }
+            sch::validate(&s, &ctx.cat).map_err(|e| CliError::new("usage", 2, e.to_string()))?;
+            let mut cfg = ctx.cfg.clone();
+            cfg.schedule.retain(|x| x.id != s.id);
+            cfg.schedule.push(s.clone());
+            save_sync(&cfg, format!("schedule `{}`: plan {} every {}{}", s.id, s.plan, s.every, s.at.map(|a| format!(" at {}", a)).unwrap_or_default()))
+        }
+        ScheduleCmd::Rm { id } | ScheduleCmd::Enable { id } | ScheduleCmd::Disable { id } if !ctx.cfg.schedule.iter().any(|s| s.id == id) => {
+            Err(CliError::new("not_found", 3, format!("no schedule `{}`", id)))
+        }
+        ScheduleCmd::Rm { id } => {
+            let mut cfg = ctx.cfg.clone();
+            cfg.schedule.retain(|s| s.id != id);
+            save_sync(&cfg, format!("removed schedule `{}`", id))
+        }
+        ScheduleCmd::Enable { id } => {
+            let mut cfg = ctx.cfg.clone();
+            cfg.schedule.iter_mut().filter(|s| s.id == id).for_each(|s| s.enabled = true);
+            save_sync(&cfg, format!("enabled schedule `{}`", id))
+        }
+        ScheduleCmd::Disable { id } => {
+            let mut cfg = ctx.cfg.clone();
+            cfg.schedule.iter_mut().filter(|s| s.id == id).for_each(|s| s.enabled = false);
+            save_sync(&cfg, format!("disabled schedule `{}`", id))
+        }
+        ScheduleCmd::Run { id, dry_run } => {
+            let s = ctx.cfg.schedule.iter().find(|s| s.id == id).cloned().ok_or_else(|| CliError::new("not_found", 3, format!("no schedule `{}`", id)))?;
+            let rec = sch::run(ctx, &s, dry_run)?;
+            if out.json {
+                emit(out, &serde_json::to_value(&rec).unwrap_or_default());
+            } else {
+                println!("{}: {} {} ({} cleaned, {} skipped, {} failed). {} free.", id, rec.status, bytes(rec.freed_bytes), rec.cleaned, rec.skipped, rec.failed, bytes(rec.free_after));
+                if !rec.message.is_empty() {
+                    println!("{}", rec.message);
+                }
+            }
+            Ok(())
+        }
+        ScheduleCmd::Tick => {
+            let done = sch::tick()?;
+            if out.json {
+                emit(out, &json!({"ran": done.iter().map(|(id, r)| json!({"id": id, "record": r})).collect::<Vec<_>>()}));
+            }
+            Ok(())
+        }
+        ScheduleCmd::Install => {
+            let p = sch::install_agent()?;
+            save_sync(&ctx.cfg, format!("installed {}", tilde(&p)))
+        }
+        ScheduleCmd::Uninstall => {
+            sch::uninstall_agent()?;
+            if !out.json {
+                println!("scheduler agent removed; schedules stay in config.toml");
+            }
+            Ok(())
+        }
+        ScheduleCmd::Log { limit } => {
+            let text = std::fs::read_to_string(poo::config::state_dir().join("scheduler.log")).unwrap_or_default();
+            let lines: Vec<&str> = text.lines().rev().take(limit).collect();
+            if out.json {
+                emit(out, &json!({"log": lines}));
+            } else {
+                for l in lines.into_iter().rev() {
+                    println!("{}", l);
+                }
+            }
+            Ok(())
+        }
+    }
+}
+
+fn select_rules(ctx: &Ctx, sel: &RuleSelect) -> Vec<String> {
+    ops::select_rules(&ctx.cat, sel.id.as_deref(), sel.tag.as_deref(), sel.group.as_deref(), sel.bucket.as_deref(), sel.stack.as_deref())
 }
 
 fn human_setup(ctx: &mut Ctx) -> R {

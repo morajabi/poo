@@ -3,13 +3,14 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-pub const SCHEMA: u32 = 1;
+pub const SCHEMA: u32 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Tier {
     Junk,
     Cold,
+    Idle,
     Warm,
     Hot,
     Review,
@@ -17,13 +18,14 @@ pub enum Tier {
 }
 
 impl Tier {
-    pub fn all() -> [Tier; 6] {
-        [Tier::Junk, Tier::Cold, Tier::Warm, Tier::Hot, Tier::Review, Tier::Protected]
+    pub fn all() -> [Tier; 7] {
+        [Tier::Junk, Tier::Cold, Tier::Idle, Tier::Warm, Tier::Hot, Tier::Review, Tier::Protected]
     }
     pub fn as_str(&self) -> &'static str {
         match self {
             Tier::Junk => "junk",
             Tier::Cold => "cold",
+            Tier::Idle => "idle",
             Tier::Warm => "warm",
             Tier::Hot => "hot",
             Tier::Review => "review",
@@ -38,21 +40,57 @@ impl Tier {
         match self {
             Tier::Junk => 0,
             Tier::Cold => 1,
-            Tier::Warm => 2,
-            Tier::Hot => 3,
-            Tier::Review => 4,
-            Tier::Protected => 5,
+            Tier::Idle => 2,
+            Tier::Warm => 3,
+            Tier::Hot => 4,
+            Tier::Review => 5,
+            Tier::Protected => 6,
         }
     }
     pub fn describe(&self) -> &'static str {
         match self {
             Tier::Junk => "junk, nothing to rebuild",
-            Tier::Cold => "unused for a while or orphaned",
-            Tier::Warm => "used recently, will be rebuilt or redownloaded",
+            Tier::Cold => "unused for days, orphaned, or its work already landed",
+            Tier::Idle => "nothing is using it right now; costs a rebuild if you return",
+            Tier::Warm => "in active use, will be rebuilt or redownloaded soon",
             Tier::Hot => "in use right now",
             Tier::Review => "needs a human look",
-            Tier::Protected => "never cleaned automatically",
+            Tier::Protected => "never cleaned without --danger",
         }
+    }
+}
+
+/// How much risk a clean may take. Items carry risks; each needs a mode to be allowed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RiskLevel {
+    Standard,
+    Force,
+    Danger,
+}
+
+impl RiskLevel {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            RiskLevel::Standard => "standard",
+            RiskLevel::Force => "force",
+            RiskLevel::Danger => "danger",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Risk {
+    /// Stable tag: recent, agent-active, review, dirty, unmerged, build-running, app-running, data, system-path, unreachable-commits.
+    pub tag: String,
+    /// Mode needed to clean despite this risk.
+    pub level: RiskLevel,
+    pub message: String,
+}
+
+impl Risk {
+    pub fn new(tag: &str, level: RiskLevel, message: impl Into<String>) -> Risk {
+        Risk { tag: tag.into(), level, message: message.into() }
     }
 }
 
@@ -140,6 +178,9 @@ pub struct RuleSpec {
     pub description: Option<String>,
     pub recommend: Option<String>,
     pub tags: Option<Vec<String>>,
+    /// Stacks or tools this rule belongs to (rust, swift, xcode, node, python, ruby, docker,
+    /// android, macos...). Used to show people what is relevant to their machine.
+    pub stacks: Option<Vec<String>>,
     pub enabled: Option<bool>,
     // artifact matching
     pub names: Option<Vec<String>>,
@@ -174,6 +215,8 @@ pub struct RuleSpec {
     pub tier: Option<Tier>,
     pub rebuild: Option<String>,
     pub warm_days: Option<u32>,
+    /// Untouched this many days with nobody working there counts as idle.
+    pub idle_days: Option<u32>,
     pub action: Option<ActionKind>,
     pub command: Option<Vec<String>>,
 }
@@ -295,6 +338,8 @@ pub struct Item {
     pub rule: String,
     pub bucket: String,
     pub group: String,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub tags: Vec<String>,
     /// Bytes counted in totals. Disjoint from every other item.
     pub bytes: u64,
     /// Bytes freed when this item is cleaned, including nested items (worktrees).
@@ -314,6 +359,9 @@ pub struct Item {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
     pub action: Action,
+    /// What could go wrong cleaning this, and which mode allows it.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub risks: Vec<Risk>,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub children: Vec<Child>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty", default)]
@@ -366,6 +414,12 @@ pub struct Project {
     pub dirty: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub merged: Option<bool>,
+    /// Rank among checkouts of the same repo by recent build activity (0 = most recent).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recency_rank: Option<usize>,
+    /// Coding agents, editors or shells currently working in this checkout.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub active: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -400,4 +454,10 @@ pub struct Report {
     pub projects: Vec<Project>,
     pub items: Vec<Item>,
     pub warnings: Vec<String>,
+    /// Stacks found in your projects plus tools found on this machine.
+    #[serde(default)]
+    pub detected: Vec<String>,
+    /// Rules that matched something, with item count and bytes.
+    #[serde(default)]
+    pub rule_hits: BTreeMap<String, (usize, u64)>,
 }

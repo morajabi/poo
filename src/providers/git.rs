@@ -16,7 +16,8 @@ pub struct WorktreeInfo {
 
 pub fn git(dir: &Path, args: &[&str], timeout: u64) -> Option<String> {
     let d = dir.to_string_lossy().to_string();
-    let mut cmd = vec!["git", "-C", d.as_str()];
+    // --no-optional-locks: never refresh .git/index, which would make poo itself look like activity.
+    let mut cmd = vec!["git", "--no-optional-locks", "-C", d.as_str()];
     cmd.extend_from_slice(args);
     run_capture(&cmd, timeout)
 }
@@ -72,11 +73,12 @@ pub fn git_dir(checkout: &Path) -> Option<PathBuf> {
     Some(if p.is_absolute() { p } else { checkout.join(p) })
 }
 
-/// Last time someone worked in the checkout: index writes and HEAD moves.
+/// Last commit, checkout, merge or rebase in the checkout. The index is not used: any tool
+/// running `git status` rewrites it, so it says nothing about real work.
 pub fn last_activity(checkout: &Path) -> Option<i64> {
     let gd = git_dir(checkout)?;
     let mut best = None;
-    for f in ["index", "HEAD", "logs/HEAD", "FETCH_HEAD", "ORIG_HEAD"] {
+    for f in ["HEAD", "logs/HEAD", "ORIG_HEAD"] {
         if let Some(t) = crate::fsutil::mtime(&gd.join(f)) {
             best = Some(best.map_or(t, |b: i64| b.max(t)));
         }
@@ -84,14 +86,57 @@ pub fn last_activity(checkout: &Path) -> Option<i64> {
     best
 }
 
-pub fn is_dirty(checkout: &Path) -> Option<bool> {
-    let out = git(checkout, &["status", "--porcelain", "--ignore-submodules=dirty", "-uno"], 20)?;
-    if !out.trim().is_empty() {
-        return Some(true);
+/// Uncommitted work in a checkout: modified tracked files, and untracked paths that are
+/// not build output poo already knows about (agents often leave .dd or build/ unignored).
+pub struct DirtyState {
+    pub modified: Vec<String>,
+    pub untracked: Vec<String>,
+}
+
+impl DirtyState {
+    pub fn is_dirty(&self) -> bool {
+        !self.modified.is_empty() || !self.untracked.is_empty()
     }
-    // Untracked (not ignored) files are work too. Limit the cost on huge trees.
-    let untracked = git(checkout, &["ls-files", "--others", "--exclude-standard", "--directory", "--no-empty-directory"], 20)?;
-    Some(!untracked.trim().is_empty())
+    pub fn summary(&self) -> String {
+        let mut parts = vec![];
+        let m = self.modified.len();
+        if m > 0 {
+            parts.push(format!("{} modified file{}", m, if m == 1 { "" } else { "s" }));
+        }
+        if !self.untracked.is_empty() {
+            let shown: Vec<&str> = self.untracked.iter().take(3).map(|s| s.as_str()).collect();
+            parts.push(format!("untracked {}{}", shown.join(", "), if self.untracked.len() > 3 { ", ..." } else { "" }));
+        }
+        parts.join("; ")
+    }
+}
+
+pub fn dirty_state(checkout: &Path, artifacts: &[PathBuf]) -> Option<DirtyState> {
+    let out = git(checkout, &["status", "--porcelain", "--ignore-submodules=dirty", "-uno"], 20)?;
+    let modified: Vec<String> = out
+        .lines()
+        .filter(|l| l.len() > 3)
+        .map(|l| {
+            let p = &l[3..];
+            // Renames print "old -> new"; the new path is what exists.
+            p.rsplit(" -> ").next().unwrap_or(p).trim_matches('"').to_string()
+        })
+        .collect();
+    let untracked_out = git(checkout, &["ls-files", "--others", "--exclude-standard", "--directory", "--no-empty-directory"], 20)?;
+    let untracked = untracked_out
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .filter(|l| {
+            let abs = checkout.join(l.trim_end_matches('/'));
+            !artifacts.iter().any(|a| abs.starts_with(a) || a.starts_with(&abs))
+        })
+        .map(String::from)
+        .collect();
+    Some(DirtyState { modified, untracked })
+}
+
+pub fn is_dirty(checkout: &Path) -> Option<bool> {
+    dirty_state(checkout, &[]).map(|d| d.is_dirty())
 }
 
 pub fn default_branch(repo: &Path) -> Option<String> {
@@ -109,23 +154,39 @@ pub fn default_branch(repo: &Path) -> Option<String> {
     None
 }
 
-/// Whether `head` is already contained in the default branch (or its remote).
+/// Whether `head` is already contained in the default branch, locally or on the remote.
 pub fn is_merged(repo: &Path, head: &str, default: &str) -> bool {
     let d = repo.to_string_lossy().to_string();
     let ok = |target: &str| {
         std::process::Command::new("git")
-            .args(["-C", &d, "merge-base", "--is-ancestor", head, target])
+            .args(["--no-optional-locks", "-C", &d, "merge-base", "--is-ancestor", head, target])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status()
             .map(|s| s.success())
             .unwrap_or(false)
     };
-    if ok(default) {
-        return true;
-    }
-    let remote = if default.starts_with("origin/") { default.to_string() } else { format!("origin/{}", default) };
-    ok(&remote)
+    let local = default.trim_start_matches("origin/").to_string();
+    let remote = format!("origin/{}", local);
+    [default.to_string(), local, remote].iter().any(|t| ok(t))
+}
+
+/// Whether a commit is reachable from any branch or remote branch.
+pub fn reachable(repo: &Path, head: &str) -> bool {
+    git(repo, &["for-each-ref", "--contains", head, "--count=1", "refs/heads", "refs/remotes"], 10)
+        .map_or(false, |o| !o.trim().is_empty())
+}
+
+/// Ignored files (not folders) small enough to be config: .env, Local.xcconfig, keys.
+pub fn small_ignored_files(checkout: &Path, max_bytes: u64) -> Vec<PathBuf> {
+    let Some(out) = git(checkout, &["ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"], 30) else {
+        return vec![];
+    };
+    out.split('\0')
+        .filter(|s| !s.is_empty() && !s.ends_with('/'))
+        .map(|s| checkout.join(s))
+        .filter(|p| std::fs::symlink_metadata(p).map(|m| m.is_file() && m.len() <= max_bytes).unwrap_or(false))
+        .collect()
 }
 
 /// Ignored directories at the top of each ignored subtree, relative to the repo.

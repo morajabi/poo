@@ -350,7 +350,10 @@ pub fn setup_brief(cfg: &Config, cat: &Catalog, r: &Report) -> String {
         "Rebuild tolerance: how painful is a cold rebuild for their main stacks (Xcode, Rust, Node)? Raise warm_days for expensive stacks, lower it for cheap ones.",
         "Simulators and runtimes: which OS versions do they still test on?",
         "AI history: keep agent transcripts and editor chat history, or allow cleaning old ones?",
-        "Autonomy: may you clean junk and cold items without asking each time (`agents.auto_clean_max_tier = cold`), only junk, or nothing?",
+        "Autonomy: may you clean junk and cold items without asking each time (`agents.auto_clean_max_tier = cold`), also idle, only junk, or nothing?",
+        "Concurrency: how many checkouts of the same repo do they actively build at once? Set `scan.keep_recent_checkouts` (default 2) and `scan.idle_hours` (default 6).",
+        "Routine cleanups: offer `poo schedule add nightly` (clean what nothing uses at 03:30) and `poo schedule add guard` (free space automatically when below 10%).",
+        "Packs: are there stacks or apps they never want touched, or extra ones to turn on? `poo rules ls --hits` shows what matched; `poo rules disable --tag <t>` turns a pack off.",
         "Buckets: does the default grouping match how they think? Rename, merge, reorder or hide buckets.",
     ] {
         push(&mut s, format!("- {}", q));
@@ -368,6 +371,9 @@ pub fn setup_brief(cfg: &Config, cat: &Catalog, r: &Report) -> String {
         "poo buckets set build --name \"Builds\" --order 5     poo buckets add work --name \"Work repos\" --color \"#FF9500\"",
         "poo rules set rust.target bucket=work    (move a rule to another bucket)",
         "poo config set agents.auto_clean_max_tier cold",
+        "poo config set scan.keep_recent_checkouts 3     poo config set scan.idle_hours 4",
+        "poo rules disable --tag games     poo rules enable --tag <pack>",
+        "poo schedule add nightly          poo schedule add guard --when-free-below 15% --target-free 25%",
         "poo mods new myteam     (then edit ~/.config/poo/mods/myteam/rules.toml; poo mods validate)",
         "poo scan                (rescan to see the effect)",
         "poo setup --done --by <agent name> --notes \"what you configured and why\"",

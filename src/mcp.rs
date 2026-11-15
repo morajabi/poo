@@ -1,7 +1,7 @@
 //! MCP server over stdio (JSON-RPC 2.0, one message per line).
 
 use crate::clean::{self, CleanOptions};
-use crate::model::{ProjectPolicy, Tier};
+use crate::model::{ProjectPolicy, RiskLevel, Tier};
 use crate::ops::{self, BucketEdit, Ctx};
 use crate::plan::Filter;
 use crate::scan::ScanOptions;
@@ -48,7 +48,7 @@ fn tools() -> Value {
             "free": {"type": "string", "description": "With plan: target size"},
             "dry_run": {"type": "boolean", "default": true},
             "approved_by_user": {"type": "boolean", "default": false, "description": "Only after the user explicitly approved these items"},
-            "force": {"type": "boolean", "description": "Allow hot or review items the user explicitly chose"}
+            "mode": {"type": "string", "enum": ["standard", "force", "danger"], "default": "standard", "description": "force: also items with soft risks (recent, agent working, dirty worktrees which get stashed, review). danger: hard risks too (running builds, data, protected, system paths). Both need approved_by_user and the user's explicit OK for that mode."}
          }}},
         {"name": "projects", "description": "Projects and worktrees with size, activity status and policy; plus repos grouped with their worktrees.",
          "inputSchema": {"type": "object", "properties": {}}},
@@ -56,17 +56,28 @@ fn tools() -> Value {
          "inputSchema": {"type": "object", "properties": {"bucket": {"type": "string"}}}},
         {"name": "explain_path", "description": "Which rules match a path, whether git ignores it, and how it appears in the report.",
          "inputSchema": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}},
-        {"name": "configure", "description": "Change poo's configuration. Actions: add_root, remove_root, set_project_policy (path, policy: active|stale|protected|auto), disable_rule, enable_rule, set_rule (id, values: [\"warm_days=7\", \"bucket=work\"]), add_bucket / set_bucket (id, name, order, color, symbol, description, hidden), remove_bucket (id, move_to), set (key, value) for config keys like agents.auto_clean_max_tier, setup_done (by, notes).",
+        {"name": "configure", "description": "Change poo's configuration. Actions: add_root, remove_root, set_project_policy (path, policy: active|stale|protected|auto), disable_rule / enable_rule (id, or tag/group/bucket/stack for many), set_rule (id, values: [\"warm_days=7\", \"bucket=work\"]), add_bucket / set_bucket (id, name, order, color, symbol, description, hidden), remove_bucket (id, move_to), set (key, value) for config keys like agents.auto_clean_max_tier, setup_done (by, notes).",
          "inputSchema": {"type": "object", "properties": {
             "action": {"type": "string"}, "path": {"type": "string"}, "policy": {"type": "string"},
             "id": {"type": "string"}, "values": {"type": "array", "items": {"type": "string"}},
             "name": {"type": "string"}, "order": {"type": "integer"}, "color": {"type": "string"},
             "symbol": {"type": "string"}, "description": {"type": "string"}, "hidden": {"type": "boolean"},
             "move_to": {"type": "string"}, "key": {"type": "string"}, "value": {"type": "string"},
+            "tag": {"type": "string"}, "group": {"type": "string"}, "bucket": {"type": "string"}, "stack": {"type": "string"},
             "by": {"type": "string"}, "notes": {"type": "string"}
          }, "required": ["action"]}},
         {"name": "setup_brief", "description": "A brief for configuring poo to this user's workflows: machine, space, projects, duplication, everything poo knows, questions to ask and commands to apply.",
          "inputSchema": {"type": "object", "properties": {}}},
+        {"name": "schedules", "description": "Routine cleanups run by a launchd agent (standard mode only, rescan first). Actions: list, presets, add (id, preset or plan+every, optional at HH:MM, when_free_below, target_free, max_bytes, buckets, exclude_buckets, tags, exclude_tags), remove, enable, disable, run (id, dry_run). Ask the user before adding or enabling schedules.",
+         "inputSchema": {"type": "object", "properties": {
+            "action": {"type": "string", "enum": ["list", "presets", "add", "remove", "enable", "disable", "run"]},
+            "id": {"type": "string"}, "preset": {"type": "string"}, "plan": {"type": "string"},
+            "every": {"type": "string"}, "at": {"type": "string"}, "when_free_below": {"type": "string"},
+            "target_free": {"type": "string"}, "max_bytes": {"type": "string"},
+            "buckets": {"type": "array", "items": {"type": "string"}}, "exclude_buckets": {"type": "array", "items": {"type": "string"}},
+            "tags": {"type": "array", "items": {"type": "string"}}, "exclude_tags": {"type": "array", "items": {"type": "string"}},
+            "dry_run": {"type": "boolean", "default": true}
+         }, "required": ["action"]}},
         {"name": "history", "description": "What poo cleaned before, newest first.",
          "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer", "default": 50}}}}
     ])
@@ -84,6 +95,7 @@ fn filter_from(a: &Value) -> Filter {
         tier: s(a, "tier").and_then(|t| Tier::parse(&t)),
         min_bytes: s(a, "min_size").and_then(|m| parse_bytes(&m)).unwrap_or(0),
         query: s(a, "query"),
+        ..Default::default()
     }
 }
 
@@ -125,7 +137,14 @@ fn call(ctx: &mut Ctx, name: &str, a: &Value) -> Result<Value> {
             let mut r = ops::report(ctx, false, ScanOptions::default())?;
             let dry = a.get("dry_run").and_then(|v| v.as_bool()).unwrap_or(true);
             let approved = a.get("approved_by_user").and_then(|v| v.as_bool()).unwrap_or(false);
-            let force = a.get("force").and_then(|v| v.as_bool()).unwrap_or(false);
+            let mode = match s(a, "mode").as_deref() {
+                Some("force") => RiskLevel::Force,
+                Some("danger") => RiskLevel::Danger,
+                _ => RiskLevel::Standard,
+            };
+            if mode > RiskLevel::Standard && !approved && !dry {
+                return Ok(json!({"status": "needs_approval", "message": format!("mode `{}` needs approved_by_user: true after the user explicitly agreed to it", mode.as_str())}));
+            }
             let items = if let Some(ids) = a.get("ids").and_then(|v| v.as_array()) {
                 let keys: Vec<String> = ids.iter().filter_map(|x| x.as_str().map(String::from)).collect();
                 ops::resolve_ids(&r, &keys)?
@@ -148,8 +167,11 @@ fn call(ctx: &mut Ctx, name: &str, a: &Value) -> Result<Value> {
                 dry_run: dry,
                 trash: false,
                 max_tier: Some(if approved { Tier::Warm } else { limit }),
-                force: force && approved,
+                mode,
                 actor: "mcp".into(),
+            };
+            let _lock = if dry { None } else {
+                Some(crate::schedule::RunLock::try_acquire().ok_or_else(|| anyhow!("another poo clean or scheduled run is in progress"))?)
             };
             let res = clean::clean(&items, &ctx.cat, &opts);
             if !dry {
@@ -186,20 +208,11 @@ fn call(ctx: &mut Ctx, name: &str, a: &Value) -> Result<Value> {
                     ops::set_project_policy(&ctx.cfg, &need("path")?, pol, s(a, "notes"))?
                 }
                 "disable_rule" | "enable_rule" => {
-                    let id = need("id")?;
-                    if ctx.cat.rule(&id).is_none() {
-                        return Err(anyhow!("unknown rule `{}`", id));
+                    let ids = ops::select_rules(&ctx.cat, s(a, "id").as_deref(), s(a, "tag").as_deref(), s(a, "group").as_deref(), s(a, "bucket").as_deref(), s(a, "stack").as_deref());
+                    if ids.is_empty() {
+                        return Err(anyhow!("no rule matches; pass id, tag, group, bucket or stack"));
                     }
-                    let mut c = ctx.cfg.clone();
-                    c.disabled_rules.retain(|r| r != &id);
-                    if action == "disable_rule" {
-                        c.disabled_rules.push(id.clone());
-                    } else if let Some(o) = c.rule_overrides.get_mut(&id) {
-                        o.enabled = Some(true);
-                    } else {
-                        c.rule_overrides.entry(id).or_default().enabled = Some(true);
-                    }
-                    c
+                    ops::toggle_rules(&ctx.cfg, &ids, action == "enable_rule")
                 }
                 "set_rule" => {
                     let vals: Vec<String> = a.get("values").and_then(|v| v.as_array()).map(|v| v.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default();
@@ -235,11 +248,80 @@ fn call(ctx: &mut Ctx, name: &str, a: &Value) -> Result<Value> {
             let r = ops::report(ctx, false, ScanOptions::default())?;
             Ok(json!({"brief": crate::agent::setup_brief(&ctx.cfg, &ctx.cat, &r)}))
         }
+        "schedules" => schedules_tool(ctx, a),
         "history" => {
             let limit = a.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
             Ok(json!({"history": clean::history(limit)}))
         }
         _ => Err(anyhow!("unknown tool `{}`", name)),
+    }
+}
+
+fn schedules_tool(ctx: &mut Ctx, a: &Value) -> Result<Value> {
+    use crate::schedule as sch;
+    let action = s(a, "action").unwrap_or_else(|| "list".into());
+    let list_of = |k: &str| -> Vec<String> {
+        a.get(k).and_then(|v| v.as_array()).map(|v| v.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default()
+    };
+    let save = |ctx: &mut Ctx, cfg: crate::config::Config| -> Result<Value> {
+        cfg.save()?;
+        let note = sch::sync_agent(&cfg)?;
+        ctx.reload()?;
+        Ok(json!({"ok": true, "agent": note, "schedules": ctx.cfg.schedule}))
+    };
+    match action.as_str() {
+        "list" => {
+            let state = sch::load_state();
+            Ok(json!({"schedules": ctx.cfg.schedule.iter().map(|x| {
+                let last = state.last_run.get(&x.id);
+                json!({"schedule": x, "last_run": last, "next_run": sch::next_run(x, last.map(|l| l.at))})
+            }).collect::<Vec<_>>(), "agent_loaded": sch::agent_loaded()}))
+        }
+        "presets" => Ok(json!({"presets": sch::presets().into_iter().map(|(id, d, x)| json!({"id": id, "description": d, "schedule": x})).collect::<Vec<_>>()})),
+        "add" => {
+            let id = s(a, "id").ok_or_else(|| anyhow!("id is required"))?;
+            let preset = s(a, "preset").unwrap_or_else(|| id.clone());
+            let mut x = sch::presets().into_iter().find(|(p, _, _)| *p == preset).map(|(_, _, x)| x).unwrap_or(crate::config::Schedule {
+                id: id.clone(), plan: "stale".into(), every: "1d".into(), at: None, when_free_below: None, target_free: None,
+                max_bytes: None, buckets: vec![], exclude_buckets: vec![], tags: vec![], exclude_tags: vec![], enabled: true, notify: true,
+            });
+            x.id = id;
+            if let Some(v) = s(a, "plan") { x.plan = v; }
+            if let Some(v) = s(a, "every") { x.every = v; }
+            if let Some(v) = s(a, "at") { x.at = Some(v); }
+            if let Some(v) = s(a, "when_free_below") { x.when_free_below = Some(v); }
+            if let Some(v) = s(a, "target_free") { x.target_free = Some(v); }
+            if let Some(v) = s(a, "max_bytes") { x.max_bytes = Some(v); }
+            for (k, f) in [("buckets", &mut x.buckets), ("exclude_buckets", &mut x.exclude_buckets), ("tags", &mut x.tags), ("exclude_tags", &mut x.exclude_tags)] {
+                let v = list_of(k);
+                if !v.is_empty() { *f = v; }
+            }
+            sch::validate(&x, &ctx.cat)?;
+            let mut cfg = ctx.cfg.clone();
+            cfg.schedule.retain(|y| y.id != x.id);
+            cfg.schedule.push(x);
+            save(ctx, cfg)
+        }
+        "remove" | "enable" | "disable" => {
+            let id = s(a, "id").ok_or_else(|| anyhow!("id is required"))?;
+            if !ctx.cfg.schedule.iter().any(|y| y.id == id) {
+                return Err(anyhow!("no schedule `{}`", id));
+            }
+            let mut cfg = ctx.cfg.clone();
+            match action.as_str() {
+                "remove" => cfg.schedule.retain(|y| y.id != id),
+                "enable" => cfg.schedule.iter_mut().filter(|y| y.id == id).for_each(|y| y.enabled = true),
+                _ => cfg.schedule.iter_mut().filter(|y| y.id == id).for_each(|y| y.enabled = false),
+            }
+            save(ctx, cfg)
+        }
+        "run" => {
+            let id = s(a, "id").ok_or_else(|| anyhow!("id is required"))?;
+            let x = ctx.cfg.schedule.iter().find(|y| y.id == id).cloned().ok_or_else(|| anyhow!("no schedule `{}`", id))?;
+            let dry = a.get("dry_run").and_then(|v| v.as_bool()).unwrap_or(true);
+            Ok(serde_json::to_value(sch::run(ctx, &x, dry)?)?)
+        }
+        _ => Err(anyhow!("unknown action `{}`", action)),
     }
 }
 

@@ -7,6 +7,10 @@ use serde::Serialize;
 
 #[derive(Debug, Clone, Default)]
 pub struct Filter {
+    pub buckets: Vec<String>,
+    pub exclude_buckets: Vec<String>,
+    pub tags: Vec<String>,
+    pub exclude_tags: Vec<String>,
     pub bucket: Option<String>,
     pub group: Option<String>,
     pub project: Option<String>,
@@ -17,6 +21,18 @@ pub struct Filter {
 
 impl Filter {
     pub fn matches(&self, i: &Item) -> bool {
+        if !self.buckets.is_empty() && !self.buckets.contains(&i.bucket) {
+            return false;
+        }
+        if self.exclude_buckets.contains(&i.bucket) {
+            return false;
+        }
+        if !self.tags.is_empty() && !i.tags.iter().any(|t| self.tags.contains(t)) {
+            return false;
+        }
+        if i.tags.iter().any(|t| self.exclude_tags.contains(t)) {
+            return false;
+        }
         if let Some(b) = &self.bucket {
             if &i.bucket != b {
                 return false;

@@ -36,6 +36,7 @@ pub struct Raw {
     pub exclude: HashSet<PathBuf>,
     /// Sized without its claimed descendants, so nested items are not double counted.
     pub disjoint: bool,
+    pub risks: Vec<crate::model::Risk>,
 }
 
 pub fn parse_iso(s: &str) -> Option<i64> {
@@ -131,34 +132,45 @@ pub fn xcode_derived_data(rule: &Rule) -> Vec<Raw> {
 pub fn versions(rule: &Rule) -> Vec<Raw> {
     let Some(dir) = rule.param_str("path").map(|p| expand(&p)) else { return vec![] };
     let keep = rule.param_u64("keep").unwrap_or(1) as usize;
-    let mut active: HashSet<PathBuf> = HashSet::new();
-    for link in rule.param_list("active") {
-        let l = expand(&link);
-        if let Ok(target) = std::fs::canonicalize(&l) {
-            // The active version is the entry of `dir` that contains the link target.
-            if let Ok(rd) = std::fs::read_dir(&dir) {
-                for e in rd.flatten() {
-                    if let Ok(c) = std::fs::canonicalize(e.path()) {
-                        if target.starts_with(&c) {
-                            active.insert(e.path());
-                        }
-                    }
-                }
+    let pattern = rule.param_str("pattern").and_then(|p| globset::Glob::new(&p).ok()).map(|g| g.compile_matcher());
+    // The active version: entries any `active` symlink points into, or the path printed by
+    // `active_command` (for example `xcode-select -p`).
+    let mut targets: Vec<PathBuf> = rule
+        .param_list("active")
+        .iter()
+        .filter_map(|l| std::fs::canonicalize(expand(l)).ok())
+        .collect();
+    let cmd = rule.param_list("active_command");
+    if !cmd.is_empty() {
+        let refs: Vec<&str> = cmd.iter().map(|s| s.as_str()).collect();
+        if let Some(out) = run_capture(&refs, 10) {
+            if let Ok(p) = std::fs::canonicalize(out.trim()) {
+                targets.push(p);
             }
         }
     }
-    if !rule.param_list("active").is_empty() && active.is_empty() {
-        // Could not tell which version is in use: keep everything.
-        return vec![];
-    }
+    let wants_active = !rule.param_list("active").is_empty() || !cmd.is_empty();
     let mut entries: Vec<(PathBuf, i64)> = std::fs::read_dir(&dir)
         .map(|rd| {
             rd.flatten()
                 .filter(|e| !e.file_name().to_string_lossy().starts_with('.'))
+                .filter(|e| pattern.as_ref().map_or(true, |m| m.is_match(e.file_name().to_string_lossy().as_ref())))
                 .map(|e| (e.path(), crate::fsutil::mtime(&e.path()).unwrap_or(0)))
                 .collect()
         })
         .unwrap_or_default();
+    let active: HashSet<PathBuf> = entries
+        .iter()
+        .filter(|(p, _)| {
+            let c = std::fs::canonicalize(p).unwrap_or_else(|_| p.clone());
+            targets.iter().any(|t| t.starts_with(&c))
+        })
+        .map(|(p, _)| p.clone())
+        .collect();
+    if wants_active && active.is_empty() {
+        // Could not tell which version is in use: keep everything.
+        return vec![];
+    }
     entries.sort_by(|a, b| b.1.cmp(&a.1));
     let mut kept = 0;
     let mut out = vec![];
@@ -174,6 +186,104 @@ pub fn versions(rule: &Rule) -> Vec<Raw> {
         let mut raw = Raw { path: p, name, rule: rule.id.clone(), last_used: Some(t), ..Default::default() };
         raw.reasons.push("superseded version".into());
         out.push(raw);
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
+// Leftovers of uninstalled apps
+// ---------------------------------------------------------------------------
+
+/// Bundle ids of installed apps, including helpers and extensions inside them.
+pub fn installed_bundle_ids() -> HashSet<String> {
+    let mut ids = HashSet::new();
+    let roots = [
+        PathBuf::from("/Applications"),
+        PathBuf::from("/Applications/Utilities"),
+        PathBuf::from("/System/Applications"),
+        PathBuf::from("/System/Applications/Utilities"),
+        PathBuf::from("/Applications/Setapp"),
+        home().join("Applications"),
+        home().join("Applications/Chrome Apps.localized"),
+    ];
+    fn add_app(app: &Path, ids: &mut HashSet<String>, depth: usize) {
+        if let Ok(v) = plist::Value::from_file(app.join("Contents/Info.plist")) {
+            if let Some(id) = v.as_dictionary().and_then(|d| d.get("CFBundleIdentifier")).and_then(|v| v.as_string()) {
+                ids.insert(id.to_lowercase());
+            }
+        }
+        if depth == 0 {
+            return;
+        }
+        for sub in ["Contents/Library/LoginItems", "Contents/Library/LaunchServices", "Contents/PlugIns", "Contents/Frameworks", "Contents/Helpers", "Contents/Library/SystemExtensions", "Contents/XPCServices"] {
+            if let Ok(rd) = std::fs::read_dir(app.join(sub)) {
+                for e in rd.flatten() {
+                    let n = e.file_name().to_string_lossy().to_string();
+                    if n.ends_with(".app") || n.ends_with(".appex") || n.ends_with(".xpc") || n.ends_with(".systemextension") {
+                        add_app(&e.path(), ids, depth - 1);
+                    }
+                }
+            }
+        }
+    }
+    for r in roots {
+        if let Ok(rd) = std::fs::read_dir(&r) {
+            for e in rd.flatten() {
+                if e.file_name().to_string_lossy().ends_with(".app") {
+                    add_app(&e.path(), &mut ids, 2);
+                }
+            }
+        }
+    }
+    // Homebrew cask apps sometimes live elsewhere; their caches use the cask token.
+    if let Ok(rd) = std::fs::read_dir("/opt/homebrew/Caskroom") {
+        for e in rd.flatten() {
+            ids.insert(e.file_name().to_string_lossy().to_lowercase());
+        }
+    }
+    ids
+}
+
+fn looks_like_bundle_id(name: &str) -> bool {
+    let n = name.to_lowercase();
+    let prefixes = ["com.", "org.", "net.", "io.", "app.", "dev.", "co.", "me.", "ai.", "so.", "us.", "tv.", "de.", "fr.", "jp.", "cn."];
+    n.matches('.').count() >= 2 && prefixes.iter().any(|p| n.starts_with(p)) && !n.starts_with("com.apple.")
+}
+
+pub fn app_leftovers(rule: &Rule, installed: &HashSet<String>) -> Vec<Raw> {
+    let mut out = vec![];
+    let running: Vec<String> = crate::procs::list().into_iter().map(|p| p.name.to_lowercase()).collect();
+    for loc in rule.param_list("locations") {
+        let dir = expand(&loc);
+        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+        for e in rd.flatten() {
+            let raw_name = e.file_name().to_string_lossy().to_string();
+            let name = raw_name.trim_end_matches(".savedState").trim_end_matches(".plist").to_string();
+            if !looks_like_bundle_id(&name) || rule.exclude.matches(&raw_name) {
+                continue;
+            }
+            let lname = name.to_lowercase();
+            // Installed if any installed id equals it, extends it, or it extends an installed id.
+            let present = installed.iter().any(|id| {
+                lname == *id || lname.starts_with(&format!("{}.", id)) || id.starts_with(&format!("{}.", lname))
+            });
+            if present {
+                continue;
+            }
+            // A process whose name matches the id's last part means the app is around.
+            let last = lname.rsplit('.').next().unwrap_or("");
+            if last.len() > 3 && running.iter().any(|r| r == last) {
+                continue;
+            }
+            let mut raw = Raw {
+                path: e.path(),
+                name: format!("{} ({})", name, dir.file_name().map(|d| d.to_string_lossy().to_string()).unwrap_or_default()),
+                rule: rule.id.clone(),
+                ..Default::default()
+            };
+            raw.reasons.push("no installed app has this bundle id".into());
+            out.push(raw);
+        }
     }
     out
 }

@@ -18,8 +18,13 @@ item gets a tier that says how much regret cleaning it causes.
   worktrees with uncommitted changes, skips projects with running builds and
   never leaves its safety floor.
 - Junk and cold items may be cleaned when the user asked you to free space.
-  Warm items need the user's OK unless `poo config get agents.auto_clean_max_tier`
+  Idle and warm items need the user's OK unless `poo config get agents.auto_clean_max_tier`
   allows them. Hot, review and protected items: show them and let the user decide.
+- Items carry `risks`, each needing a mode: `--force` (recently used, an agent open
+  in that checkout, uncommitted work which poo stashes first, review items) or
+  `--danger` (running builds, data, protected, system paths, detached commits which
+  poo saves to a `poo/` branch first). Use a mode only after the user agreed to that
+  mode for those items; quote the warnings poo prints.
 - Before cleaning anything beyond junk, show the user what goes: sizes, tiers and
   reasons from poo's output.
 - Use IDs and paths exactly as poo prints them. Do not predict them.
@@ -29,8 +34,9 @@ item gets a tier that says how much regret cleaning it causes.
 | tier | meaning | plans |
 |---|---|---|
 | junk | nothing to rebuild (logs, temp, crash reports, broken simulators) | all |
-| cold | rebuildable and unused for weeks, or orphaned (project gone, merged worktree) | stale, deep, emergency |
-| warm | rebuildable but used recently; costs a rebuild or redownload | deep, emergency |
+| cold | rebuildable and unused for days, orphaned, or its worktree's work already landed | stale, deep, emergency |
+| idle | nothing uses it now: other checkouts' builds while you work in your 2 newest, untouched for hours | stale, deep, emergency |
+| warm | in active use; costs a rebuild or redownload | deep, emergency |
 | hot | in use right now (build or agent running, touched in the last hour) | never |
 | review | needs a human look (unknown ignored folder, transcripts, archives) | never |
 | protected | never cleaned (uncommitted work, data, volumes) | never |
@@ -55,11 +61,23 @@ poo catalog                 every bucket, rule, provider and recommendation
 poo rules explain PATH      which rule matches a path and why
 poo history                 what poo cleaned before
 poo setup --agent           setup brief for configuring poo for this user
+poo schedule add nightly    routine cleanups (presets: nightly, quick, guard, weekly)
+poo schedule ls | run <id> --dry-run | rm <id>
+poo rules ls --hits         rules that matched on this machine
+poo rules disable --tag <t> turn a whole pack off (also --group, --bucket, --stack)
 ```
 
 MCP: `poo mcp` serves the same as tools (`overview`, `list_items`, `inspect`,
 `plan`, `clean`, `projects`, `catalog`, `configure`, `explain_path`,
-`setup_brief`). `clean` defaults to a dry run.
+`setup_brief`, `schedules`, `history`). `clean` defaults to a dry run.
+
+## Routine cleanups
+
+Schedules make free space a non-issue: `poo schedule add nightly` cleans everything
+nothing is using every night; `poo schedule add guard` frees space automatically when
+the disk runs low. Scheduled runs rescan first and only clean items without risks.
+Ask the user before adding or enabling schedules; tune them with `--bucket`,
+`--exclude-bucket`, `--tag`, `--exclude-tag`, `--max`, `--when-free-below`, `--target-free`.
 
 ## Typical flows
 

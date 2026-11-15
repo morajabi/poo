@@ -73,6 +73,14 @@ pub struct ScanConfig {
     pub warm_days: u32,
     /// Scan results younger than this are reused by `poo ls` and friends.
     pub cache_minutes: u64,
+    /// Rebuildable things untouched this many days (and with nobody working there) are idle.
+    pub idle_days: u32,
+    /// Per repo, this many most recently used checkouts keep their builds warm.
+    pub keep_recent_checkouts: usize,
+    /// Builds of other checkouts become idle after this many hours without use.
+    pub idle_hours: u32,
+    /// Builds of a worktree whose commits already landed go cold after this many idle hours.
+    pub landed_idle_hours: u32,
 }
 
 impl Default for ScanConfig {
@@ -83,6 +91,10 @@ impl Default for ScanConfig {
             min_item_bytes: 1_000_000,
             warm_days: 14,
             cache_minutes: 60,
+            idle_days: 3,
+            keep_recent_checkouts: 2,
+            idle_hours: 6,
+            landed_idle_hours: 2,
         }
     }
 }
@@ -108,6 +120,45 @@ pub struct SetupState {
     pub notes: Option<String>,
 }
 
+/// A routine cleanup the scheduler runs on its own (standard mode only).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Schedule {
+    pub id: String,
+    /// Plan to run: quick, stale, deep, emergency or one from a mod.
+    pub plan: String,
+    /// How often: 30m, 6h, 1d, 7d.
+    pub every: String,
+    /// Local time of day for daily or weekly runs, "03:30".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<String>,
+    /// Only run when free space is below this ("50G" or "10%").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub when_free_below: Option<String>,
+    /// Free least-regret items until this much is free ("80G" or "20%").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_free: Option<String>,
+    /// Never clean more than this per run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_bytes: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub buckets: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclude_buckets: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclude_tags: Vec<String>,
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    #[serde(default = "yes")]
+    pub notify: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
@@ -124,6 +175,7 @@ pub struct Config {
     pub scan: ScanConfig,
     pub updates: UpdatesConfig,
     pub setup: SetupState,
+    pub schedule: Vec<Schedule>,
 }
 
 /// Common places developers keep projects. Used when no roots are configured.

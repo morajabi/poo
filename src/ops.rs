@@ -189,6 +189,7 @@ pub fn catalog_json(cat: &Catalog) -> Value {
         "rules": cat.rules.iter().map(|r| json!({
             "id": r.id, "name": r.name, "bucket": r.bucket, "group": r.group, "kind": r.kind,
             "enabled": r.enabled, "cost": r.cost, "tier": r.tier, "warm_days": r.warm_days,
+            "tags": r.tags, "stacks": r.stacks, "idle_days": r.idle_days,
             "description": r.description, "recommend": r.recommend, "rebuild": r.rebuild,
             "names": r.names.raw, "parent_any": r.parent_any.raw, "children_any": r.children_any.raw,
             "children_all": r.children_all.raw, "ignored_only": r.ignored,
@@ -289,6 +290,38 @@ pub fn set_rule(ctx: &Ctx, id: &str, assignments: &[String]) -> Result<Config> {
         bail!("that override breaks the rule: {}", e);
     }
     Ok(cfg)
+}
+
+/// Rule ids selected by id, tag, group, bucket or stack (all given filters must match).
+pub fn select_rules(cat: &Catalog, id: Option<&str>, tag: Option<&str>, group: Option<&str>, bucket: Option<&str>, stack: Option<&str>) -> Vec<String> {
+    if id.is_none() && tag.is_none() && group.is_none() && bucket.is_none() && stack.is_none() {
+        return vec![];
+    }
+    cat.rules
+        .iter()
+        .filter(|r| id.map_or(true, |i| r.id == i))
+        .filter(|r| tag.map_or(true, |t| r.tags.iter().any(|x| x == t)))
+        .filter(|r| group.map_or(true, |g| r.group.eq_ignore_ascii_case(g)))
+        .filter(|r| bucket.map_or(true, |b| r.bucket == b))
+        .filter(|r| stack.map_or(true, |s| r.stacks.iter().any(|x| x == s)))
+        .map(|r| r.id.clone())
+        .collect()
+}
+
+pub fn toggle_rules(cfg: &Config, ids: &[String], enable: bool) -> Config {
+    let mut c = cfg.clone();
+    for id in ids {
+        c.disabled_rules.retain(|r| r != id);
+        if enable {
+            c.rule_overrides.entry(id.clone()).or_default().enabled = Some(true);
+        } else {
+            c.disabled_rules.push(id.clone());
+            if let Some(o) = c.rule_overrides.get_mut(id) {
+                o.enabled = None;
+            }
+        }
+    }
+    c
 }
 
 pub struct BucketEdit {
