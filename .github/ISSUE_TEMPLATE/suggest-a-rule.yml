@@ -1,0 +1,62 @@
+name: Suggest a rule
+description: A folder poo should know about (a build output, cache, download or log).
+title: "rules: "
+labels: ["rules"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks! `poo suggest` lists big folders no rule explains and drafts a rule for each;
+        `poo mods submit <mod>` turns a tested rule into a pull request. If you would rather
+        describe it here, the fields below are all a maintainer needs.
+        Please write paths with `~` and leave out your user, machine and project names.
+  - type: input
+    id: path
+    attributes:
+      label: Where is it?
+      description: The folder, with ~ for your home folder. For folders inside projects, the folder name and a file next to it.
+      placeholder: ~/Library/Caches/com.example.tool  or  .acme-cache next to acme.config.js
+    validations:
+      required: true
+  - type: input
+    id: tool
+    attributes:
+      label: What writes it?
+      description: Tool or app and version.
+      placeholder: acme 4.2 (acme --version)
+    validations:
+      required: true
+  - type: input
+    id: size
+    attributes:
+      label: Typical size
+      placeholder: 3-8 GB, grows with every build
+  - type: textarea
+    id: recreate
+    attributes:
+      label: How does it come back after removal?
+      placeholder: Rebuilt by the next `acme build`; nothing is lost.
+    validations:
+      required: true
+  - type: dropdown
+    id: cost
+    attributes:
+      label: What does removing it cost?
+      options:
+        - Nothing (logs, temp, crash reports)
+        - A rebuild
+        - A redownload
+        - Real data (should only be shown, never cleaned)
+    validations:
+      required: true
+  - type: input
+    id: app
+    attributes:
+      label: App or process that keeps it open (if any)
+      placeholder: Acme Studio
+  - type: textarea
+    id: rule
+    attributes:
+      label: Draft rule (optional)
+      description: Paste a rule from your mod or from `poo suggest --write`.
+      render: toml

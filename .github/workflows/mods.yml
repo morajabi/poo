@@ -1,0 +1,43 @@
+name: mods
+
+# Checks pull requests that change poo's knowledge: the core mod loads, every rule passes
+# the safety lint, every matcher fixture holds, and new rules with generic folder names
+# (build, dist, out, deps...) come with fixtures that show what they match and what not.
+on:
+  pull_request:
+    paths:
+      - "rules/**"
+      - "tests/rule-fixtures/**"
+      - "tests/core.rs"
+      - "src/catalog.rs"
+      - "src/contrib.rs"
+      - "src/model.rs"
+
+concurrency:
+  group: mods-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - name: core mod loads
+        run: cargo run --quiet -- mods validate --text
+      - name: safety lint and fixtures (new rules since the base branch)
+        run: cargo run --quiet -- mods lint --core --base "origin/${{ github.base_ref }}" --text
+      - name: matcher tests
+        run: cargo test --test core
+      - name: proposals are not loaded
+        run: |
+          if ls rules/proposals/*.toml >/dev/null 2>&1; then
+            echo "::warning::rules/proposals holds changes to built-in rules; fold them into the original rule before merging."
+          fi
