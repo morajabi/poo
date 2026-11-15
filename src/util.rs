@@ -8,6 +8,11 @@ pub fn home() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("/"))
 }
 
+/// Whether this process has Full Disk Access (it can list the TCC database folder).
+pub fn has_full_disk_access() -> bool {
+    std::fs::read_dir(home().join("Library/Application Support/com.apple.TCC")).is_ok()
+}
+
 /// The per-user cache folder macOS keeps next to $TMPDIR (/var/folders/../C).
 pub fn darwin_user_cache_dir() -> Option<PathBuf> {
     let tmp = std::env::var("TMPDIR").ok()?;

@@ -321,3 +321,57 @@ markers = ["project.godot"]
 id = "elm"
 name = "Elm"
 markers = ["elm.json"]
+
+# ---------------------------------------------------------------------------
+# Launchers: how "Ask your agent" hands a prompt to a coding agent or AI app.
+# {prompt} is the brief poo writes; terminal launchers run in the item's folder.
+# Add your own in a mod, or disable one with enabled = false.
+# ---------------------------------------------------------------------------
+
+[[launcher]]
+id = "claude-code"
+name = "Claude Code"
+kind = "terminal"
+command = ["claude", "{prompt}"]
+detect = ["claude"]
+order = 10
+
+[[launcher]]
+id = "codex"
+name = "Codex CLI"
+kind = "terminal"
+command = ["codex", "{prompt}"]
+detect = ["codex"]
+order = 20
+
+[[launcher]]
+id = "cursor"
+name = "Cursor"
+kind = "url"
+url = "cursor://anysphere.cursor-deeplink/prompt?text={prompt}"
+detect_app = ["Cursor.app"]
+order = 30
+
+[[launcher]]
+id = "gemini"
+name = "Gemini CLI"
+kind = "terminal"
+command = ["gemini", "-i", "{prompt}"]
+detect = ["gemini"]
+order = 40
+
+[[launcher]]
+id = "opencode"
+name = "OpenCode"
+kind = "terminal"
+command = ["opencode", "--prompt", "{prompt}"]
+detect = ["opencode"]
+order = 50
+
+[[launcher]]
+id = "claude-app"
+name = "Claude app"
+kind = "url"
+url = "claude://claude.ai/new?q={prompt}"
+detect_app = ["Claude.app"]
+order = 60

@@ -198,6 +198,22 @@ enum Cmd {
         #[command(subcommand)]
         cmd: Option<ScheduleCmd>,
     },
+    /// Write a brief about an item, project (path), bucket:<id> or overview for an AI agent.
+    Prompt {
+        #[arg(default_value = "overview")]
+        target: String,
+    },
+    /// Open an agent (Claude Code, Codex, Cursor...) with a brief about a target.
+    Ask {
+        #[arg(default_value = "overview")]
+        target: String,
+        /// Launcher id (see `poo ask --list`); default: agents.default_launcher or the first available.
+        #[arg(long = "with")]
+        with: Option<String>,
+        /// List launchers and whether they are installed.
+        #[arg(long)]
+        list: bool,
+    },
     /// What poo saved before cleaning: config file copies, stashes, rescue branches.
     Backups {
         #[command(subcommand)]
@@ -1210,6 +1226,43 @@ fn real_main(cli: Cli) -> R {
         }
         Cmd::Schedule { cmd } => schedule_cmd(&mut ctx, &out, cmd.unwrap_or(ScheduleCmd::Ls))?,
         Cmd::Backups { cmd } => backups_cmd(&ctx, &out, cmd.unwrap_or(BackupsCmd::Ls))?,
+        Cmd::Prompt { target } => {
+            let r = ops::report(&ctx, false, scan_opts(&out, false))?;
+            clear_progress(&out);
+            let b = poo::ask::brief(&r, &ctx.cat, &target).map_err(|e| CliError::new("not_found", 3, e.to_string()))?;
+            if out.json {
+                emit(&out, &serde_json::to_value(&b).unwrap_or_default());
+            } else {
+                println!("{}", b.prompt);
+            }
+        }
+        Cmd::Ask { target, with, list } => {
+            let launchers = poo::ask::launchers(&ctx.cat);
+            if list {
+                if out.json {
+                    emit(&out, &json!({"launchers": launchers.iter().map(|(l, a)| json!({"id": l.id, "name": l.name, "kind": l.kind, "available": a})).collect::<Vec<_>>(), "default": ctx.cfg.agents.default_launcher, "skill_installed": poo::agent::status().iter().any(|t| t.skill_installed)}));
+                } else {
+                    for (l, a) in &launchers {
+                        println!("{:<12} {:<14} {:<9} {}", l.id, l.name, l.kind, if *a { "installed" } else { "-" });
+                    }
+                }
+                return Ok(());
+            }
+            let r = ops::report(&ctx, false, scan_opts(&out, false))?;
+            clear_progress(&out);
+            let b = poo::ask::brief(&r, &ctx.cat, &target).map_err(|e| CliError::new("not_found", 3, e.to_string()))?;
+            let pick = with
+                .or_else(|| ctx.cfg.agents.default_launcher.clone())
+                .or_else(|| launchers.iter().find(|(_, a)| *a).map(|(l, _)| l.id.clone()))
+                .ok_or_else(|| CliError::new("not_found", 3, "no agent launcher is installed").hint("copy the brief with `poo prompt <target>`"))?;
+            let l = launchers.iter().find(|(l, _)| l.id == pick).map(|(l, _)| l.clone()).ok_or_else(|| CliError::new("not_found", 3, format!("no launcher `{}`", pick)))?;
+            let msg = poo::ask::launch(&ctx.cfg, &l, &b)?;
+            if out.json {
+                emit(&out, &json!({"ok": true, "message": msg, "launcher": l.id}));
+            } else {
+                println!("{}", msg);
+            }
+        }
         Cmd::Hooks { cmd } => match cmd.unwrap_or(HooksCmd::Status) {
             HooksCmd::Status => {
                 let st = poo::hooks::status();

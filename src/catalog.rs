@@ -120,6 +120,8 @@ pub struct Rule {
     pub source: String,
     pub mod_dir: Option<PathBuf>,
     pub spec: RuleSpec,
+    /// Reads other apps' protected data: on only with Full Disk Access or an explicit enable.
+    pub needs_permission: bool,
 }
 
 impl Rule {
@@ -219,6 +221,29 @@ pub struct Stack {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct Launcher {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+    pub command: Vec<String>,
+    pub url: Option<String>,
+    pub detect: Vec<String>,
+    pub detect_app: Vec<String>,
+    pub order: i32,
+    pub source: String,
+}
+
+impl Launcher {
+    pub fn available(&self) -> bool {
+        let bin = self.detect.iter().any(|b| crate::util::which(b).is_some());
+        let app = self.detect_app.iter().any(|a| {
+            std::path::Path::new("/Applications").join(a).exists() || crate::util::home().join("Applications").join(a).exists()
+        });
+        (self.detect.is_empty() && self.detect_app.is_empty()) || bin || app
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct WorktreeHome {
     pub path: String,
     pub agent: String,
@@ -234,6 +259,7 @@ pub struct Catalog {
     pub roots: Vec<String>,
     pub worktree_homes: Vec<WorktreeHome>,
     pub stacks: Vec<Stack>,
+    pub launchers: Vec<Launcher>,
     pub errors: Vec<String>,
 }
 
@@ -441,6 +467,7 @@ pub fn load(cfg: &Config) -> Catalog {
     let mut roots = vec![];
     let mut homes: Vec<WorktreeHome> = vec![];
     let mut stacks: Vec<Stack> = vec![];
+    let mut launchers: Vec<Launcher> = vec![];
     let mut mods = vec![];
 
     for m in &mut all {
@@ -525,6 +552,24 @@ pub fn load(cfg: &Config) -> Catalog {
                     }),
                     Err(e) => errors.push(format!("{}: stack `{}`: {}", label, st.id, e)),
                 }
+            }
+            for l in &f.launcher {
+                let prev = launchers.iter().position(|x| x.id == l.id);
+                let base = prev.map(|i| launchers.remove(i));
+                if l.enabled == Some(false) {
+                    continue;
+                }
+                launchers.push(Launcher {
+                    id: l.id.clone(),
+                    name: l.name.clone().or_else(|| base.as_ref().map(|b| b.name.clone())).unwrap_or_else(|| l.id.clone()),
+                    kind: l.kind.clone().or_else(|| base.as_ref().map(|b| b.kind.clone())).unwrap_or_else(|| "terminal".into()),
+                    command: l.command.clone().or_else(|| base.as_ref().map(|b| b.command.clone())).unwrap_or_default(),
+                    url: l.url.clone().or_else(|| base.as_ref().and_then(|b| b.url.clone())),
+                    detect: l.detect.clone().or_else(|| base.as_ref().map(|b| b.detect.clone())).unwrap_or_default(),
+                    detect_app: l.detect_app.clone().or_else(|| base.as_ref().map(|b| b.detect_app.clone())).unwrap_or_default(),
+                    order: l.order.or_else(|| base.as_ref().map(|b| b.order)).unwrap_or(100),
+                    source: m.info.id.clone(),
+                });
             }
             roots.extend(f.root.iter().map(|r| r.path.clone()));
             for h in &f.worktree_home {
@@ -611,11 +656,23 @@ pub fn load(cfg: &Config) -> Catalog {
         .collect();
     plan_list.sort_by_key(|p| p.order);
 
+    // Rules that read other apps' protected data run only with Full Disk Access, so a scan
+    // never triggers "Data Access Blocked" or permission prompts. A config override that
+    // enables one explicitly wins.
+    let fda = crate::util::has_full_disk_access();
     let mut compiled = vec![];
     for id in &rules.order {
         let (spec, src, dir) = &rules.map[id];
         match compile_rule(spec, src, dir.clone(), &bucket_list) {
-            Ok(r) => compiled.push(r),
+            Ok(mut r) => {
+                if r.tags.iter().any(|t| t == "needs-permission") {
+                    let explicit = cfg.rule_overrides.get(id).and_then(|o| o.enabled);
+                    let disabled = cfg.disabled_rules.contains(id);
+                    r.needs_permission = true;
+                    r.enabled = !disabled && explicit.unwrap_or(fda);
+                }
+                compiled.push(r)
+            }
             Err(e) => errors.push(format!("rule `{}` ({}): {}", id, src, e)),
         }
     }
@@ -629,6 +686,11 @@ pub fn load(cfg: &Config) -> Catalog {
         roots,
         worktree_homes: homes,
         stacks,
+        launchers: {
+            let mut l = launchers;
+            l.sort_by_key(|x| x.order);
+            l
+        },
         errors,
     }
 }
@@ -707,5 +769,6 @@ fn compile_rule(s: &RuleSpec, src: &str, dir: Option<PathBuf>, buckets: &[Bucket
         source: src.to_string(),
         mod_dir: dir,
         spec: s.clone(),
+        needs_permission: false,
     })
 }

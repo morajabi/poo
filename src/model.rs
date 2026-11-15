@@ -310,6 +310,27 @@ pub struct ModFile {
     pub plan: Vec<PlanSpec>,
     #[serde(default)]
     pub stack: Vec<StackSpec>,
+    #[serde(default)]
+    pub launcher: Vec<LauncherSpec>,
+}
+
+/// How to hand a prompt to a coding agent or AI app.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherSpec {
+    pub id: String,
+    pub name: Option<String>,
+    /// terminal: run `command` in a new terminal window in the target folder.
+    /// url: open `url` (deep link) with the prompt filled in.
+    pub kind: Option<String>,
+    pub command: Option<Vec<String>>,
+    pub url: Option<String>,
+    /// Binaries on PATH that mean it is installed.
+    pub detect: Option<Vec<String>>,
+    /// App bundles (in /Applications or ~/Applications) that mean it is installed.
+    pub detect_app: Option<Vec<String>>,
+    pub order: Option<i32>,
+    pub enabled: Option<bool>,
 }
 
 /// Marker files that identify a project's stack (rust, swift, node, ...).

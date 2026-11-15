@@ -179,7 +179,7 @@ cost = "rebuild"
 contents = true
 running_apps = ["Messages"]
 warm_days = 14
-tags = ["macos", "messages", "thumbnails"]
+tags = ["macos", "messages", "thumbnails", "needs-permission"]
 stacks = ["macos"]
 description = "Thumbnail and sticker caches of Messages; real attachments are never touched."
 
@@ -194,7 +194,7 @@ each = true
 cost = "none"
 running_apps = ["Mail"]
 min_age_days = 30
-tags = ["macos", "mail", "attachments"]
+tags = ["macos", "mail", "attachments", "needs-permission"]
 stacks = ["macos"]
 description = "Copies of attachments you opened from Mail; the originals stay in your mailbox."
 
@@ -259,7 +259,6 @@ paths = [
   "~/Library/Caches/KSCrash",
   "~/Library/Caches/com.crashlytics.data",
   "~/Library/Application Support/*/Crashpad/completed",
-  "~/Library/Application Support/{Google,BraveSoftware,Microsoft,Yandex,Arc,Dia}/*/Crashpad/completed",
   "~/Library/Application Support/minecraft/crash-reports",
 ]
 cost = "none"
@@ -267,6 +266,19 @@ contents = true
 tags = ["logs", "crash-reports"]
 stacks = ["macos"]
 description = "Crash and hang reports, including Chromium and Electron Crashpad reports that were already handled."
+
+[[rule]]
+id = "browser.crashpad"
+name = "Browser crash reports"
+bucket = "junk"
+group = "Logs"
+kind = "path"
+paths = ["~/Library/Application Support/{Google,BraveSoftware,Microsoft,Yandex,Arc,Dia}/*/Crashpad/completed"]
+cost = "none"
+contents = true
+tags = ["browsers", "logs", "crash-reports", "needs-permission"]
+stacks = ["browsers", "macos"]
+description = "Crash reports browsers already uploaded; inside browser profiles, so it needs Full Disk Access."
 
 [[rule]]
 id = "junk.homebrew-logs"

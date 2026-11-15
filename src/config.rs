@@ -53,11 +53,15 @@ pub struct ProjectConfig {
 pub struct AgentsConfig {
     /// Highest tier an agent may clean through MCP without `approved_by_user`.
     pub auto_clean_max_tier: Tier,
+    /// Terminal app terminal launchers open (Terminal, iTerm, Ghostty, Warp...).
+    pub terminal_app: String,
+    /// Launcher `poo ask` uses when none is named.
+    pub default_launcher: Option<String>,
 }
 
 impl Default for AgentsConfig {
     fn default() -> Self {
-        Self { auto_clean_max_tier: Tier::Cold }
+        Self { auto_clean_max_tier: Tier::Cold, terminal_app: "Terminal".into(), default_launcher: None }
     }
 }
 

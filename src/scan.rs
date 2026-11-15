@@ -374,6 +374,13 @@ pub fn scan(cfg: &Config, cat: &Catalog, opts: &ScanOptions) -> Report {
     let current = Mutex::new(String::new());
     let item_count = AtomicUsize::new(0);
     let mut warnings: Vec<String> = cat.errors.iter().map(|e| format!("mod error: {}", e)).collect();
+    let gated = cat.rules.iter().filter(|r| r.needs_permission && !r.enabled).count();
+    if gated > 0 && !crate::util::has_full_disk_access() {
+        warnings.push(format!(
+            "{} rules (browser profiles, Mail, Messages, app containers) are off until poo has Full Disk Access: System Settings > Privacy & Security > Full Disk Access",
+            gated
+        ));
+    }
 
     let (cfg_roots, detected) = cfg.effective_roots();
     let mut roots: Vec<PathBuf> = opts.roots.clone().unwrap_or(cfg_roots);

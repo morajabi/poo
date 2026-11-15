@@ -179,6 +179,7 @@ pub fn worktrees(r: &Report) -> Value {
 
 pub fn catalog_json(cat: &Catalog) -> Value {
     json!({
+        "full_disk_access": crate::util::has_full_disk_access(),
         "mods": cat.mods,
         "buckets": cat.buckets,
         "plans": cat.plans,
@@ -191,6 +192,7 @@ pub fn catalog_json(cat: &Catalog) -> Value {
             "enabled": r.enabled, "cost": r.cost, "tier": r.tier, "warm_days": r.warm_days,
             "tags": r.tags, "stacks": r.stacks, "idle_days": r.idle_days, "running_apps": r.running_apps,
             "exclude": r.exclude.raw, "min_age_days": r.min_age_days, "contents": r.contents, "system": r.system,
+            "needs_full_disk_access": r.needs_permission,
             "description": r.description, "recommend": r.recommend, "rebuild": r.rebuild,
             "names": r.names.raw, "parent_any": r.parent_any.raw, "children_any": r.children_any.raw,
             "children_all": r.children_all.raw, "ignored_only": r.ignored,
