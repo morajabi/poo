@@ -179,6 +179,14 @@ ignores them. Buckets, plans, stacks, worktree homes and guards are mod data too
 override any field, disable rules, add buckets, write providers or guards in any
 language: see [docs/mods.md](docs/mods.md) or `poo mods docs`.
 
+### Share a rule
+
+Your Mac has folders ours never sees. `poo suggest` lists big folders no rule explains and
+drafts a rule for each; `poo mods submit <mod>` lints it, removes your home path and your
+user, machine and project names, shows you exactly what would be sent, and only then opens
+a pull request through `gh` (or prints prefilled GitHub links). See
+[CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Safety
 
 poo never deletes outside your home and temp folders (or a rule's declared system

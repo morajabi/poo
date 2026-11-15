@@ -363,6 +363,27 @@ policy = "stale"           # active | stale | protected | auto
 auto_clean_max_tier = "cold"   # MCP may clean junk and cold without asking
 ```
 
+## Share a rule
+
+Rules that help you probably help others. The loop:
+
+1. `poo suggest` lists big folders no specific rule explains: git-ignored folders in projects,
+   `~/Library/Caches` and `~/.cache` folders only the catch-all rules cover, and big dot or
+   Application Support folders. `poo suggest --write mine` drafts a disabled rule for each
+   into the mod `mine`.
+2. Fill in the TODOs, check with `poo rules explain <path>`, set `enabled = true`.
+3. `poo mods lint` runs the safety lint (paths under `~` or `$TMPDIR`, nothing on the never
+   list, generic names with markers, descriptions and stacks set).
+4. `poo mods submit mine` removes personal details, shows the exact files and pull request
+   text, saves them under `~/.local/state/poo/submissions/`, and with your yes opens a pull
+   request through `gh`. Without `gh` it prints prefilled GitHub links. `--dry-run` only shows,
+   `--no-evidence` leaves out sizes, tool versions and fixtures, `--json` is for agents.
+
+New rules go to the core file for their stack, or `rules/core/contrib-<name>.toml` when no
+file fits. Changes to built-in rules go to `rules/proposals/` for a maintainer to fold in.
+Matcher fixtures go to `tests/rule-fixtures/`. [CONTRIBUTING.md](../CONTRIBUTING.md) has the
+conventions reviewers check.
+
 ## Safety floor
 
 These checks run for every item and no mod or config can turn them off:
