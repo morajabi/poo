@@ -188,7 +188,7 @@ group = "Swift"
 kind = "path"
 tags = ["swift", "package-cache"]
 stacks = ["swift", "xcode"]
-paths = ["~/Library/Caches/org.swift.swiftpm", "~/Library/Caches/org.swift.swift-build", "~/.swiftpm/cache", "~/.cache/org.swift.swiftpm"]
+paths = ["~/Library/Caches/org.swift.swiftpm", "~/Library/Caches/org.swift.swift-build", "~/.swiftpm/cache", "~/.cache/org.swift.swiftpm", "~/.cache/swift-package-manager"]
 cost = "redownload"
 rebuild = "Fetched again on the next package resolve"
 warm_days = 30
@@ -280,18 +280,36 @@ recommend = "Keep archives of versions still in users' hands. Old betas and dev 
 
 [[rule]]
 id = "xcode.device-support"
-name = "Device support files"
+name = "Device support for older OS versions"
+bucket = "xcode"
+group = "Device support"
+kind = "provider"
+provider = "versions"
+tags = ["xcode", "device-support"]
+stacks = ["xcode"]
+params.path = ["~/Library/Developer/Xcode/*DeviceSupport"]
+params.sort = "version"
+# The two newest OS versions per platform stay (a connected older device often needs the second).
+params.keep = 2
+cost = "redownload"
+rebuild = "Copied again (slowly) when a device with that OS version connects"
+warm_days = 60
+description = "Symbols Xcode copied from each device OS version you connected, older than the two newest per platform (iOS, watchOS, tvOS, visionOS, macOS)."
+
+[[rule]]
+id = "xcode.device-support-caches"
+name = "Device support symbol caches"
 bucket = "xcode"
 group = "Device support"
 kind = "path"
 tags = ["xcode", "device-support"]
 stacks = ["xcode"]
-paths = ["~/Library/Developer/Xcode/iOS DeviceSupport", "~/Library/Developer/Xcode/watchOS DeviceSupport", "~/Library/Developer/Xcode/tvOS DeviceSupport", "~/Library/Developer/Xcode/visionOS DeviceSupport", "~/Library/Developer/Xcode/macOS DeviceSupport", "~/Library/Developer/Xcode/xrOS DeviceSupport"]
-each = true
+paths = ["~/Library/Developer/Xcode/*DeviceSupport/*/Symbols/System/Library/Caches"]
+contents = true
 cost = "redownload"
-rebuild = "Copied again (slowly) when that OS version's device connects"
-warm_days = 60
-description = "Symbols copied from each device OS version you connected. Old OS versions are rarely needed."
+rebuild = "Copied again from the device when Xcode needs it"
+warm_days = 30
+description = "The dyld shared cache copies inside each device support folder, the bulk of its size; the rest of the symbols stay."
 
 [[rule]]
 id = "xcode.device-logs"
@@ -371,7 +389,7 @@ group = "Documentation"
 kind = "path"
 tags = ["xcode", "docs"]
 stacks = ["xcode"]
-paths = ["~/Library/Developer/Xcode/DocumentationCache", "~/Library/Developer/Xcode/DocumentationIndex"]
+paths = ["~/Library/Developer/Xcode/DocumentationCache", "~/Library/Developer/Xcode/DocumentationIndex", "~/Library/Developer/Shared/Documentation"]
 cost = "redownload"
 rebuild = "Downloaded again when you open the documentation window"
 warm_days = 30
@@ -631,3 +649,19 @@ cost = "redownload"
 tier = "review"
 rebuild = "swift sdk install <url>"
 description = "Swift SDKs for cross compiling (Static Linux, WebAssembly, Android), one item per bundle. Each is several hundred MB."
+
+[[rule]]
+id = "simulator.device-tmp"
+name = "Simulator device temp folders"
+bucket = "xcode"
+group = "Simulators"
+kind = "path"
+tags = ["xcode", "simulator", "temp"]
+stacks = ["xcode"]
+paths = ["~/Library/Developer/CoreSimulator/Devices/*/data/tmp"]
+contents = true
+# A booted simulator (with or without Simulator.app) runs launchd_sim.
+running_apps = ["Simulator", "launchd_sim"]
+min_age_days = 1
+cost = "none"
+description = "Temp files apps left inside each simulator. Only while no simulator is booted."

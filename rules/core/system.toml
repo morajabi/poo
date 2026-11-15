@@ -410,3 +410,27 @@ warm_days = 30
 tags = ["cache", "cli"]
 stacks = ["macos"]
 description = "Tool caches in ~/.cache that no specific rule covers."
+
+# ---------------------------------------------------------------------------
+# Folders that say they are caches
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "cache.cachedir-tag"
+name = "Folders tagged as caches"
+bucket = "caches"
+group = "Tagged caches"
+kind = "artifact"
+# Tools opt in by writing CACHEDIR.TAG (https://bford.info/cachedir/): Cargo, Bazel, Zig,
+# pip, ccache, Borg, restic and others. The signature line is checked, so lookalikes never
+# match. Specific rules (rust.target, zig.cache...) win; this catches the rest.
+names = ["*"]
+children_all = ["CACHEDIR.TAG"]
+children_none = [".git", "Cargo.toml", "package.json", "CMakeLists.txt"]
+contains = { "CACHEDIR.TAG" = "Signature: 8a477f597d28d172789f06886806bc55" }
+cost = "rebuild"
+rebuild = "Recreated by the tool that tagged it"
+warm_days = 14
+tags = ["cache", "fallback"]
+stacks = ["macos"]
+description = "Any folder whose CACHEDIR.TAG says it is a cache the tool can regenerate."

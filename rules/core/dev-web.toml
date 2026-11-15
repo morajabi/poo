@@ -376,17 +376,37 @@ description = "Downloads proto leaves behind after installing tools."
 
 [[rule]]
 id = "pnpm.metadata-cache"
-name = "pnpm metadata and dlx cache"
+name = "pnpm metadata cache"
 bucket = "caches"
 group = "Node"
 kind = "path"
 tags = ["node", "pnpm", "package-cache"]
 stacks = ["node", "pnpm"]
 paths = ["~/Library/Caches/pnpm", "~/.cache/pnpm"]
+each = true
+# dlx installs run from inside the cache; they have their own guarded rule.
+exclude = ["dlx"]
 cost = "redownload"
-rebuild = "Refilled by the next pnpm install or pnpm dlx"
+rebuild = "Refilled by the next pnpm install"
 warm_days = 30
-description = "Registry metadata and pnpm dlx installs."
+description = "Registry metadata pnpm caches between installs."
+
+[[rule]]
+id = "pnpm.dlx-cache"
+name = "pnpm dlx installs"
+bucket = "caches"
+group = "Node"
+kind = "path"
+tags = ["node", "pnpm", "package-cache"]
+stacks = ["node", "pnpm"]
+paths = ["~/Library/Caches/pnpm/dlx/*", "~/.cache/pnpm/dlx/*"]
+# A running `pnpm dlx` executes from here.
+running_apps = ["pnpm", "pnpx"]
+min_age_days = 1
+cost = "redownload"
+rebuild = "Installed again by the next pnpm dlx of that package"
+warm_days = 14
+description = "Packages pnpm dlx and pnpx installed to run once, one item per install."
 
 [[rule]]
 id = "pnpm.tools"
@@ -481,3 +501,30 @@ cost = "rebuild"
 rebuild = "cdk synth"
 warm_days = 14
 description = "CloudFormation templates and bundled Lambda assets cdk synth writes. Grows with every asset hash."
+
+[[rule]]
+id = "tnpm.cache"
+name = "tnpm cache"
+bucket = "caches"
+group = "Node"
+kind = "path"
+tags = ["node", "tnpm", "package-cache"]
+stacks = ["node"]
+paths = ["~/.tnpm/_cacache"]
+cost = "redownload"
+rebuild = "Refilled by the next tnpm install"
+warm_days = 30
+description = "Package tarballs and metadata tnpm (Alibaba's npm client) cached."
+
+[[rule]]
+id = "tnpm.logs"
+name = "tnpm logs"
+bucket = "junk"
+group = "Logs"
+kind = "path"
+tags = ["node", "tnpm", "logs"]
+stacks = ["node"]
+paths = ["~/.tnpm/_logs"]
+contents = true
+cost = "none"
+description = "Debug logs tnpm writes for every run."

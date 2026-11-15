@@ -580,3 +580,26 @@ paths = ["~/.asdf/downloads", "~/Library/Caches/mise", "~/.cache/mise", "~/.loca
 cost = "none"
 contents = true
 description = "Leftover archives from tool installs."
+
+[[rule]]
+id = "ruby.gem-file-caches"
+name = "Downloaded .gem files"
+bucket = "caches"
+group = "Ruby"
+kind = "path"
+tags = ["ruby", "package-cache"]
+stacks = ["ruby"]
+paths = [
+  "~/.gem/ruby/*/cache",
+  "~/.local/share/gem/ruby/*/cache",
+  "~/.rbenv/versions/*/lib/ruby/gems/*/cache",
+  "~/.rubies/*/lib/ruby/gems/*/cache",
+  "~/.local/share/mise/installs/ruby/*/lib/ruby/gems/*/cache",
+  "~/.asdf/installs/ruby/*/lib/ruby/gems/*/cache",
+]
+contents = true
+extensions = ["gem"]
+cost = "redownload"
+rebuild = "Downloaded again only if a gem is reinstalled"
+warm_days = 30
+description = "The .gem archives RubyGems keeps after installing; the installed gems stay."

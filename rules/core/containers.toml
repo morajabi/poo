@@ -73,6 +73,9 @@ group = "VMs"
 kind = "path"
 paths = [
   "~/Library/Caches/lima",
+  "~/Library/Caches/com.vmware.fusion",
+  "~/Library/Caches/com.parallels.desktop.console",
+  "~/Library/Caches/Parallels",
   "~/Library/Caches/colima",
   "~/Library/Caches/com.utmapp.UTM",
   "~/Library/Caches/rancher-desktop",
