@@ -133,7 +133,7 @@ pub const NEVER: &[&str] = &[
 const CRITICAL: &[&str] = &[
     "/", "/System", "/bin", "/sbin", "/usr", "/etc", "/private/etc", "/var", "/private/var",
     "/Library", "/Applications", "/Users", "/Volumes", "/opt", "/opt/homebrew", "/cores", "/dev",
-    "/private", "/private/var/db", "/Library/Apple", "/Library/Keychains", "/nix",
+    "/private", "/private/var/db", "/Library/Apple", "/Library/Keychains", "/nix", "/usr/local",
 ];
 
 /// Whole trees danger mode never enters.
@@ -141,6 +141,9 @@ const CRITICAL_TREES: &[&str] = &[
     "/System", "/bin", "/sbin", "/etc", "/private/etc", "/dev", "/Library/Apple", "/Library/Keychains",
     "/private/var/db", "/private/var/root", "/Library/Extensions", "/Library/Frameworks", "/Library/LaunchDaemons",
     "/Library/LaunchAgents", "/Library/PrivilegedHelperTools", "/Applications/Utilities",
+    // Installed software; /usr/local stays open below these for caches and the like.
+    "/usr/local/bin", "/usr/local/sbin", "/usr/local/lib", "/usr/local/include", "/usr/local/etc",
+    "/usr/local/share",
 ];
 
 /// The floor. In danger mode a few checks loosen; the rest always hold.
