@@ -117,10 +117,14 @@ pub fn lint_spec(spec: &RuleSpec, cat: &Catalog, new_rule: bool, contrib: bool) 
     if kind == Some(RuleKind::Artifact) {
         lint_artifact(spec, cat, &mut out);
     }
-    let system = spec.system.unwrap_or(false);
+    // Report-only rules (by flag or bucket) are never cleaned, so they may point anywhere.
+    let bucket_id = spec.bucket.clone().or_else(|| cat.rule(id).map(|r| r.bucket.clone()));
+    let report_only = spec.report_only.unwrap_or(false) || bucket_id.and_then(|b| cat.bucket(&b).map(|b| b.report_only)).unwrap_or(false);
+    let system = spec.system.unwrap_or(false) || report_only;
     for p in spec.paths.iter().flatten() {
-        let data = spec.cost.or_else(|| cat.rule(id).map(|r| r.cost)) == Some(Cost::Data);
-        lint_path(id, p, spec.each.unwrap_or(false), system, data, contrib, spec.tags.as_deref().unwrap_or(&[]), &mut out);
+        let data = report_only || spec.cost.or_else(|| cat.rule(id).map(|r| r.cost)) == Some(Cost::Data);
+        let quiet_system = system && (report_only || !contrib);
+        lint_path(id, p, spec.each.unwrap_or(false), system, data, contrib && !quiet_system, spec.tags.as_deref().unwrap_or(&[]), &mut out);
     }
     out
 }

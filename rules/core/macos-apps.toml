@@ -785,3 +785,18 @@ tags = ["photos", "media", "cache"]
 stacks = ["macos"]
 description = "Thumbnails and standard previews next to a Lightroom Classic catalog; Lightroom renders them again as you browse."
 recommend = "Prefer Library > Previews > Discard 1:1 Previews in Lightroom; Smart Previews are left alone because they may be your only offline copy."
+
+[[rule]]
+id = "app.steam-partial-downloads"
+name = "Steam partial downloads"
+bucket = "junk"
+group = "Games"
+kind = "path"
+paths = ["~/Library/Application Support/Steam/steamapps/downloading"]
+contents = true
+cost = "redownload"
+running_apps = ["steam_osx", "Steam"]
+min_age_days = 7
+tags = ["games", "downloads"]
+stacks = ["macos"]
+description = "Unfinished game downloads and updates Steam left behind. Only while Steam is closed."

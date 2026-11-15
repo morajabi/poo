@@ -41,3 +41,104 @@ tags = ["macos", "snapshots", "time-machine"]
 stacks = ["macos"]
 description = "Local Time Machine snapshots older than a day. Your backup disk keeps its own copy; macOS also thins these on its own."
 recommend = "Usually nothing to do. To get the space back now, remove old ones here with --include-in-use; snapshots from the last day always stay."
+
+
+# ---------------------------------------------------------------------------
+# Media, messages, games and macOS assets (managed in their own apps)
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "aware.podcasts-downloads"
+name = "Podcast downloads"
+bucket = "elsewhere"
+group = "Media downloads"
+kind = "path"
+paths = ["~/Library/Group Containers/243LU875E5.groups.com.apple.podcasts/Library/Cache"]
+cost = "redownload"
+running_apps = ["Podcasts"]
+tags = ["awareness", "media", "needs-permission"]
+stacks = ["macos"]
+description = "Episodes the Podcasts app downloaded."
+recommend = "Manage in Podcasts > Settings > Remove played downloads, or per show."
+
+[[rule]]
+id = "aware.tv-downloads"
+name = "Apple TV downloads"
+bucket = "elsewhere"
+group = "Media downloads"
+kind = "path"
+paths = ["~/Movies/TV/Media"]
+cost = "redownload"
+running_apps = ["TV"]
+tags = ["awareness", "media"]
+stacks = ["macos"]
+description = "Movies and shows downloaded in the TV app."
+recommend = "Remove downloads in the TV app (Library > Downloaded), or turn on Optimize Storage in its settings."
+
+[[rule]]
+id = "aware.steam-games"
+name = "Steam games"
+bucket = "elsewhere"
+group = "Games"
+kind = "path"
+paths = ["~/Library/Application Support/Steam/steamapps/common"]
+each = true
+cost = "data"
+running_apps = ["steam_osx", "Steam"]
+tags = ["awareness", "games"]
+stacks = ["macos"]
+description = "Installed Steam games, one item per game."
+recommend = "Uninstall games from the Steam library (right-click > Manage > Uninstall)."
+
+[[rule]]
+id = "aware.music-libraries"
+name = "GarageBand and Logic sound libraries"
+bucket = "elsewhere"
+group = "Sound libraries"
+kind = "path"
+paths = ["/Library/Application Support/GarageBand", "/Library/Application Support/Logic", "/Library/Audio/Apple Loops/Apple", "~/Music/Audio Music Apps"]
+cost = "redownload"
+running_apps = ["GarageBand", "Logic Pro"]
+tags = ["awareness", "media"]
+stacks = ["macos"]
+description = "Instruments, loops and sound packs GarageBand and Logic Pro downloaded."
+recommend = "Use the app's Sound Library > Relocate or Remove Sound Library; never delete these folders by hand."
+
+[[rule]]
+id = "aware.messages-attachments"
+name = "Messages attachments"
+bucket = "elsewhere"
+group = "Messages"
+kind = "path"
+paths = ["~/Library/Messages/Attachments"]
+cost = "data"
+tags = ["awareness", "messages", "needs-permission"]
+stacks = ["macos"]
+description = "Photos, videos and files sent and received in Messages."
+recommend = "Manage in System Settings > General > Storage > Messages, or set Messages > Settings > Keep messages."
+
+[[rule]]
+id = "aware.apple-intelligence-assets"
+name = "Apple Intelligence and voice assets"
+bucket = "elsewhere"
+group = "macOS assets"
+kind = "path"
+paths = ["/System/Library/AssetsV2/com_apple_MobileAsset_UAF_FM_*", "/System/Library/AssetsV2/com_apple_MobileAsset_VoiceServices*"]
+cost = "data"
+tags = ["awareness", "macos", "ai-models"]
+stacks = ["macos"]
+description = "On-device models for Apple Intelligence and downloaded voices. macOS manages them."
+recommend = "The only supported way to remove them is turning Apple Intelligence off in System Settings, or removing voices in Accessibility > Spoken Content."
+
+[[rule]]
+id = "aware.staged-macos-update"
+name = "Staged macOS update"
+bucket = "elsewhere"
+group = "macOS assets"
+kind = "path"
+paths = ["/macOS Install Data"]
+cost = "redownload"
+tags = ["awareness", "macos", "installers"]
+stacks = ["macos"]
+description = "A macOS update downloaded and staged for install."
+recommend = "Install it from System Settings > General > Software Update, or let macOS remove it after the update."

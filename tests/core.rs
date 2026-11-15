@@ -320,3 +320,17 @@ fn offline_music_and_running_dlx_are_protected() {
     let first_fallback = cat.rules.iter().position(|r| r.tags.iter().any(|t| t == "fallback")).unwrap();
     assert!(cat.rules[first_fallback..].iter().all(|r| r.tags.iter().any(|t| t == "fallback")));
 }
+
+#[test]
+fn elsewhere_rules_are_report_only() {
+    let cat = catalog::load(&Config::default());
+    let aware: Vec<_> = cat.rules.iter().filter(|r| r.id.starts_with("aware.")).collect();
+    assert!(aware.len() >= 7);
+    for r in aware {
+        assert!(r.report_only, "{} must be report-only", r.id);
+        assert!(r.recommend.is_some(), "{} must say where to manage it", r.id);
+    }
+    // Partial Steam downloads are the one cleanable piece, and only while Steam is closed.
+    let steam = cat.rule("app.steam-partial-downloads").unwrap();
+    assert!(!steam.report_only && !steam.running_apps.is_empty());
+}
