@@ -284,6 +284,8 @@ tags = ["php", "dependencies"]
 stacks = ["php"]
 names = ["vendor"]
 parent_any = ["composer.json"]
+# WordPress plugins and some deploy setups commit vendor/; only match it when git ignores it.
+ignored = true
 cost = "redownload"
 rebuild = "composer install"
 description = "Composer dependencies."
@@ -323,17 +325,32 @@ description = "Vendored Go modules, when git ignores them."
 
 [[rule]]
 id = "elixir.build"
-name = "Elixir _build and deps"
+name = "Elixir _build"
 bucket = "build"
 group = "Elixir"
 kind = "artifact"
 tags = ["elixir", "build-output", "dependencies"]
 stacks = ["elixir"]
-names = ["_build", "deps", ".elixir_ls"]
+names = ["_build", ".elixir_ls"]
 parent_any = ["mix.exs"]
 cost = "rebuild"
-rebuild = "mix deps.get && mix compile"
-description = "Compiled Elixir, fetched dependencies and ElixirLS build state."
+rebuild = "mix compile"
+description = "Compiled Elixir and ElixirLS build state."
+
+[[rule]]
+id = "elixir.deps"
+name = "Elixir deps"
+bucket = "deps"
+group = "Elixir"
+kind = "artifact"
+tags = ["elixir", "dependencies"]
+stacks = ["elixir"]
+names = ["deps"]
+parent_any = ["mix.exs"]
+children_none = [".git", "mix.exs"]
+cost = "redownload"
+rebuild = "mix deps.get"
+description = "Hex and git dependencies mix fetched into the project."
 
 [[rule]]
 id = "elixir.hex"
@@ -489,12 +506,12 @@ group = "Docs sites"
 kind = "artifact"
 tags = ["static-site", "jekyll", "eleventy", "build-output"]
 stacks = ["jekyll", "eleventy", "hugo", "ruby", "node"]
-names = ["_site", ".jekyll-cache", ".sass-cache", "resources"]
-parent_any = ["_config.yml", "hugo.toml", "hugo.yaml", "config.toml", ".eleventy.js", "eleventy.config.*"]
+names = ["_site", ".jekyll-cache", ".sass-cache"]
+parent_any = ["_config.yml", "Gemfile", ".eleventy.js", "eleventy.config.*"]
 ignored = true
 cost = "rebuild"
 rebuild = "jekyll build / hugo / npx @11ty/eleventy"
-description = "Jekyll, Eleventy and Hugo generated sites. Only when git ignores them."
+description = "Jekyll and Eleventy generated sites. Only when git ignores them (Hugo has its own rule)."
 
 # ---------------------------------------------------------------------------
 # Game engines

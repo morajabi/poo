@@ -44,6 +44,8 @@ tags = ["python", "conda", "dependencies"]
 stacks = ["python", "conda"]
 names = ["*"]
 children_all = ["conda-meta"]
+# A whole Miniconda/Anaconda install also has conda-meta; only match environments.
+children_none = ["condabin", "envs", "pkgs"]
 cost = "redownload"
 rebuild = "conda env create -p <dir> -f environment.yml"
 warm_days = 30

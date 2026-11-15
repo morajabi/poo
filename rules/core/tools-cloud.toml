@@ -105,19 +105,6 @@ tags = ["cloud", "infra", "terraform", "cache"]
 stacks = ["terraform"]
 description = "A provider cache many setups point TF_PLUGIN_CACHE_DIR at."
 
-[[rule]]
-id = "terragrunt.cache"
-name = "Terragrunt caches"
-bucket = "deps"
-group = "Terraform"
-kind = "artifact"
-names = [".terragrunt-cache"]
-cost = "redownload"
-warm_days = 14
-rebuild = "terragrunt init"
-tags = ["cloud", "infra", "terraform", "terragrunt", "cache"]
-stacks = ["terraform"]
-description = "Module and provider copies Terragrunt downloads next to each terragrunt.hcl."
 
 [[rule]]
 id = "packer.cache"

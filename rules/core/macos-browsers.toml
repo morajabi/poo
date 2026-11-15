@@ -19,6 +19,23 @@ group = "Browsers"
 kind = "path"
 paths = [
   "~/Library/Caches/Google/Chrome*",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["Google Chrome", "Google Chrome Beta", "Google Chrome Dev", "Google Chrome Canary", "Google Chrome for Testing"]
+warm_days = 7
+tags = ["browsers", "chrome", "chromium", "cache"]
+stacks = ["browsers", "macos"]
+description = "Chrome's disk cache in ~/Library/Caches, one folder per profile and channel. Readable without extra permissions."
+recommend = "Close Chrome first. Sites and offline web apps refill their service worker caches on the next visit; you stay signed in."
+
+[[rule]]
+id = "browser.chrome-profile-caches"
+name = "Chrome profile caches"
+bucket = "system"
+group = "Browsers"
+kind = "path"
+paths = [
   "~/Library/Application Support/Google/Chrome*/*/{Code Cache,GPUCache,DawnCache,DawnGraphiteCache,DawnWebGPUCache,GrShaderCache,GraphiteDawnCache,Application Cache}",
   "~/Library/Application Support/Google/Chrome*/*/Service Worker/{CacheStorage,ScriptCache}",
   "~/Library/Application Support/Google/Chrome*/{ShaderCache,GrShaderCache,GraphiteDawnCache,GPUPersistentCache,component_crx_cache,extensions_crx_cache}",
@@ -29,7 +46,7 @@ running_apps = ["Google Chrome", "Google Chrome Beta", "Google Chrome Dev", "Goo
 warm_days = 7
 tags = ["browsers", "chrome", "chromium", "cache", "gpu-cache", "service-worker", "needs-permission"]
 stacks = ["browsers", "macos"]
-description = "Chrome's HTTP, code, GPU, shader and service worker caches for every profile and channel."
+description = "Chrome's code, GPU, shader and service worker caches inside the browser profile. macOS protects browser profiles, so poo reads them only with Full Disk Access."
 recommend = "Close Chrome first. Sites and offline web apps refill their service worker caches on the next visit; you stay signed in."
 
 [[rule]]
@@ -115,6 +132,22 @@ group = "Browsers"
 kind = "path"
 paths = [
   "~/Library/Caches/BraveSoftware/Brave-Browser*",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["Brave Browser", "Brave Browser Beta", "Brave Browser Nightly"]
+warm_days = 7
+tags = ["browsers", "brave", "chromium", "cache"]
+stacks = ["browsers", "macos"]
+description = "Brave's disk cache in ~/Library/Caches, one folder per profile and channel. Readable without extra permissions."
+
+[[rule]]
+id = "browser.brave-profile-caches"
+name = "Brave profile caches"
+bucket = "system"
+group = "Browsers"
+kind = "path"
+paths = [
   "~/Library/Application Support/BraveSoftware/Brave-Browser*/*/{Code Cache,GPUCache,DawnCache,DawnGraphiteCache,DawnWebGPUCache,GrShaderCache,GraphiteDawnCache,Application Cache}",
   "~/Library/Application Support/BraveSoftware/Brave-Browser*/*/Service Worker/{CacheStorage,ScriptCache}",
   "~/Library/Application Support/BraveSoftware/Brave-Browser*/{ShaderCache,GrShaderCache,GraphiteDawnCache,GPUPersistentCache,component_crx_cache,extensions_crx_cache}",
@@ -125,7 +158,7 @@ running_apps = ["Brave Browser", "Brave Browser Beta", "Brave Browser Nightly"]
 warm_days = 7
 tags = ["browsers", "brave", "chromium", "cache", "gpu-cache", "service-worker", "needs-permission"]
 stacks = ["browsers", "macos"]
-description = "Brave's HTTP, code, GPU, shader and service worker caches for every profile and channel."
+description = "Brave's code, GPU, shader and service worker caches inside the browser profile. macOS protects browser profiles, so poo reads them only with Full Disk Access."
 
 [[rule]]
 id = "browser.brave-old-versions"
@@ -158,6 +191,22 @@ kind = "path"
 paths = [
   "~/Library/Caches/com.microsoft.edgemac*",
   "~/Library/Caches/Microsoft Edge*",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["Microsoft Edge", "Microsoft Edge Beta", "Microsoft Edge Dev", "Microsoft Edge Canary"]
+warm_days = 7
+tags = ["browsers", "edge", "chromium", "cache"]
+stacks = ["browsers", "macos"]
+description = "Edge's disk cache in ~/Library/Caches, one folder per profile and channel. Readable without extra permissions."
+
+[[rule]]
+id = "browser.edge-profile-caches"
+name = "Edge profile caches"
+bucket = "system"
+group = "Browsers"
+kind = "path"
+paths = [
   "~/Library/Application Support/Microsoft Edge*/*/{Code Cache,GPUCache,DawnCache,DawnGraphiteCache,DawnWebGPUCache,GrShaderCache,GraphiteDawnCache,Application Cache}",
   "~/Library/Application Support/Microsoft Edge*/*/Service Worker/{CacheStorage,ScriptCache}",
   "~/Library/Application Support/Microsoft Edge*/{ShaderCache,GrShaderCache,GraphiteDawnCache,GPUPersistentCache,component_crx_cache,extensions_crx_cache}",
@@ -168,7 +217,7 @@ running_apps = ["Microsoft Edge", "Microsoft Edge Beta", "Microsoft Edge Dev", "
 warm_days = 7
 tags = ["browsers", "edge", "chromium", "cache", "gpu-cache", "service-worker", "needs-permission"]
 stacks = ["browsers", "macos"]
-description = "Edge's HTTP, code, GPU, shader and service worker caches for every profile and channel."
+description = "Edge's code, GPU, shader and service worker caches inside the browser profile. macOS protects browser profiles, so poo reads them only with Full Disk Access."
 
 [[rule]]
 id = "browser.edge-old-versions"
@@ -217,6 +266,22 @@ kind = "path"
 paths = [
   "~/Library/Caches/company.thebrowser.Browser",
   "~/Library/Caches/Arc",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["Arc"]
+warm_days = 7
+tags = ["browsers", "arc", "chromium", "cache"]
+stacks = ["browsers", "macos"]
+description = "Arc's disk cache in ~/Library/Caches, one folder per profile and channel. Readable without extra permissions."
+
+[[rule]]
+id = "browser.arc-profile-caches"
+name = "Arc profile caches"
+bucket = "system"
+group = "Browsers"
+kind = "path"
+paths = [
   "~/Library/Application Support/Arc/User Data/*/{Code Cache,GPUCache,DawnCache,DawnGraphiteCache,DawnWebGPUCache,GrShaderCache,GraphiteDawnCache,Application Cache}",
   "~/Library/Application Support/Arc/User Data/*/Service Worker/{CacheStorage,ScriptCache}",
   "~/Library/Application Support/Arc/User Data/{ShaderCache,GrShaderCache,GraphiteDawnCache,GPUPersistentCache,component_crx_cache,extensions_crx_cache}",
@@ -227,7 +292,7 @@ running_apps = ["Arc"]
 warm_days = 7
 tags = ["browsers", "arc", "chromium", "cache", "gpu-cache", "service-worker", "needs-permission"]
 stacks = ["browsers", "macos"]
-description = "Arc's HTTP, code, GPU, shader and service worker caches; spaces, tabs and sidebar data are untouched."
+description = "Arc's code, GPU, shader and service worker caches inside the browser profile. macOS protects browser profiles, so poo reads them only with Full Disk Access."
 
 [[rule]]
 id = "browser.dia-cache"
@@ -237,6 +302,22 @@ group = "Browsers"
 kind = "path"
 paths = [
   "~/Library/Caches/Dia/User Data/*/{Cache,Code Cache}",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["Dia"]
+warm_days = 7
+tags = ["browsers", "dia", "chromium", "cache"]
+stacks = ["browsers", "macos"]
+description = "Dia's disk cache in ~/Library/Caches, one folder per profile and channel. Readable without extra permissions."
+
+[[rule]]
+id = "browser.dia-profile-caches"
+name = "Dia profile caches"
+bucket = "system"
+group = "Browsers"
+kind = "path"
+paths = [
   "~/Library/Application Support/Dia/User Data/*/{GPUCache,DawnCache,DawnGraphiteCache,DawnWebGPUCache,GrShaderCache,GraphiteDawnCache}",
   "~/Library/Application Support/Dia/User Data/*/Service Worker/{CacheStorage,ScriptCache}",
   "~/Library/Application Support/Dia/User Data/{ShaderCache,GrShaderCache,GraphiteDawnCache,GPUPersistentCache,component_crx_cache,extensions_crx_cache}",
@@ -247,7 +328,7 @@ running_apps = ["Dia"]
 warm_days = 7
 tags = ["browsers", "dia", "chromium", "cache", "gpu-cache", "service-worker", "needs-permission"]
 stacks = ["browsers", "macos"]
-description = "Dia's HTTP, code, GPU, shader and service worker caches; its bundle-id cache folder is left to the generic sweep because it also stages updates."
+description = "Dia's code, GPU, shader and service worker caches inside the browser profile. macOS protects browser profiles, so poo reads them only with Full Disk Access."
 
 # ---------------------------------------------------------------------------
 # Other Chromium browsers
@@ -262,6 +343,22 @@ kind = "path"
 paths = [
   "~/Library/Caches/com.vivaldi.Vivaldi*",
   "~/Library/Caches/Vivaldi*",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["Vivaldi", "Vivaldi Snapshot"]
+warm_days = 7
+tags = ["browsers", "vivaldi", "chromium", "cache"]
+stacks = ["browsers", "macos"]
+description = "Vivaldi's disk cache in ~/Library/Caches, one folder per profile and channel. Readable without extra permissions."
+
+[[rule]]
+id = "browser.vivaldi-profile-caches"
+name = "Vivaldi profile caches"
+bucket = "system"
+group = "Browsers"
+kind = "path"
+paths = [
   "~/Library/Application Support/Vivaldi*/*/{Code Cache,GPUCache,DawnCache,DawnGraphiteCache,DawnWebGPUCache,GrShaderCache,GraphiteDawnCache,Application Cache}",
   "~/Library/Application Support/Vivaldi*/*/Service Worker/{CacheStorage,ScriptCache}",
   "~/Library/Application Support/Vivaldi*/{ShaderCache,GrShaderCache,GraphiteDawnCache,GPUPersistentCache,component_crx_cache,extensions_crx_cache}",
@@ -272,7 +369,7 @@ running_apps = ["Vivaldi", "Vivaldi Snapshot"]
 warm_days = 7
 tags = ["browsers", "vivaldi", "chromium", "cache", "gpu-cache", "service-worker", "needs-permission"]
 stacks = ["browsers", "macos"]
-description = "Vivaldi's HTTP, code, GPU, shader and service worker caches, including Snapshot builds."
+description = "Vivaldi's code, GPU, shader and service worker caches inside the browser profile. macOS protects browser profiles, so poo reads them only with Full Disk Access."
 
 [[rule]]
 id = "browser.opera-cache"
@@ -282,6 +379,22 @@ group = "Browsers"
 kind = "path"
 paths = [
   "~/Library/Caches/com.operasoftware.*",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["Opera", "Opera GX", "Opera Air", "Opera Beta", "Opera Developer"]
+warm_days = 7
+tags = ["browsers", "opera", "chromium", "cache"]
+stacks = ["browsers", "macos"]
+description = "Opera's disk cache in ~/Library/Caches, one folder per profile and channel. Readable without extra permissions."
+
+[[rule]]
+id = "browser.opera-profile-caches"
+name = "Opera profile caches"
+bucket = "system"
+group = "Browsers"
+kind = "path"
+paths = [
   "~/Library/Application Support/com.operasoftware.*/{Code Cache,GPUCache,DawnCache,DawnGraphiteCache,DawnWebGPUCache,GrShaderCache,GraphiteDawnCache,ShaderCache,GPUPersistentCache,Application Cache,component_crx_cache,extensions_crx_cache}",
   "~/Library/Application Support/com.operasoftware.*/Service Worker/{CacheStorage,ScriptCache}",
   "~/Library/Application Support/com.operasoftware.*/_side_profiles/*/{Code Cache,GPUCache}",
@@ -290,9 +403,9 @@ cost = "rebuild"
 contents = true
 running_apps = ["Opera", "Opera GX", "Opera Air", "Opera Beta", "Opera Developer"]
 warm_days = 7
-tags = ["browsers", "opera", "chromium", "cache", "gpu-cache", "service-worker"]
+tags = ["browsers", "opera", "chromium", "cache", "gpu-cache", "service-worker", "needs-permission"]
 stacks = ["browsers", "macos"]
-description = "Caches of Opera, Opera GX and Opera Air, whose main profile sits directly in the support folder."
+description = "Opera's code, GPU, shader and service worker caches inside the browser profile. macOS protects browser profiles, so poo reads them only with Full Disk Access."
 
 [[rule]]
 id = "browser.helium-cache"
@@ -302,6 +415,22 @@ group = "Browsers"
 kind = "path"
 paths = [
   "~/Library/Caches/net.imput.helium",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["Helium"]
+warm_days = 7
+tags = ["browsers", "helium", "chromium", "cache"]
+stacks = ["browsers", "macos"]
+description = "Helium's disk cache in ~/Library/Caches, one folder per profile and channel. Readable without extra permissions."
+
+[[rule]]
+id = "browser.helium-profile-caches"
+name = "Helium profile caches"
+bucket = "system"
+group = "Browsers"
+kind = "path"
+paths = [
   "~/Library/Application Support/net.imput.helium/*/{Code Cache,GPUCache,DawnCache,DawnGraphiteCache,DawnWebGPUCache,GrShaderCache,GraphiteDawnCache,Application Cache}",
   "~/Library/Application Support/net.imput.helium/*/Service Worker/{CacheStorage,ScriptCache}",
   "~/Library/Application Support/net.imput.helium/{ShaderCache,GrShaderCache,GraphiteDawnCache,GPUPersistentCache,component_crx_cache,extensions_crx_cache}",
@@ -312,7 +441,7 @@ running_apps = ["Helium"]
 warm_days = 7
 tags = ["browsers", "helium", "chromium", "cache", "gpu-cache", "service-worker", "needs-permission"]
 stacks = ["browsers", "macos"]
-description = "Helium's HTTP, code, GPU, shader and service worker caches."
+description = "Helium's code, GPU, shader and service worker caches inside the browser profile. macOS protects browser profiles, so poo reads them only with Full Disk Access."
 
 [[rule]]
 id = "browser.comet-cache"
@@ -322,6 +451,22 @@ group = "Browsers"
 kind = "path"
 paths = [
   "~/Library/Caches/Comet",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["Comet"]
+warm_days = 7
+tags = ["browsers", "comet", "chromium", "cache"]
+stacks = ["browsers", "macos"]
+description = "Comet's disk cache in ~/Library/Caches, one folder per profile and channel. Readable without extra permissions."
+
+[[rule]]
+id = "browser.comet-profile-caches"
+name = "Comet profile caches"
+bucket = "system"
+group = "Browsers"
+kind = "path"
+paths = [
   "~/Library/Application Support/Comet/*/{Code Cache,GPUCache,DawnCache,DawnGraphiteCache,DawnWebGPUCache,GrShaderCache,GraphiteDawnCache,Application Cache}",
   "~/Library/Application Support/Comet/*/Service Worker/{CacheStorage,ScriptCache}",
   "~/Library/Application Support/Comet/{ShaderCache,GrShaderCache,GraphiteDawnCache,GPUPersistentCache,component_crx_cache,extensions_crx_cache}",
@@ -332,7 +477,7 @@ running_apps = ["Comet"]
 warm_days = 7
 tags = ["browsers", "comet", "chromium", "cache", "gpu-cache", "service-worker", "needs-permission"]
 stacks = ["browsers", "macos"]
-description = "Caches of Perplexity's Comet browser."
+description = "Comet's code, GPU, shader and service worker caches inside the browser profile. macOS protects browser profiles, so poo reads them only with Full Disk Access."
 
 [[rule]]
 id = "browser.chromium-cache"
@@ -344,6 +489,22 @@ paths = [
   "~/Library/Caches/{Chromium,Thorium}",
   "~/Library/Caches/Yandex/YandexBrowser",
   "~/Library/Caches/BrowserOS/*/{Cache,Code Cache}",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["Chromium", "Thorium", "Yandex", "BrowserOS"]
+warm_days = 7
+tags = ["browsers", "chromium", "cache"]
+stacks = ["browsers", "macos"]
+description = "Chromium-based browser's disk cache in ~/Library/Caches, one folder per profile and channel. Readable without extra permissions."
+
+[[rule]]
+id = "browser.chromium-profile-caches"
+name = "Chromium-based browser profile caches"
+bucket = "system"
+group = "Browsers"
+kind = "path"
+paths = [
   "~/Library/Application Support/{Chromium,Thorium,BrowserOS,Yandex/YandexBrowser}/*/{Code Cache,GPUCache,DawnCache,DawnGraphiteCache,DawnWebGPUCache,GrShaderCache,GraphiteDawnCache,Application Cache}",
   "~/Library/Application Support/{Chromium,Thorium,BrowserOS,Yandex/YandexBrowser}/*/Service Worker/{CacheStorage,ScriptCache}",
   "~/Library/Application Support/{Chromium,Thorium,BrowserOS,Yandex/YandexBrowser}/{ShaderCache,GrShaderCache,GraphiteDawnCache,GPUPersistentCache,component_crx_cache,extensions_crx_cache}",
@@ -354,7 +515,7 @@ running_apps = ["Chromium", "Thorium", "Yandex", "BrowserOS"]
 warm_days = 7
 tags = ["browsers", "chromium", "cache", "gpu-cache", "service-worker", "needs-permission"]
 stacks = ["browsers", "macos"]
-description = "Caches of plain Chromium (including ungoogled builds), Thorium, Yandex Browser and BrowserOS."
+description = "Chromium-based browser's code, GPU, shader and service worker caches inside the browser profile. macOS protects browser profiles, so poo reads them only with Full Disk Access."
 
 # ---------------------------------------------------------------------------
 # Firefox family
@@ -369,6 +530,22 @@ kind = "path"
 paths = [
   "~/Library/Caches/Firefox",
   "~/Library/Caches/Mozilla",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["firefox"]
+warm_days = 7
+tags = ["browsers", "firefox", "gecko", "cache"]
+stacks = ["browsers", "macos"]
+description = "Firefox's disk cache in ~/Library/Caches, one folder per profile and channel. Readable without extra permissions."
+
+[[rule]]
+id = "browser.firefox-profile-caches"
+name = "Firefox profile caches"
+bucket = "system"
+group = "Browsers"
+kind = "path"
+paths = [
   "~/Library/Application Support/Firefox/Profiles/*/{cache2,startupCache,shader-cache}",
 ]
 cost = "rebuild"
@@ -377,7 +554,7 @@ running_apps = ["firefox"]
 warm_days = 7
 tags = ["browsers", "firefox", "gecko", "cache", "needs-permission"]
 stacks = ["browsers", "macos"]
-description = "Firefox's disk, startup and shader caches for every profile (also Developer Edition and Nightly)."
+description = "Firefox's code, GPU, shader and service worker caches inside the browser profile. macOS protects browser profiles, so poo reads them only with Full Disk Access."
 
 [[rule]]
 id = "browser.zen-cache"
@@ -387,7 +564,6 @@ group = "Browsers"
 kind = "path"
 paths = [
   "~/Library/Caches/zen",
-  "~/Library/Application Support/zen/Profiles/*/{cache2,startupCache,shader-cache}",
 ]
 cost = "rebuild"
 contents = true
@@ -395,7 +571,24 @@ running_apps = ["zen"]
 warm_days = 7
 tags = ["browsers", "zen", "gecko", "cache"]
 stacks = ["browsers", "macos"]
-description = "Zen's disk, startup and shader caches."
+description = "Zen's disk cache in ~/Library/Caches, one folder per profile and channel. Readable without extra permissions."
+
+[[rule]]
+id = "browser.zen-profile-caches"
+name = "Zen profile caches"
+bucket = "system"
+group = "Browsers"
+kind = "path"
+paths = [
+  "~/Library/Application Support/zen/Profiles/*/{cache2,startupCache,shader-cache}",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["zen"]
+warm_days = 7
+tags = ["browsers", "zen", "gecko", "cache", "needs-permission"]
+stacks = ["browsers", "macos"]
+description = "Zen's code, GPU, shader and service worker caches inside the browser profile. macOS protects browser profiles, so poo reads them only with Full Disk Access."
 
 [[rule]]
 id = "browser.firefox-forks-cache"
@@ -405,7 +598,6 @@ group = "Browsers"
 kind = "path"
 paths = [
   "~/Library/Caches/{librewolf,LibreWolf,Waterfox,waterfox,Floorp,floorp}",
-  "~/Library/Application Support/{librewolf,LibreWolf,Waterfox,Floorp}/Profiles/*/{cache2,startupCache,shader-cache}",
 ]
 cost = "rebuild"
 contents = true
@@ -413,7 +605,24 @@ running_apps = ["librewolf", "waterfox", "floorp"]
 warm_days = 7
 tags = ["browsers", "gecko", "cache"]
 stacks = ["browsers", "macos"]
-description = "Disk, startup and shader caches of Firefox-based browsers."
+description = "Firefox fork's disk cache in ~/Library/Caches, one folder per profile and channel. Readable without extra permissions."
+
+[[rule]]
+id = "browser.firefox-forks-profile-caches"
+name = "Firefox fork profile caches"
+bucket = "system"
+group = "Browsers"
+kind = "path"
+paths = [
+  "~/Library/Application Support/{librewolf,LibreWolf,Waterfox,Floorp}/Profiles/*/{cache2,startupCache,shader-cache}",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["librewolf", "waterfox", "floorp"]
+warm_days = 7
+tags = ["browsers", "gecko", "cache", "needs-permission"]
+stacks = ["browsers", "macos"]
+description = "Firefox fork's code, GPU, shader and service worker caches inside the browser profile. macOS protects browser profiles, so poo reads them only with Full Disk Access."
 
 # ---------------------------------------------------------------------------
 # WebKit browsers
@@ -430,7 +639,7 @@ cost = "rebuild"
 contents = true
 running_apps = ["Safari", "Safari Technology Preview"]
 warm_days = 7
-tags = ["browsers", "safari", "webkit", "cache"]
+tags = ["browsers", "safari", "webkit", "cache", "needs-permission"]
 stacks = ["browsers", "macos"]
 description = "Safari's web cache and the shared WebKit network cache."
 

@@ -343,6 +343,8 @@ tags = ["cpp", "cmake", "build-output"]
 stacks = ["cmake", "cpp"]
 names = ["*"]
 children_all = ["CMakeCache.txt"]
+# An in-source build (`cmake .`) puts CMakeCache.txt next to the sources; never match that.
+children_none = ["CMakeLists.txt", ".git"]
 cost = "rebuild"
 rebuild = "cmake -B <dir> && cmake --build <dir>"
 description = "Any folder holding a CMakeCache.txt is a CMake build tree (build/, cmake-build-debug/, out/...)."
@@ -357,6 +359,7 @@ tags = ["cpp", "meson", "build-output"]
 stacks = ["cmake", "cpp"]
 names = ["*"]
 children_all = ["build.ninja", "meson-private"]
+children_none = ["meson.build", ".git"]
 cost = "rebuild"
 rebuild = "meson setup <dir> && ninja -C <dir>"
 description = "Meson build directories."

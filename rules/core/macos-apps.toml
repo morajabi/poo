@@ -293,7 +293,7 @@ cost = "rebuild"
 contents = true
 running_apps = ["Mail"]
 warm_days = 14
-tags = ["mail", "cache", "macos"]
+tags = ["mail", "cache", "macos", "needs-permission"]
 stacks = ["macos"]
 description = "Apple Mail's cache folder; mailboxes in ~/Library/Mail are never touched."
 
