@@ -243,6 +243,9 @@ pub struct Fixture {
     /// Full path, for rules with path_contains. Defaults to /x/project/<name>.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
+    /// Files to create inside the folder with this content, for rules with `contains`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub files: BTreeMap<String, String>,
     /// Whether the rule must match.
     pub matches: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -270,6 +273,16 @@ pub fn read_fixtures(dir: &Path) -> Result<Vec<(String, Fixture)>> {
 }
 
 pub fn fixture_matches(rule: &Rule, fx: &Fixture) -> bool {
+    if !fx.files.is_empty() {
+        // Content checks read real files: build the folder in a temp dir.
+        let base = std::env::temp_dir().join(format!("poo-fixture-{}-{}", std::process::id(), crate::util::short_hash(&format!("{:?}", fx))));
+        let dir = base.join(&fx.name);
+        let ok = std::fs::create_dir_all(&dir).is_ok()
+            && fx.files.iter().all(|(n, t)| std::fs::write(dir.join(n), t).is_ok())
+            && rule.matches_artifact(&fx.name, &dir, &fx.parent, &fx.children);
+        let _ = std::fs::remove_dir_all(&base);
+        return ok;
+    }
     let path = fx.path.clone().unwrap_or_else(|| format!("/x/project/{}", fx.name));
     rule.matches_artifact(&fx.name, Path::new(&path), &fx.parent, &fx.children)
 }
@@ -773,6 +786,7 @@ fn fixtures_from_report(rule: &Rule, report: Option<&Report>) -> Vec<Fixture> {
                 parent: mentioned(&parent, &[&rule.parent_any, &rule.parent_all]),
                 children: mentioned(&children, &[&rule.children_any, &rule.children_all]),
                 path: None,
+                files: BTreeMap::new(),
                 matches: true,
                 note: Some("seen on the submitter's Mac".into()),
             };

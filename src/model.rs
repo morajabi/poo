@@ -220,6 +220,9 @@ pub struct RuleSpec {
     pub children_none: Option<Vec<String>>,
     pub path_contains: Option<Vec<String>>,
     pub path_excludes: Option<Vec<String>>,
+    /// Files inside the folder that must start with this text (`{ "CACHEDIR.TAG" = "Signature: 8a47..." }`).
+    /// Read only after every name matcher passed.
+    pub contains: Option<BTreeMap<String, String>>,
     /// Only match when git ignores the folder (for generic names like dist or build).
     pub ignored: Option<bool>,
     // path matching

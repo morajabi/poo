@@ -97,6 +97,8 @@ pub struct Rule {
     pub children_none: NameSet,
     pub path_contains: Vec<String>,
     pub path_excludes: Vec<String>,
+    /// (file inside the folder, text it must start with).
+    pub contains: Vec<(String, String)>,
     pub ignored: bool,
     pub paths: Vec<String>,
     pub each: bool,
@@ -154,6 +156,11 @@ impl Rule {
         }
         if self.path_excludes.iter().any(|s| p.contains(s.as_str())) {
             return false;
+        }
+        for (file, prefix) in &self.contains {
+            if !file_starts_with(&path.join(file), prefix) {
+                return false;
+            }
         }
         true
     }
@@ -430,7 +437,7 @@ pub fn merge_rule(base: &mut RuleSpec, o: &RuleSpec) {
     merge_opt!(
         base, o, name, bucket, group, kind, description, recommend, tags, stacks, enabled, names, parent_any,
         parent_all, parent_none, children_any, children_all, children_none, path_contains,
-        path_excludes, ignored, paths, each, files, extensions, exclude, min_age_days, min_bytes, system, contents, running_apps,
+        path_excludes, contains, ignored, paths, each, files, extensions, exclude, min_age_days, min_bytes, system, contents, running_apps,
         provider, params, cost, tier, rebuild, warm_days, idle_days, action, command
     );
 }
@@ -676,6 +683,9 @@ pub fn load(cfg: &Config) -> Catalog {
             Err(e) => errors.push(format!("rule `{}` ({}): {}", id, src, e)),
         }
     }
+    // The first matching artifact rule wins: catch-all rules (tag "fallback") go last so a
+    // specific rule always explains a folder first.
+    compiled.sort_by_key(|r| r.tags.iter().any(|t| t == "fallback"));
 
     Catalog {
         mods,
@@ -746,6 +756,7 @@ fn compile_rule(s: &RuleSpec, src: &str, dir: Option<PathBuf>, buckets: &[Bucket
         children_none: ns(&s.children_none)?,
         path_contains: s.path_contains.clone().unwrap_or_default(),
         path_excludes: s.path_excludes.clone().unwrap_or_default(),
+        contains: s.contains.clone().unwrap_or_default().into_iter().collect(),
         ignored: s.ignored.unwrap_or(false),
         paths: s.paths.clone().unwrap_or_default(),
         each: s.each.unwrap_or(false),
@@ -771,4 +782,15 @@ fn compile_rule(s: &RuleSpec, src: &str, dir: Option<PathBuf>, buckets: &[Bucket
         spec: s.clone(),
         needs_permission: false,
     })
+}
+
+/// Whether a file starts with `prefix` (reads at most that many bytes; missing files fail).
+fn file_starts_with(path: &Path, prefix: &str) -> bool {
+    use std::io::Read;
+    let Ok(f) = std::fs::File::open(path) else { return false };
+    let mut buf = Vec::with_capacity(prefix.len());
+    if f.take(prefix.len() as u64).read_to_end(&mut buf).is_err() {
+        return false;
+    }
+    buf == prefix.as_bytes()
 }
