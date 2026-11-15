@@ -38,7 +38,7 @@ jobs:
 
   # The release build path, ad-hoc and one arch: icon, Sparkle embedding, signing order.
   bundle:
-    runs-on: macos-15
+    runs-on: macos-26  # actool crashes compiling the .icon on macos-15 images
     steps:
       - uses: actions/checkout@v4
       - name: newest Xcode (actool compiles the Icon Composer icon)

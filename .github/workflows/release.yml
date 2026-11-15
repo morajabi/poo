@@ -82,7 +82,7 @@ jobs:
   # stapled when the secrets exist, ad-hoc signed otherwise.
   app:
     needs: version
-    runs-on: macos-15
+    runs-on: macos-26  # actool crashes compiling the .icon on macos-15 images
     outputs:
       signing: ${{ steps.verify.outputs.signing }}
     env:
