@@ -68,7 +68,7 @@ struct CleanConfirmView: View {
                             TierBadge(tier: i.tier)
                             Text(Fmt.bytes(i.total_bytes)).monospacedDigit().frame(width: 72, alignment: .trailing)
                         }
-                        Text(i.reasons.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        Text(([i.comesBack] + i.reasons).joined(separator: " · ")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                         ForEach((i.risks ?? []).filter(\.isWarning), id: \.tag) { r in
                             Label(r.message, systemImage: r.isDangerous ? "exclamationmark.octagon.fill" : "exclamationmark.triangle.fill")
                                 .font(.caption)
@@ -179,7 +179,7 @@ struct WhatHappensView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 8))
+        .card()
     }
 }
 

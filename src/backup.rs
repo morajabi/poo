@@ -207,6 +207,7 @@ pub struct PruneResult {
 /// Prunes backups by id, or every backup older than `older_than_days` (files kind only when
 /// `files_only`, which automatic pruning uses so stashes and branches stay until a person acts).
 pub fn prune(ids: &[String], older_than_days: Option<u32>, files_only: bool, dry_run: bool) -> PruneResult {
+    let dry_run = dry_run || crate::clean::read_only();
     let all = read_all();
     let cutoff = older_than_days.map(|d| now() - d as i64 * 86400);
     let selected = |b: &Backup| {

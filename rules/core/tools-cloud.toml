@@ -198,3 +198,31 @@ warm_days = 30
 tags = ["infra", "ansible", "cache"]
 stacks = ["ansible"]
 description = "Leftover temp files from Ansible runs and the Galaxy API cache; installed collections and roles stay."
+
+[[rule]]
+id = "ci.quality-tool-caches"
+name = "CI and code quality caches"
+bucket = "caches"
+group = "CI tools"
+kind = "path"
+paths = ["~/.sonar/cache", "~/.cache/gitlab-runner"]
+cost = "rebuild"
+rebuild = "Downloaded or rebuilt on the next analysis or job"
+warm_days = 30
+tags = ["ci", "cache"]
+stacks = ["ci"]
+description = "SonarScanner's plugin and analysis cache and GitLab Runner's local job cache."
+
+[[rule]]
+id = "ci.jenkins-workspace-builds"
+name = "Local Jenkins workspace build output"
+bucket = "build"
+group = "CI tools"
+kind = "path"
+paths = ["~/.jenkins/workspace/*/target", "~/.jenkins/workspace/*/build"]
+cost = "rebuild"
+rebuild = "Rebuilt by the next job run"
+warm_days = 14
+tags = ["ci", "build-output"]
+stacks = ["ci", "jvm"]
+description = "Maven and Gradle output in the workspaces of a Jenkins server running on this Mac."

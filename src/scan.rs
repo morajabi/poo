@@ -222,7 +222,6 @@ impl<'a> Walker<'a> {
             if let Some(rule) = matched {
                 let (mut s, children) = self.ctx.size_entries(&child, dev, &HashSet::new());
                 s.bytes += e.alloc;
-                s.newest = s.newest.max(e.mtime);
                 self.items.lock().unwrap().push(Raw {
                     path: e.path.clone(),
                     name: self.label(&e.path, &proj),
@@ -315,7 +314,6 @@ impl<'a> Walker<'a> {
             if let Some(rule) = self.rules.iter().find(|r| (!r.ignored || is_ignored) && r.matches_artifact(&e.name, &e.path, &entry_names, &child_names)) {
                 let (mut s, children) = self.ctx.size_entries(&child, dev, &HashSet::new());
                 s.bytes += e.alloc;
-                s.newest = s.newest.max(e.mtime);
                 self.items.lock().unwrap().push(Raw {
                     path: e.path.clone(),
                     name: self.label(&e.path, &proj),
@@ -511,6 +509,9 @@ pub fn scan(cfg: &Config, cat: &Catalog, opts: &ScanOptions) -> Report {
         let mut exclude: HashSet<PathBuf> = claimed.clone();
         exclude.insert(home().join("Library"));
         exclude.insert(home().join(".Trash"));
+        // OrbStack mounts container and VM filesystems here: slow to walk, and their space is
+        // already counted in its disk image.
+        exclude.insert(home().join("OrbStack"));
         let mut gb = globset::GlobSetBuilder::new();
         for x in &cfg.scan.exclude {
             if let Ok(g) = globset::Glob::new(&expand(x).to_string_lossy()) {
@@ -1019,7 +1020,8 @@ fn build_report(
     for mut raw in kept {
         let Some(rule) = cat.rule(&raw.rule) else { continue };
         let (sized, children) = raw.sized.take().unwrap_or((Sized::default(), vec![]));
-        if sized.bytes < cfg.scan.min_item_bytes.max(rule.min_bytes) && raw.action != Some(ActionKind::WorktreeRemove) {
+        let size_unknown = raw.meta.get("size_unknown").and_then(|v| v.as_bool()) == Some(true);
+        if sized.bytes < cfg.scan.min_item_bytes.max(rule.min_bytes) && raw.action != Some(ActionKind::WorktreeRemove) && !size_unknown {
             continue;
         }
         let fp = raw.project.as_deref().and_then(find_project);
@@ -1075,10 +1077,31 @@ fn build_report(
             ));
         }
         let cost = raw.cost.unwrap_or(rule.cost);
-        let action_kind = raw.action.unwrap_or(rule.action);
-        let command = raw.command.clone().or_else(|| rule.command.clone());
+        let mut action_kind = raw.action.unwrap_or(rule.action);
+        let mut command = raw.command.clone().or_else(|| rule.command.clone());
+        // Owner-command cleaning: the tool's own command instead of deleting the folder.
+        if !raw.is_virtual && matches!(action_kind, ActionKind::Delete | ActionKind::Trash) {
+            if let Some(cmd) = rule.owner_command() {
+                action_kind = ActionKind::Command;
+                command = Some(cmd);
+                raw.meta.insert("owner_cleanup".into(), Value::Bool(true));
+            }
+        }
+        // A command that cleans a folder is judged by re-measuring that folder afterwards.
+        if !raw.is_virtual && action_kind == ActionKind::Command {
+            raw.meta.insert("measure".into(), Value::from("path"));
+        }
+        let report_only = rule.report_only || raw.report_only;
+        let recommend = raw.meta.remove("recommend").and_then(|v| v.as_str().map(String::from)).or_else(|| rule.recommend.clone());
         let path_s = raw.path.to_string_lossy().to_string();
-        let safeguards = safeguards_for(cfg, rule, action_kind, command.as_deref(), &raw, &risks);
+        let safeguards = if report_only {
+            vec![match &recommend {
+                Some(r) => format!("poo shows it but never cleans it: {}", r),
+                None => "poo shows it but never cleans it".to_string(),
+            }]
+        } else {
+            safeguards_for(cfg, rule, action_kind, command.as_deref(), &raw, &risks)
+        };
         if rule.contents {
             raw.meta.insert("contents".into(), Value::Bool(true));
         }
@@ -1106,6 +1129,8 @@ fn build_report(
             safeguards,
             children: children.into_iter().take(16).collect(),
             meta: raw.meta,
+            report_only,
+            recommend,
         });
     }
     items.sort_by(|a, b| b.bytes.cmp(&a.bytes));
@@ -1122,6 +1147,7 @@ fn build_report(
             symbol: b.symbol.clone(),
             description: b.description.clone(),
             hidden: b.hidden,
+            report_only: b.report_only,
             bytes: 0,
             count: 0,
             tiers: BTreeMap::new(),
@@ -1207,6 +1233,7 @@ fn build_report(
         e.1 += it.bytes;
     }
     let disk = crate::fsutil::disk_info(&home());
+    let items_report_only_bytes: u64 = items.iter().filter(|i| i.report_only).map(|i| i.bytes).sum();
     let mut report = Report {
         schema: SCHEMA,
         version: env!("CARGO_PKG_VERSION").into(),
@@ -1214,7 +1241,7 @@ fn build_report(
         duration_ms: started.elapsed().as_millis() as u64,
         disk,
         roots: roots.iter().map(|r| r.to_string_lossy().to_string()).collect(),
-        total_bytes: items.iter().map(|i| i.bytes).sum(),
+        total_bytes: items.iter().filter(|i| !i.report_only).map(|i| i.bytes).sum(),
         buckets,
         plans: vec![],
         projects,
@@ -1222,6 +1249,8 @@ fn build_report(
         warnings,
         detected,
         rule_hits,
+        report_only_bytes: items_report_only_bytes,
+        growth: None,
     };
     report.plans = crate::plan::summaries(cat, &report);
     report
@@ -1274,7 +1303,18 @@ fn safeguards_for(cfg: &Config, rule: &Rule, action: ActionKind, command: Option
         }
         ActionKind::Command => {
             if let Some(c) = command {
-                v.push(format!("Runs `{}`", c.join(" ")));
+                let mut shown = c.to_vec();
+                if let Some(first) = shown.first_mut() {
+                    *first = Path::new(first.as_str()).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                }
+                if raw.meta.get("owner_cleanup").and_then(|m| m.as_bool()) == Some(true) {
+                    v.push(format!("Runs `{}`, {}'s own cleanup, instead of deleting the folder; frees what it no longer needs", shown.join(" "), shown[0]));
+                } else {
+                    v.push(format!("Runs `{}`", shown.join(" ")));
+                }
+                if let Some(p) = &rule.probe {
+                    v.push(format!("Only when `{}` answers; otherwise it is skipped", p.join(" ")));
+                }
             }
         }
         ActionKind::None => v.push("Poo shows it but leaves cleaning to you".into()),
@@ -1290,6 +1330,17 @@ pub fn report_path() -> PathBuf {
 pub fn save_report(r: &Report) -> anyhow::Result<()> {
     let p = report_path();
     std::fs::create_dir_all(p.parent().unwrap())?;
+    // Growth history: one sample per save (thinned), and the summary rides along in the file.
+    crate::growth::record(r);
+    let mut with_growth;
+    let r = match crate::growth::summary(r) {
+        Some(g) => {
+            with_growth = r.clone();
+            with_growth.growth = Some(g);
+            &with_growth
+        }
+        None => r,
+    };
     let tmp = p.with_extension(format!("json.tmp-{}", std::process::id()));
     std::fs::write(&tmp, serde_json::to_vec(r)?)?;
     std::fs::rename(tmp, p)?;
@@ -1360,6 +1411,9 @@ fn slow_providers(cat: &Catalog, devices_json: Option<&Value>) -> (Vec<Raw>, Vec
     for r in rule_with_provider(cat, "homebrew") {
         out.extend(providers::homebrew(r));
     }
+    for r in rule_with_provider(cat, "snapshots") {
+        out.extend(providers::snapshots::snapshots(r));
+    }
     for r in rule_with_provider(cat, "exec") {
         match providers::exec(r) {
             Ok(items) => out.extend(items),
@@ -1376,7 +1430,7 @@ fn slow_providers(cat: &Catalog, devices_json: Option<&Value>) -> (Vec<Raw>, Vec
 // Scan index and incremental rescans
 // ---------------------------------------------------------------------------
 
-const INDEX_VERSION: u32 = 1;
+const INDEX_VERSION: u32 = 2;
 /// Slow providers (Docker, Homebrew, app leftovers, runtimes) are reused this long.
 const SLOW_TTL: i64 = 15 * 60;
 /// A full walk at least this often catches anything the journal cannot tell.

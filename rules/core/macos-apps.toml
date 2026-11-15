@@ -412,15 +412,33 @@ name = "Spotify cache"
 bucket = "system"
 group = "Media & design"
 kind = "path"
-paths = ["~/Library/Application Support/Spotify/PersistentCache", "~/Library/Caches/com.spotify.client"]
-cost = "redownload"
-contents = true
+paths = ["~/Library/Caches/com.spotify.client"]
+each = true
+# Data (and the PersistentCache below) can hold offline downloads; they have their own
+# review-only rule.
+exclude = ["Data", "*ffline*", "Storage"]
+cost = "rebuild"
 running_apps = ["Spotify"]
 warm_days = 14
 tags = ["music", "media", "cache"]
 stacks = ["macos"]
-description = "Spotify's streaming cache, which also holds songs you downloaded for offline listening."
-recommend = "Offline playlists download again the next time you open Spotify online."
+description = "Spotify's web view and HTTP caches. Songs saved for offline listening are never included."
+
+[[rule]]
+id = "app.spotify-offline"
+name = "Spotify streaming and offline storage"
+bucket = "system"
+group = "Media & design"
+kind = "path"
+paths = ["~/Library/Caches/com.spotify.client/Data", "~/Library/Application Support/Spotify/PersistentCache"]
+cost = "redownload"
+tier = "review"
+running_apps = ["Spotify"]
+warm_days = 30
+tags = ["music", "media", "offline"]
+stacks = ["macos"]
+description = "Spotify's streaming cache together with songs and podcasts you downloaded for offline listening. Shown for review only, never planned."
+recommend = "To make it smaller, remove downloads or lower the cache size in Spotify's Settings > Storage; clearing it here would drop your offline music."
 
 [[rule]]
 id = "app.apple-media-cache"
@@ -751,3 +769,34 @@ warm_days = 14
 tags = ["launchers", "cache"]
 stacks = ["macos"]
 description = "Favicon, preview and web caches of Raycast and Alfred; clipboard history, snippets and settings live elsewhere and are never touched."
+
+[[rule]]
+id = "app.lightroom-previews"
+name = "Lightroom Classic previews"
+bucket = "system"
+group = "Media & design"
+kind = "path"
+paths = ["~/Pictures/*/*Previews.lrdata", "~/Pictures/*Previews.lrdata"]
+exclude = ["*Smart Previews.lrdata"]
+cost = "rebuild"
+tier = "review"
+running_apps = ["Adobe Lightroom Classic"]
+tags = ["photos", "media", "cache"]
+stacks = ["macos"]
+description = "Thumbnails and standard previews next to a Lightroom Classic catalog; Lightroom renders them again as you browse."
+recommend = "Prefer Library > Previews > Discard 1:1 Previews in Lightroom; Smart Previews are left alone because they may be your only offline copy."
+
+[[rule]]
+id = "app.steam-partial-downloads"
+name = "Steam partial downloads"
+bucket = "junk"
+group = "Games"
+kind = "path"
+paths = ["~/Library/Application Support/Steam/steamapps/downloading"]
+contents = true
+cost = "redownload"
+running_apps = ["steam_osx", "Steam"]
+min_age_days = 7
+tags = ["games", "downloads"]
+stacks = ["macos"]
+description = "Unfinished game downloads and updates Steam left behind. Only while Steam is closed."

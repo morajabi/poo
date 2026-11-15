@@ -87,6 +87,7 @@ pub fn eligible(plan: &Plan, i: &Item) -> bool {
         && i.cost.rank() <= plan.max_cost.rank()
         && !plan.exclude_buckets.contains(&i.bucket)
         && i.action.kind != ActionKind::None
+        && !i.report_only
 }
 
 /// Bytes a greedy plan should free to reach its free-space target.

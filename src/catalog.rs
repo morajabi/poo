@@ -21,6 +21,7 @@ pub const PROVIDERS: &[(&str, &str)] = &[
     ("homebrew", "Old Homebrew versions and downloads that brew cleanup would remove"),
     ("versions", "Old versions in a versions folder, keeping the active one (symlink target) and the newest N"),
     ("app-leftovers", "Caches, logs and support folders of apps that are no longer installed"),
+    ("snapshots", "Purgeable space and local APFS snapshots (Time Machine and other apps); report first"),
     ("exec", "Any executable in a mod that prints {\"items\": [...]} as JSON"),
 ];
 
@@ -97,6 +98,8 @@ pub struct Rule {
     pub children_none: NameSet,
     pub path_contains: Vec<String>,
     pub path_excludes: Vec<String>,
+    /// (file inside the folder, text it must start with).
+    pub contains: Vec<(String, String)>,
     pub ignored: bool,
     pub paths: Vec<String>,
     pub each: bool,
@@ -122,6 +125,10 @@ pub struct Rule {
     pub spec: RuleSpec,
     /// Reads other apps' protected data: on only with Full Disk Access or an explicit enable.
     pub needs_permission: bool,
+    pub report_only: bool,
+    pub clean_command: Option<Vec<String>>,
+    pub probe: Option<Vec<String>>,
+    pub timeout_secs: u64,
 }
 
 impl Rule {
@@ -155,7 +162,22 @@ impl Rule {
         if self.path_excludes.iter().any(|s| p.contains(s.as_str())) {
             return false;
         }
+        for (file, prefix) in &self.contains {
+            if !file_starts_with(&path.join(file), prefix) {
+                return false;
+            }
+        }
         true
+    }
+
+    /// The owner command to clean with, when this rule has one and its tool is installed.
+    pub fn owner_command(&self) -> Option<Vec<String>> {
+        let cmd = self.clean_command.as_ref().filter(|c| !c.is_empty())?;
+        crate::util::which(&cmd[0]).map(|bin| {
+            let mut argv = cmd.clone();
+            argv[0] = bin.to_string_lossy().to_string();
+            argv
+        })
     }
 
     pub fn param_str(&self, key: &str) -> Option<String> {
@@ -182,6 +204,7 @@ pub struct Bucket {
     pub symbol: String,
     pub description: String,
     pub hidden: bool,
+    pub report_only: bool,
     pub source: String,
 }
 
@@ -430,13 +453,14 @@ pub fn merge_rule(base: &mut RuleSpec, o: &RuleSpec) {
     merge_opt!(
         base, o, name, bucket, group, kind, description, recommend, tags, stacks, enabled, names, parent_any,
         parent_all, parent_none, children_any, children_all, children_none, path_contains,
-        path_excludes, ignored, paths, each, files, extensions, exclude, min_age_days, min_bytes, system, contents, running_apps,
-        provider, params, cost, tier, rebuild, warm_days, idle_days, action, command
+        path_excludes, contains, ignored, paths, each, files, extensions, exclude, min_age_days, min_bytes, system, contents, running_apps,
+        provider, params, cost, tier, rebuild, warm_days, idle_days, action, command, report_only,
+        clean_command, probe, timeout_secs
     );
 }
 
 pub fn merge_bucket(base: &mut BucketSpec, o: &BucketSpec) {
-    merge_opt!(base, o, name, order, color, symbol, description, hidden);
+    merge_opt!(base, o, name, order, color, symbol, description, hidden, report_only);
 }
 
 fn merge_plan(base: &mut PlanSpec, o: &PlanSpec) {
@@ -630,6 +654,7 @@ pub fn load(cfg: &Config) -> Catalog {
                 symbol: b.symbol.clone().unwrap_or_else(|| "folder".into()),
                 description: b.description.clone().unwrap_or_default(),
                 hidden: b.hidden.unwrap_or(false),
+                report_only: b.report_only.unwrap_or(false),
                 source: src.clone(),
             }
         })
@@ -676,6 +701,9 @@ pub fn load(cfg: &Config) -> Catalog {
             Err(e) => errors.push(format!("rule `{}` ({}): {}", id, src, e)),
         }
     }
+    // The first matching artifact rule wins: catch-all rules (tag "fallback") go last so a
+    // specific rule always explains a folder first.
+    compiled.sort_by_key(|r| r.tags.iter().any(|t| t == "fallback"));
 
     Catalog {
         mods,
@@ -726,6 +754,21 @@ fn compile_rule(s: &RuleSpec, src: &str, dir: Option<PathBuf>, buckets: &[Bucket
     if action == ActionKind::Command && s.command.is_none() && kind != RuleKind::Provider {
         return Err("action `command` needs `command`".into());
     }
+    for (field, v) in [("clean_command", &s.clean_command), ("probe", &s.probe)] {
+        if let Some(argv) = v {
+            if argv.is_empty() || argv[0].trim().is_empty() {
+                return Err(format!("`{}` needs a program and its arguments", field));
+            }
+            // argv only: poo never runs a shell, so shell syntax would be passed literally.
+            if matches!(argv[0].as_str(), "sh" | "bash" | "zsh" | "fish" | "env" | "sudo" | "/bin/sh" | "/bin/bash" | "/bin/zsh" | "/usr/bin/env" | "/usr/bin/sudo") {
+                return Err(format!("`{}` runs a program directly; shells, env and sudo are not allowed", field));
+            }
+            if argv[0].contains('/') {
+                return Err(format!("`{}` names a tool on PATH (like `pnpm`), not a path", field));
+            }
+        }
+    }
+    let bucket_report_only = buckets.iter().find(|b| b.id == bucket).map_or(false, |b| b.report_only);
     Ok(Rule {
         id: s.id.clone(),
         group: s.group.clone().unwrap_or_else(|| name.clone()),
@@ -746,6 +789,7 @@ fn compile_rule(s: &RuleSpec, src: &str, dir: Option<PathBuf>, buckets: &[Bucket
         children_none: ns(&s.children_none)?,
         path_contains: s.path_contains.clone().unwrap_or_default(),
         path_excludes: s.path_excludes.clone().unwrap_or_default(),
+        contains: s.contains.clone().unwrap_or_default().into_iter().collect(),
         ignored: s.ignored.unwrap_or(false),
         paths: s.paths.clone().unwrap_or_default(),
         each: s.each.unwrap_or(false),
@@ -770,5 +814,20 @@ fn compile_rule(s: &RuleSpec, src: &str, dir: Option<PathBuf>, buckets: &[Bucket
         mod_dir: dir,
         spec: s.clone(),
         needs_permission: false,
+        report_only: s.report_only.unwrap_or(false) || bucket_report_only,
+        clean_command: s.clean_command.clone(),
+        probe: s.probe.clone(),
+        timeout_secs: s.timeout_secs.unwrap_or(600).clamp(1, 3600),
     })
+}
+
+/// Whether a file starts with `prefix` (reads at most that many bytes; missing files fail).
+fn file_starts_with(path: &Path, prefix: &str) -> bool {
+    use std::io::Read;
+    let Ok(f) = std::fs::File::open(path) else { return false };
+    let mut buf = Vec::with_capacity(prefix.len());
+    if f.take(prefix.len() as u64).read_to_end(&mut buf).is_err() {
+        return false;
+    }
+    buf == prefix.as_bytes()
 }

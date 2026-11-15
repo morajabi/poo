@@ -495,3 +495,26 @@ cost = "none"
 tags = ["editor", "helix", "logs"]
 stacks = ["helix"]
 description = "The log file Helix appends to on every run."
+
+[[rule]]
+id = "devtools.api-db-client-caches"
+name = "API and database client caches"
+bucket = "system"
+group = "Dev utilities"
+kind = "path"
+paths = [
+  "~/Library/Caches/com.insomnia.*",
+  "~/Library/Caches/com.postmanlabs.mac*",
+  "~/Library/Caches/com.mongodb.compass*",
+  "~/Library/Caches/com.redis.*",
+  "~/Library/Caches/com.redislabs.*",
+  "~/Library/Caches/com.prect.Navicat*",
+  "~/Library/Caches/com.navicat.*",
+]
+contents = true
+cost = "rebuild"
+running_apps = ["Insomnia", "Postman", "MongoDB Compass", "Redis Insight", "RedisInsight", "Navicat Premium", "Navicat for MySQL", "Navicat for PostgreSQL"]
+warm_days = 14
+tags = ["devtools", "cache"]
+stacks = ["macos"]
+description = "HTTP and web view caches of Insomnia, Postman, MongoDB Compass, Redis Insight and Navicat. Saved requests and connections live elsewhere and stay."

@@ -29,6 +29,8 @@ fn item(path: &str, kind: ActionKind) -> Item {
         safeguards: vec![],
         children: vec![],
         meta: BTreeMap::new(),
+        report_only: false,
+        recommend: None,
     }
 }
 
@@ -272,4 +274,63 @@ fn contrib_lint_and_scrub() {
     assert!(errors(art(&[".acme-cache"], None, None, None)).is_empty(), "specific names need nothing else");
     assert_eq!(replace_word("Built by mo for inline-chat", "inline-chat", "<project>"), "Built by mo for <project>");
     assert_eq!(replace_word("inlined code", "inline", "<project>"), "inlined code");
+}
+
+#[test]
+fn versions_keep_newest_per_folder_by_os_version() {
+    use poo::providers::version_key;
+    // Device Support names: OS version first (device model prefix ignored), then the build.
+    assert!(version_key("17.5.1 (21F90)") > version_key("17.5 (21F79)"));
+    assert!(version_key("iPhone16,1 18.0 (22A3354)") > version_key("17.5.1 (21F90)"));
+    assert!(version_key("10.0 (14A345)") > version_key("9.3.5 (13G36)"), "numeric, not string, order");
+    assert!(version_key("Current").is_none());
+
+    let base = std::env::temp_dir().join(format!("poo-versions-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    for (dir, names) in [
+        ("iOS DeviceSupport", &["16.4 (20E247)", "17.5 (21F79)", "18.1 (22B83)", "9.3 (13E233)"][..]),
+        ("watchOS DeviceSupport", &["Watch6,1 10.5 (21T576)"][..]),
+    ] {
+        for n in names {
+            std::fs::create_dir_all(base.join(dir).join(n)).unwrap();
+        }
+    }
+    let cat = catalog::load(&Config::default());
+    let mut rule = cat.rule("xcode.device-support").unwrap().clone();
+    rule.params.insert("path".into(), toml::Value::Array(vec![toml::Value::String(format!("{}/*DeviceSupport", base.display()))]));
+    let names: Vec<String> = poo::providers::versions(&rule).into_iter().map(|r| r.name).collect();
+    assert_eq!(names.len(), 2, "{:?}", names);
+    assert!(names.contains(&"16.4 (20E247)".to_string()) && names.contains(&"9.3 (13E233)".to_string()), "{:?}", names);
+    // A folder with a name it cannot order keeps everything.
+    std::fs::create_dir_all(base.join("iOS DeviceSupport/Unknown")).unwrap();
+    assert!(poo::providers::versions(&rule).is_empty());
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[test]
+fn offline_music_and_running_dlx_are_protected() {
+    let cat = catalog::load(&Config::default());
+    let sp = cat.rule("app.spotify-cache").unwrap();
+    assert!(sp.exclude.matches("Data"), "Spotify's offline storage is never in the cache rule");
+    assert!(sp.paths.iter().all(|p| !p.contains("PersistentCache")));
+    assert_eq!(cat.rule("app.spotify-offline").unwrap().tier, Some(Tier::Review));
+    assert!(cat.rule("pnpm.metadata-cache").unwrap().exclude.matches("dlx"));
+    assert!(cat.rule("pnpm.dlx-cache").unwrap().running_apps.iter().any(|a| a == "pnpm"));
+    // Catch-all rules sort after every specific rule.
+    let first_fallback = cat.rules.iter().position(|r| r.tags.iter().any(|t| t == "fallback")).unwrap();
+    assert!(cat.rules[first_fallback..].iter().all(|r| r.tags.iter().any(|t| t == "fallback")));
+}
+
+#[test]
+fn elsewhere_rules_are_report_only() {
+    let cat = catalog::load(&Config::default());
+    let aware: Vec<_> = cat.rules.iter().filter(|r| r.id.starts_with("aware.")).collect();
+    assert!(aware.len() >= 7);
+    for r in aware {
+        assert!(r.report_only, "{} must be report-only", r.id);
+        assert!(r.recommend.is_some(), "{} must say where to manage it", r.id);
+    }
+    // Partial Steam downloads are the one cleanable piece, and only while Steam is closed.
+    let steam = cat.rule("app.steam-partial-downloads").unwrap();
+    assert!(!steam.report_only && !steam.running_apps.is_empty());
 }

@@ -59,6 +59,7 @@ paths = [
   "~/Library/Application Support/Google/Chrome*/OptGuideOnDeviceModel",
   "~/Library/Application Support/Google/Chrome*/OptGuideOnDeviceClassifierModel",
   "~/Library/Application Support/Google/Chrome*/optimization_guide_model_store",
+  "~/Library/Application Support/Google/Chrome*/OptimizationGuidePredictionModels",
 ]
 cost = "redownload"
 contents = true
@@ -67,7 +68,7 @@ warm_days = 30
 tags = ["browsers", "chrome", "ai-models", "needs-permission"]
 stacks = ["browsers", "macos"]
 description = "Gemini Nano and other on-device models Chrome downloads for its built-in AI features, often several GB."
-recommend = "Chrome downloads them again when a feature needs them. Turn the AI features off in chrome://settings to keep them away."
+recommend = "They come back: Chrome downloads them again unless the on-device model is turned off (chrome://flags/#optimization-guide-on-device-model, or the GenAILocalFoundationalModelSettings = 1 policy)."
 
 [[rule]]
 id = "browser.chrome-old-versions"
@@ -657,3 +658,19 @@ warm_days = 7
 tags = ["browsers", "orion", "webkit", "cache"]
 stacks = ["browsers", "macos"]
 description = "Kagi Orion's web cache."
+
+[[rule]]
+id = "browser.chrome-snapshots"
+name = "Chrome profile snapshots"
+bucket = "system"
+group = "Browsers"
+kind = "provider"
+provider = "versions"
+params.path = ["~/Library/Application Support/Google/Chrome*/Snapshots"]
+params.sort = "version"
+params.keep = 1
+cost = "none"
+running_apps = ["Google Chrome", "Google Chrome Beta", "Google Chrome Dev", "Google Chrome Canary"]
+tags = ["browsers", "chrome", "old-versions", "needs-permission"]
+stacks = ["browsers", "macos"]
+description = "Copies of your profile settings Chrome takes before each major update, older than the newest one."

@@ -27,7 +27,7 @@ struct MainWindow: View {
                     }
                 }
             }
-            .navigationSplitViewColumnWidth(min: 220, ideal: 250)
+            .navigationSplitViewColumnWidth(min: 240, ideal: 270)
         } detail: {
             Group {
                 switch nav.section ?? .overview {
@@ -67,26 +67,7 @@ struct MainWindow: View {
                 await store.loadLaunchers()
             }
             .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    FreshnessLabel()
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize()
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    Menu {
-                        Button("Refresh") { Task { await store.scan() } }
-                        Button("Rescan Everything") { Task { await store.scan(full: true) } }
-                            .keyboardShortcut("r", modifiers: [.command, .shift])
-                    } label: {
-                        Label("Refresh", systemImage: "arrow.clockwise")
-                    } primaryAction: {
-                        Task { await store.scan() }
-                    }
-                    .keyboardShortcut("r")
-                    .disabled(store.scanning)
-                    .help("Refresh what changed (⌘R). Hold for Rescan Everything (⇧⌘R).")
-                }
+                ToolbarItem(placement: .primaryAction) { RefreshToolbarButton() }
             }
         }
     }
@@ -119,6 +100,10 @@ struct ItemInspector: View {
                 Divider()
                 Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 4) {
                     row("Size", Fmt.bytes(item.total_bytes) + (item.total_bytes > item.bytes ? " (incl. nested)" : ""))
+                    if item.freesDiffers, let f = item.frees {
+                        row("Frees", Fmt.bytes(f) + " (the rest is shared with clones or hard links)")
+                    }
+                    row("Comes back", item.comesBack)
                     row("Files", item.files.formatted())
                     row("Used", Fmt.ago(item.lastUsedDate))
                     row("Cost", item.cost)
@@ -209,7 +194,7 @@ struct ProjectsView: View {
         }
         .navigationTitle("Projects")
         .toolbar { ToolbarItem { AskAgentButton(target: "projects", title: "Ask") } }
-        .navigationSubtitle("\(projects.count) projects")
+        .freshSubtitle("\(projects.count) projects")
     }
 }
 

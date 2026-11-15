@@ -9,6 +9,8 @@ final class LowDiskGuard {
     private unowned let store: Store
     private var task: Task<Void, Never>?
     private var lastRun: Date?
+    /// The low-space notification went out; it re-arms once space recovers.
+    private var notifiedLow = false
     private static let minInterval: TimeInterval = 15 * 60
 
     init(store: Store) { self.store = store }
@@ -51,6 +53,7 @@ final class LowDiskGuard {
 
     private func tick() async {
         guard let (free, total) = await Self.freeSpace() else { return }
+        notifyIfLow(free: free, total: total)
         if store.schedules.isEmpty { await store.loadSchedules() }
         guard let g = store.schedules.first(where: { $0.id == "guard" }), g.schedule.enabled,
               let below = g.schedule.when_free_below,
@@ -78,6 +81,21 @@ final class LowDiskGuard {
         if freedBytes > 0 {
             Self.notify(title: "Freed \(Fmt.bytes(freedBytes)) of old builds",
                         body: "\(Fmt.bytes(after)) free now. Nothing in use was touched.")
+        }
+    }
+
+    /// `[menubar] notify`: one calm note per crossing below the threshold, no alarms.
+    private func notifyIfLow(free: UInt64, total: UInt64) {
+        guard store.menubar.notify, let t = store.menubar.threshold(total: total) else { return }
+        if free < t, !notifiedLow {
+            notifiedLow = true
+            let safe = store.report.map { $0.plan("stale")?.bytes ?? $0.notInUseBytes } ?? 0
+            Self.notify(title: "Space is getting low",
+                        body: safe > 0
+                            ? "\(Fmt.bytes(free)) free. \(Fmt.bytes(safe)) of builds and caches nothing is using can go safely."
+                            : "\(Fmt.bytes(free)) free. Nothing Poo tracks is safe to clean right now.")
+        } else if free > t + 2_000_000_000 {
+            notifiedLow = false
         }
     }
 

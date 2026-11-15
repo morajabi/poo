@@ -22,7 +22,7 @@ struct BackupsView: View {
         }
         .listStyle(.inset)
         .overlay { empty }
-        .safeAreaInset(edge: .top, spacing: 0) { header }
+        .topBar { header }
         .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
         .navigationTitle("Backups")
         .toolbar {
@@ -83,8 +83,6 @@ struct BackupsView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(.bar)
-        .overlay(alignment: .bottom) { Divider() }
     }
 
     private func keepSentence(days: Int?, git: Bool) -> String {
@@ -118,10 +116,9 @@ struct BackupsView: View {
                         .disabled(store.busy)
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(.bar)
-            .overlay(alignment: .top) { Divider() }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .floatingBar()
         }
     }
 

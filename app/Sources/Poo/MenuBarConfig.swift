@@ -7,7 +7,8 @@ struct MenubarSettings: Codable, Equatable {
     var title = "icon+free"
     var warn = true
     var warn_below = "10%"
-    var sections = ["disk", "areas", "freed", "schedules"]
+    var notify = false
+    var sections = ["health", "disk", "areas", "freed", "schedules"]
     var area_order = "size"
     var max_areas = 6
 
@@ -25,10 +26,11 @@ struct MenubarSettings: Codable, Equatable {
     }
 
     enum Section: String, CaseIterable, Identifiable {
-        case disk, areas, buckets, freed, schedules
+        case health, disk, areas, buckets, freed, schedules
         var id: String { rawValue }
         var label: String {
             switch self {
+            case .health: return "What you can free"
             case .disk: return "Disk bar"
             case .areas: return "Areas to clean"
             case .buckets: return "Buckets with Clean buttons"
@@ -59,6 +61,7 @@ struct MenubarSettings: Codable, Equatable {
         title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? d.title
         warn = (try? c.decodeIfPresent(Bool.self, forKey: .warn)) ?? d.warn
         warn_below = (try? c.decodeIfPresent(String.self, forKey: .warn_below)) ?? d.warn_below
+        notify = (try? c.decodeIfPresent(Bool.self, forKey: .notify)) ?? d.notify
         sections = (try? c.decodeIfPresent([String].self, forKey: .sections)) ?? d.sections
         area_order = (try? c.decodeIfPresent(String.self, forKey: .area_order)) ?? d.area_order
         max_areas = (try? c.decodeIfPresent(Int.self, forKey: .max_areas)) ?? d.max_areas

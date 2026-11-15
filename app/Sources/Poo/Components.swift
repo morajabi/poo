@@ -136,10 +136,27 @@ struct ItemRow: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .frame(width: 64, alignment: .trailing)
-            Text(Fmt.bytes(item.total_bytes))
-                .monospacedDigit()
+            SizeLabel(item: item)
                 .frame(width: 72, alignment: .trailing)
         }
         .padding(.vertical, 2)
+    }
+}
+
+/// An item's size, with "frees X" under it when APFS sharing makes a clean return less.
+struct SizeLabel: View {
+    var item: Item
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 0) {
+            Text(Fmt.bytes(item.total_bytes)).monospacedDigit()
+            if item.freesDiffers, let f = item.frees {
+                Text("frees \(Fmt.bytes(f))")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .help("Cleaning returns \(Fmt.bytes(f)). The rest is shared with clones or hard links and stays until they go too.")
+            }
+        }
     }
 }

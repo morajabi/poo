@@ -2,6 +2,7 @@
 //! provider runs, with which parameters, and in which bucket results land.
 
 pub mod git;
+pub mod snapshots;
 
 use crate::catalog::Rule;
 use crate::fsutil::Sized;
@@ -41,6 +42,9 @@ pub struct Raw {
     /// Sized without its claimed descendants, so nested items are not double counted.
     pub disjoint: bool,
     pub risks: Vec<crate::model::Risk>,
+    /// Shown and sized, never cleaned by poo (its owner manages it).
+    #[serde(default)]
+    pub report_only: bool,
 }
 
 pub fn parse_iso(s: &str) -> Option<i64> {
@@ -133,9 +137,49 @@ pub fn xcode_derived_data(rule: &Rule) -> Vec<Raw> {
 // Versioned installs: keep the active one and the newest N
 // ---------------------------------------------------------------------------
 
+/// Old versions in one or more folders. `params.path` is a folder or a list of folders (globs
+/// allowed); each folder keeps its own newest `keep` entries plus any version an `active`
+/// symlink or `active_command` points into. `params.sort` orders entries: `mtime` (default)
+/// or `version`, which compares the numbers in the name ("17.5.1 (21F90)", "1.82.0") and
+/// keeps everything in a folder where any name has no number.
 pub fn versions(rule: &Rule) -> Vec<Raw> {
-    let Some(dir) = rule.param_str("path").map(|p| expand(&p)) else { return vec![] };
+    let mut dirs: Vec<String> = rule.param_list("path");
+    if let Some(p) = rule.param_str("path") {
+        dirs.push(p);
+    }
+    let mut out = vec![];
+    for d in dirs {
+        let pattern = expand(&d);
+        let matched = if crate::fsutil::has_glob(&d) { crate::fsutil::expand_glob(&pattern) } else { vec![pattern] };
+        for dir in matched {
+            out.extend(versions_in(rule, &dir));
+        }
+    }
+    out
+}
+
+/// Numbers in a version-like name, for ordering: "iPhone15,2 17.5.1 (21F90)" sorts by
+/// 17.5.1 and then the build 21F90; "1.82.0-aarch64" by 1.82.0.
+pub fn version_key(name: &str) -> Option<(Vec<u64>, String)> {
+    // Skip a leading device model ("iPhone15,2 ") so the OS version decides.
+    let rest = match name.split_once(' ') {
+        Some((first, r)) if first.contains(',') => r,
+        _ => name,
+    };
+    let start = rest.find(|c: char| c.is_ascii_digit())?;
+    let tail = &rest[start..];
+    let end = tail.find(|c: char| !(c.is_ascii_digit() || c == '.')).unwrap_or(tail.len());
+    let nums: Vec<u64> = tail[..end].split('.').filter(|p| !p.is_empty()).filter_map(|p| p.parse().ok()).collect();
+    if nums.is_empty() {
+        return None;
+    }
+    let build = rest.split_once('(').and_then(|(_, b)| b.split(')').next()).unwrap_or("").to_string();
+    Some((nums, build))
+}
+
+fn versions_in(rule: &Rule, dir: &Path) -> Vec<Raw> {
     let keep = rule.param_u64("keep").unwrap_or(1) as usize;
+    let by_version = rule.param_str("sort").as_deref() == Some("version");
     let pattern = rule.param_str("pattern").and_then(|p| globset::Glob::new(&p).ok()).map(|g| g.compile_matcher());
     // The active version: entries any `active` symlink points into, or the path printed by
     // `active_command` (for example `xcode-select -p`).
@@ -154,7 +198,7 @@ pub fn versions(rule: &Rule) -> Vec<Raw> {
         }
     }
     let wants_active = !rule.param_list("active").is_empty() || !cmd.is_empty();
-    let mut entries: Vec<(PathBuf, i64)> = std::fs::read_dir(&dir)
+    let mut entries: Vec<(PathBuf, i64)> = std::fs::read_dir(dir)
         .map(|rd| {
             rd.flatten()
                 .filter(|e| !e.file_name().to_string_lossy().starts_with('.'))
@@ -175,7 +219,16 @@ pub fn versions(rule: &Rule) -> Vec<Raw> {
         // Could not tell which version is in use: keep everything.
         return vec![];
     }
-    entries.sort_by(|a, b| b.1.cmp(&a.1));
+    if by_version {
+        let name = |p: &PathBuf| p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        if entries.iter().any(|(p, _)| version_key(&name(p)).is_none()) {
+            // A name we cannot order: keep the whole folder.
+            return vec![];
+        }
+        entries.sort_by(|a, b| version_key(&name(&b.0)).cmp(&version_key(&name(&a.0))).then(b.1.cmp(&a.1)));
+    } else {
+        entries.sort_by(|a, b| b.1.cmp(&a.1));
+    }
     let mut kept = 0;
     let mut out = vec![];
     for (p, t) in entries {
@@ -188,7 +241,7 @@ pub fn versions(rule: &Rule) -> Vec<Raw> {
         }
         let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
         let mut raw = Raw { path: p, name, rule: rule.id.clone(), last_used: Some(t), ..Default::default() };
-        raw.reasons.push("superseded version".into());
+        raw.reasons.push(if by_version { "older version, newer ones kept".into() } else { "superseded version".into() });
         out.push(raw);
     }
     out
@@ -469,7 +522,7 @@ pub fn docker(rule: &Rule) -> Vec<Raw> {
         let reclaim = parse_docker_size(v.get("Reclaimable").and_then(|v| v.as_str()).unwrap_or("0B"));
         let total = parse_docker_size(v.get("Size").and_then(|v| v.as_str()).unwrap_or("0B"));
         let (name, tier, cost, cmd): (&str, Tier, Cost, Vec<&str>) = match ty {
-            "Build Cache" => ("Docker build cache", Tier::Cold, Cost::Rebuild, vec!["docker", "builder", "prune", "-f"]),
+            "Build Cache" => ("Docker build cache", Tier::Cold, Cost::Rebuild, vec!["docker", "builder", "prune", "-f", "--filter", "until=168h"]),
             "Images" => ("Unused Docker images", Tier::Warm, Cost::Redownload, vec!["docker", "image", "prune", "-a", "-f"]),
             "Containers" => ("Stopped Docker containers", Tier::Review, Cost::Data, vec!["docker", "container", "prune", "-f"]),
             "Local Volumes" => ("Unused Docker volumes", Tier::Protected, Cost::Data, vec![]),
@@ -489,6 +542,9 @@ pub fn docker(rule: &Rule) -> Vec<Raw> {
             ..Default::default()
         };
         raw.meta.insert("docker_total".into(), Value::from(total));
+        if ty == "Build Cache" {
+            raw.reasons.push("keeps build cache used in the last week".into());
+        }
         if cmd.is_empty() {
             raw.action = Some(ActionKind::None);
             raw.reasons.push("volumes hold data; remove them yourself with docker volume rm".into());

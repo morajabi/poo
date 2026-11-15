@@ -218,6 +218,73 @@ pub fn run_capture(cmd: &[&str], timeout_secs: u64) -> Option<String> {
     }
 }
 
+/// The answer of a probe or guard command. Anything but a clean yes means skip.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Probe {
+    /// Exited 0.
+    Yes,
+    /// Ran and said no (non-zero exit), with what it printed.
+    No(String),
+    /// Could not tell: missing tool, spawn error or timeout.
+    Unknown(String),
+}
+
+/// Runs a probe with a timeout, optionally feeding stdin. Never through a shell.
+pub fn run_probe(argv: &[String], stdin: Option<&[u8]>, timeout_secs: u64) -> Probe {
+    use std::io::{Read, Write};
+    use std::process::{Command, Stdio};
+    let Some(bin) = argv.first() else { return Probe::Unknown("empty command".into()) };
+    let spawned = Command::new(bin)
+        .args(&argv[1..])
+        .stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn();
+    let mut child = match spawned {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Probe::Unknown(format!("`{}` is not installed", bin)),
+        Err(e) => return Probe::Unknown(format!("`{}` did not start: {}", bin, e)),
+    };
+    if let (Some(data), Some(mut s)) = (stdin, child.stdin.take()) {
+        let data = data.to_vec();
+        std::thread::spawn(move || {
+            let _ = s.write_all(&data);
+        });
+    }
+    fn drain<R: Read + Send + 'static>(r: Option<R>) -> std::thread::JoinHandle<String> {
+        std::thread::spawn(move || {
+            let mut s = String::new();
+            if let Some(mut r) = r {
+                let _ = r.read_to_string(&mut s);
+            }
+            s
+        })
+    }
+    let out = drain(child.stdout.take());
+    let err = drain(child.stderr.take());
+    let reader = std::thread::spawn(move || {
+        let (a, b) = (out.join().unwrap_or_default(), err.join().unwrap_or_default());
+        if a.trim().is_empty() { b } else { a }
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout_secs.max(1));
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let text = reader.join().unwrap_or_default();
+                let line = text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("").chars().take(300).collect::<String>();
+                return if status.success() { Probe::Yes } else { Probe::No(line) };
+            }
+            Ok(None) if std::time::Instant::now() > deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Probe::Unknown(format!("`{}` did not answer within {}s", argv.join(" "), timeout_secs.max(1)));
+            }
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(20)),
+            Err(e) => return Probe::Unknown(e.to_string()),
+        }
+    }
+}
+
 pub fn which(bin: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
     for dir in std::env::split_paths(&path) {

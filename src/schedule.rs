@@ -175,6 +175,9 @@ pub fn agent_loaded() -> bool {
 
 /// Installs (or refreshes) the launchd agent that runs `poo schedule tick`.
 pub fn install_agent() -> Result<PathBuf> {
+    if crate::clean::read_only() {
+        bail!("POO_READ_ONLY set: the launchd agent was not installed");
+    }
     let bin = std::fs::canonicalize(std::env::current_exe()?)?;
     let log = state_dir().join("scheduler.log");
     std::fs::create_dir_all(state_dir())?;
@@ -223,6 +226,9 @@ pub fn install_agent() -> Result<PathBuf> {
 }
 
 pub fn uninstall_agent() -> Result<()> {
+    if crate::clean::read_only() {
+        bail!("POO_READ_ONLY set: the launchd agent was not touched");
+    }
     let _ = std::process::Command::new("launchctl").args(["bootout", &format!("gui/{}/{}", uid(), LABEL)]).output();
     let p = plist_path();
     if p.exists() {
@@ -233,6 +239,9 @@ pub fn uninstall_agent() -> Result<()> {
 
 /// Keeps the launchd agent in step with config: installed while any schedule is enabled.
 pub fn sync_agent(cfg: &Config) -> Result<Option<String>> {
+    if crate::clean::read_only() {
+        return Ok(Some("POO_READ_ONLY set; launchd agent not touched (schedules saved to config only)".into()));
+    }
     if std::env::var_os("POO_NO_LAUNCHD").is_some() {
         return Ok(Some("POO_NO_LAUNCHD set; launchd agent not touched".into()));
     }
@@ -280,6 +289,7 @@ impl RunLock {
 
 /// Runs one schedule now. `dry_run` previews without deleting.
 pub fn run(ctx: &Ctx, s: &Schedule, dry_run: bool) -> Result<RunRecord> {
+    let dry_run = dry_run || crate::clean::read_only();
     let _lock = RunLock::try_acquire().ok_or_else(|| anyhow!("another poo clean or scheduled run is in progress"))?;
     let disk = crate::fsutil::disk_info(&crate::util::home());
     if let Some(b) = &s.when_free_below {
@@ -334,7 +344,7 @@ pub fn run(ctx: &Ctx, s: &Schedule, dry_run: bool) -> Result<RunRecord> {
         skipped: res.skipped,
         failed: res.failed,
         free_after: res.disk_free_after,
-        message: res.snapshot_note.clone().unwrap_or_default(),
+        message: res.read_only.clone().or_else(|| res.snapshot_note.clone()).unwrap_or_default(),
     };
     Ok(rec)
 }

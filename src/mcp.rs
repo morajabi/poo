@@ -21,7 +21,7 @@ fn tools() -> Value {
     let filter_props = json!({
         "bucket": {"type": "string", "description": "Bucket id, e.g. build, xcode, worktrees, deps, caches, ai, containers, system, junk, other"},
         "group": {"type": "string"},
-        "tier": {"type": "string", "enum": ["junk", "cold", "warm", "hot", "review", "protected"]},
+        "tier": {"type": "string", "enum": ["junk", "cold", "idle", "warm", "hot", "review", "protected"]},
         "project": {"type": "string", "description": "Project, repo or path prefix"},
         "min_size": {"type": "string", "description": "Minimum size like 500M or 2G"},
         "query": {"type": "string", "description": "Text to match in name, path, rule or group"}
@@ -56,7 +56,7 @@ fn tools() -> Value {
          "inputSchema": {"type": "object", "properties": {"bucket": {"type": "string"}}}},
         {"name": "explain_path", "description": "Which rules match a path, whether git ignores it, and how it appears in the report.",
          "inputSchema": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}},
-        {"name": "configure", "description": "Change poo's configuration. Actions: add_root, remove_root, set_project_policy (path, policy: active|stale|protected|auto), disable_rule / enable_rule (id, or tag/group/bucket/stack for many), set_rule (id, values: [\"warm_days=7\", \"bucket=work\"]), add_bucket / set_bucket (id, name, order, color, symbol, description, hidden), remove_bucket (id, move_to), set (key, value) for config keys like agents.auto_clean_max_tier, setup_done (by, notes).",
+        {"name": "configure", "description": "Change poo's configuration. Actions: add_root, remove_root, set_project_policy (path, policy: active|stale|protected|auto), disable_rule / enable_rule (id, or tag/group/bucket/stack for many), set_rule (id, values: [\"warm_days=7\", \"bucket=work\"]), add_bucket / set_bucket (id, name, order, color, symbol, description, hidden), remove_bucket (id, move_to), set (key, value) for config keys like agents.auto_clean_max_tier (raising it needs approved_by_user), setup_done (by, notes). Propose changes to the user before applying them.",
          "inputSchema": {"type": "object", "properties": {
             "action": {"type": "string"}, "path": {"type": "string"}, "policy": {"type": "string"},
             "id": {"type": "string"}, "values": {"type": "array", "items": {"type": "string"}},
@@ -64,11 +64,12 @@ fn tools() -> Value {
             "symbol": {"type": "string"}, "description": {"type": "string"}, "hidden": {"type": "boolean"},
             "move_to": {"type": "string"}, "key": {"type": "string"}, "value": {"type": "string"},
             "tag": {"type": "string"}, "group": {"type": "string"}, "bucket": {"type": "string"}, "stack": {"type": "string"},
-            "by": {"type": "string"}, "notes": {"type": "string"}
+            "by": {"type": "string"}, "notes": {"type": "string"},
+            "approved_by_user": {"type": "boolean", "default": false, "description": "Required to raise agents.auto_clean_max_tier; only after the user said yes"}
          }, "required": ["action"]}},
         {"name": "setup_brief", "description": "A brief for configuring poo to this user's workflows: machine, space, projects, duplication, everything poo knows, questions to ask and commands to apply.",
          "inputSchema": {"type": "object", "properties": {}}},
-        {"name": "schedules", "description": "Routine cleanups run by a launchd agent (standard mode only, rescan first). Actions: list, presets, add (id, preset or plan+every, optional at HH:MM, when_free_below, target_free, max_bytes, buckets, exclude_buckets, tags, exclude_tags), remove, enable, disable, run (id, dry_run). Ask the user before adding or enabling schedules.",
+        {"name": "schedules", "description": "Routine cleanups run by a launchd agent (standard mode only, rescan first). Actions: list, presets, add (preset, or id with plan+every; optional at HH:MM, when_free_below, target_free, max_bytes, buckets, exclude_buckets, tags, exclude_tags), remove, enable, disable, run (id, dry_run). add and enable return a preview of what the schedule would clean until you pass approved_by_user: true, which you may only do after showing that preview to the user and getting a yes, even when they asked for the schedule.",
          "inputSchema": {"type": "object", "properties": {
             "action": {"type": "string", "enum": ["list", "presets", "add", "remove", "enable", "disable", "run"]},
             "id": {"type": "string"}, "preset": {"type": "string"}, "plan": {"type": "string"},
@@ -76,7 +77,8 @@ fn tools() -> Value {
             "target_free": {"type": "string"}, "max_bytes": {"type": "string"},
             "buckets": {"type": "array", "items": {"type": "string"}}, "exclude_buckets": {"type": "array", "items": {"type": "string"}},
             "tags": {"type": "array", "items": {"type": "string"}}, "exclude_tags": {"type": "array", "items": {"type": "string"}},
-            "dry_run": {"type": "boolean", "default": true}
+            "dry_run": {"type": "boolean", "default": true},
+            "approved_by_user": {"type": "boolean", "default": false, "description": "For add and enable: only after the user saw the preview and said yes"}
          }, "required": ["action"]}},
         {"name": "backups", "description": "What poo saved before cleaning (copies of small ignored files, stashes of uncommitted work, rescue branches). Actions: list, prune (ids or older_than_days; permanent, ask the user first), restore (id; copies files back without overwriting).",
          "inputSchema": {"type": "object", "properties": {
@@ -84,6 +86,8 @@ fn tools() -> Value {
             "ids": {"type": "array", "items": {"type": "string"}}, "older_than_days": {"type": "integer"},
             "id": {"type": "string"}, "dry_run": {"type": "boolean", "default": true}
          }, "required": ["action"]}},
+        {"name": "growth", "description": "What grew since a point in time (per bucket and group), unusual growth such as a cache that grew many GB today, and a free-space forecast (days until full). Read-only.",
+         "inputSchema": {"type": "object", "properties": {"since": {"type": "string", "description": "24h, 7d (default), 2w"}}}},
         {"name": "history", "description": "What poo cleaned before, newest first.",
          "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer", "default": 50}}}}
     ])
@@ -109,6 +113,12 @@ fn call(ctx: &mut Ctx, name: &str, a: &Value) -> Result<Value> {
     let full = a.get("full").and_then(|v| v.as_bool()).unwrap_or(false);
     let rescan = full || a.get("rescan").and_then(|v| v.as_bool()).unwrap_or(false);
     match name {
+        "growth" => {
+            let r = ops::report(ctx, false, ScanOptions::default())?;
+            let since = s(a, "since").unwrap_or_else(|| "7d".into());
+            let secs = crate::growth::parse_since(&since).ok_or_else(|| anyhow!("since is like 24h, 7d or 2w"))?;
+            Ok(crate::growth::report(&r, secs))
+        }
         "overview" => {
             let r = ops::report(ctx, rescan, ScanOptions { full, ..Default::default() })?;
             let mut v = ops::overview(&r);
@@ -232,7 +242,14 @@ fn call(ctx: &mut Ctx, name: &str, a: &Value) -> Result<Value> {
                     ops::set_bucket(ctx, &need("id")?, e, action == "add_bucket")?
                 }
                 "remove_bucket" => ops::remove_bucket(ctx, &need("id")?, s(a, "move_to").as_deref())?,
-                "set" => ops::set_config_key(&ctx.cfg, &need("key")?, &need("value")?)?,
+                "set" => {
+                    let (k, v) = (need("key")?, need("value")?);
+                    let raises = k == "agents.auto_clean_max_tier" && Tier::parse(&v).map_or(false, |t| t.rank() > ctx.cfg.agents.auto_clean_max_tier.rank());
+                    if raises && !a.get("approved_by_user").and_then(|x| x.as_bool()).unwrap_or(false) {
+                        return Ok(json!({"status": "needs_approval", "message": format!("Not changed. Raising agents.auto_clean_max_tier from {} to {} lets agents clean more without asking; call again with approved_by_user: true after the user agrees.", ctx.cfg.agents.auto_clean_max_tier.as_str(), v)}));
+                    }
+                    ops::set_config_key(&ctx.cfg, &k, &v)?
+                }
                 "setup_done" => {
                     let mut c = ctx.cfg.clone();
                     c.setup.completed_at = Some(crate::util::now());
@@ -283,6 +300,7 @@ fn call(ctx: &mut Ctx, name: &str, a: &Value) -> Result<Value> {
 fn schedules_tool(ctx: &mut Ctx, a: &Value) -> Result<Value> {
     use crate::schedule as sch;
     let action = s(a, "action").unwrap_or_else(|| "list".into());
+    let approved = a.get("approved_by_user").and_then(|v| v.as_bool()).unwrap_or(false);
     let list_of = |k: &str| -> Vec<String> {
         a.get(k).and_then(|v| v.as_array()).map(|v| v.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default()
     };
@@ -302,7 +320,7 @@ fn schedules_tool(ctx: &mut Ctx, a: &Value) -> Result<Value> {
         }
         "presets" => Ok(json!({"presets": sch::presets().into_iter().map(|(id, d, x)| json!({"id": id, "description": d, "schedule": x})).collect::<Vec<_>>()})),
         "add" => {
-            let id = s(a, "id").ok_or_else(|| anyhow!("id is required"))?;
+            let id = s(a, "id").or_else(|| s(a, "preset")).ok_or_else(|| anyhow!("pass a preset (nightly, quick, guard, weekly) or an id with plan and every"))?;
             let preset = s(a, "preset").unwrap_or_else(|| id.clone());
             let mut x = sch::presets().into_iter().find(|(p, _, _)| *p == preset).map(|(_, _, x)| x).unwrap_or(crate::config::Schedule {
                 id: id.clone(), plan: "stale".into(), every: "1d".into(), at: None, when_free_below: None, target_free: None,
@@ -320,6 +338,9 @@ fn schedules_tool(ctx: &mut Ctx, a: &Value) -> Result<Value> {
                 if !v.is_empty() { *f = v; }
             }
             sch::validate(&x, &ctx.cat)?;
+            if !approved {
+                return schedule_preview(ctx, &x);
+            }
             let mut cfg = ctx.cfg.clone();
             cfg.schedule.retain(|y| y.id != x.id);
             cfg.schedule.push(x);
@@ -329,6 +350,10 @@ fn schedules_tool(ctx: &mut Ctx, a: &Value) -> Result<Value> {
             let id = s(a, "id").ok_or_else(|| anyhow!("id is required"))?;
             if !ctx.cfg.schedule.iter().any(|y| y.id == id) {
                 return Err(anyhow!("no schedule `{}`", id));
+            }
+            if action == "enable" && !approved {
+                let x = ctx.cfg.schedule.iter().find(|y| y.id == id).cloned().unwrap();
+                return schedule_preview(ctx, &x);
             }
             let mut cfg = ctx.cfg.clone();
             match action.as_str() {
@@ -348,8 +373,44 @@ fn schedules_tool(ctx: &mut Ctx, a: &Value) -> Result<Value> {
     }
 }
 
+/// What a schedule would clean if it ran now, for the user to approve before it is saved.
+pub fn schedule_preview(ctx: &mut Ctx, x: &crate::config::Schedule) -> Result<Value> {
+    let r = ops::report(ctx, false, ScanOptions::default())?;
+    let filter = Filter {
+        buckets: x.buckets.clone(),
+        exclude_buckets: x.exclude_buckets.clone(),
+        tags: x.tags.clone(),
+        exclude_tags: x.exclude_tags.clone(),
+        ..Default::default()
+    };
+    let p = ops::make_plan(ctx, &r, &x.plan, None, &filter)?;
+    Ok(json!({
+        "status": "needs_approval",
+        "message": format!("Not saved. Show the user this schedule and what it would clean right now ({} in {} items; scheduled runs skip items with risks), then call again with approved_by_user: true after they say yes.", crate::util::bytes(p.bytes), p.count),
+        "schedule": x,
+        "would_clean_now": {"plan": p.plan, "bytes": p.bytes, "count": p.count, "items": p.items.iter().take(15).map(ops::compact).collect::<Vec<_>>()},
+    }))
+}
+
+/// Hints for common tool errors, like the CLI's `{error:{kind,message,hint}}`.
+fn error_json(msg: &str) -> Value {
+    let (kind, hint) = if msg.starts_with("no item") || msg.starts_with("no items") {
+        ("not_found", "ids come from overview, list_items or plan; inspect also takes an absolute path. Rescan with overview {rescan: true} if the disk changed.")
+    } else if msg.starts_with("no schedule") {
+        ("not_found", "schedules {action: list} shows the ids")
+    } else if msg.contains("config.toml") {
+        ("invalid_config", "show the user the error, then fix the TOML in config.toml or move it aside; poo retries loading it on every call")
+    } else if msg.contains("is required") || msg.starts_with("unknown") || msg.starts_with("pass ") {
+        ("usage", "check this tool's inputSchema")
+    } else {
+        ("error", "")
+    };
+    json!({"error": {"kind": kind, "message": msg, "hint": if hint.is_empty() { Value::Null } else { json!(hint) }}})
+}
+
 pub fn serve() -> Result<()> {
-    let mut ctx = Ctx::load()?;
+    // A broken config must not kill the server: report it on each call and retry the load.
+    let mut ctx: Option<Ctx> = Ctx::load().ok();
     let stdin = std::io::stdin();
     let mut out = std::io::stdout();
     for line in stdin.lock().lines() {
@@ -384,9 +445,24 @@ pub fn serve() -> Result<()> {
             "tools/call" => {
                 let name = params.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
                 let args = params.get("arguments").cloned().unwrap_or(json!({}));
-                let r = match call(&mut ctx, &name, &args) {
-                    Ok(v) => json!({"content": [{"type": "text", "text": serde_json::to_string_pretty(&v).unwrap_or_default()}], "structuredContent": v, "isError": false}),
-                    Err(e) => json!({"content": [{"type": "text", "text": format!("error: {}", e)}], "isError": true}),
+                if ctx.is_none() {
+                    ctx = Ctx::load().ok();
+                }
+                let res = match ctx.as_mut() {
+                    Some(c) => call(c, &name, &args),
+                    None => Ctx::load().map(|_| Value::Null).map_err(|e| anyhow!("{:#}", e)),
+                };
+                let r = match res {
+                    Ok(v) => {
+                        // Compact JSON: the same data in fewer tokens. The setup brief is markdown.
+                        let text = v.get("brief").and_then(|b| b.as_str()).map(String::from).unwrap_or_else(|| serde_json::to_string(&v).unwrap_or_default());
+                        json!({"content": [{"type": "text", "text": text}], "structuredContent": v, "isError": false})
+                    }
+                    Err(e) => {
+                        let ej = error_json(&format!("{:#}", e));
+                        let text = format!("error: {}{}", ej["error"]["message"].as_str().unwrap_or(""), ej["error"]["hint"].as_str().map(|h| format!("\nhint: {}", h)).unwrap_or_default());
+                        json!({"content": [{"type": "text", "text": text}], "structuredContent": ej, "isError": true})
+                    }
                 };
                 Some(Ok(r))
             }

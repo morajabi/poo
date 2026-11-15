@@ -179,3 +179,29 @@ parent = ["docker-compose.yml"]
 children = ["production.env"]
 matches = false
 note = "an env/ folder of settings, not a virtualenv"
+
+[[fixture]]
+rule = "cache.cachedir-tag"
+name = "fetch-cache"
+parent = ["tool.toml"]
+children = ["CACHEDIR.TAG", "objects"]
+files = { "CACHEDIR.TAG" = "Signature: 8a477f597d28d172789f06886806bc55\n# This file is a cache directory tag.\n" }
+matches = true
+
+[[fixture]]
+rule = "cache.cachedir-tag"
+name = "notes"
+parent = ["README.md"]
+children = ["CACHEDIR.TAG", "todo.md"]
+files = { "CACHEDIR.TAG" = "my notes about cache tags\n" }
+matches = false
+note = "a lookalike file without the signature"
+
+[[fixture]]
+rule = "cache.cachedir-tag"
+name = "app"
+parent = []
+children = ["CACHEDIR.TAG", "Cargo.toml", "src"]
+files = { "CACHEDIR.TAG" = "Signature: 8a477f597d28d172789f06886806bc55\n" }
+matches = false
+note = "a source folder never matches, even when tagged"

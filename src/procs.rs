@@ -27,8 +27,15 @@ pub const PRESENCE: &[&str] = &[
     "nvim", "vim", "emacs", "hx", "tmux", "rust-analyzer", "sourcekit-lsp", "gopls",
 ];
 
-#[cfg(target_os = "macos")]
+/// Running processes, or nothing when they cannot be listed. Cleaning uses `try_list`.
 pub fn list() -> Vec<Proc> {
+    try_list().unwrap_or_default()
+}
+
+/// Running processes, or None when the list could not be read (then poo cannot tell
+/// whether a build is running, and skips).
+#[cfg(target_os = "macos")]
+pub fn try_list() -> Option<Vec<Proc>> {
     use std::ffi::CStr;
     const PROC_PIDVNODEPATHINFO: i32 = 9;
     const VNODE_INFO_SIZE: usize = 152;
@@ -38,7 +45,7 @@ pub fn list() -> Vec<Proc> {
         libc::proc_listallpids(pids.as_mut_ptr() as *mut libc::c_void, (pids.len() * 4) as i32)
     };
     if n <= 0 {
-        return vec![];
+        return None;
     }
     pids.truncate(n as usize);
     let mut out = vec![];
@@ -69,20 +76,20 @@ pub fn list() -> Vec<Proc> {
         };
         out.push(Proc { pid, name, cwd: PathBuf::from(cwd) });
     }
-    out
+    Some(out)
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn list() -> Vec<Proc> {
+pub fn try_list() -> Option<Vec<Proc>> {
     let mut out = vec![];
-    let Ok(rd) = std::fs::read_dir("/proc") else { return out };
+    let rd = std::fs::read_dir("/proc").ok()?;
     for e in rd.flatten() {
         let Ok(pid) = e.file_name().to_string_lossy().parse::<i32>() else { continue };
         let Ok(cwd) = std::fs::read_link(e.path().join("cwd")) else { continue };
         let name = std::fs::read_to_string(e.path().join("comm")).unwrap_or_default().trim().to_string();
         out.push(Proc { pid, name, cwd });
     }
-    out
+    Some(out)
 }
 
 pub fn is_build_tool(name: &str, extra: &[String]) -> bool {

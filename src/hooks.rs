@@ -124,6 +124,9 @@ pub fn status() -> Vec<HookTarget> {
 }
 
 pub fn install(id: &str) -> Result<String> {
+    if crate::clean::read_only() {
+        return Ok(format!("POO_READ_ONLY set: would install the {} hook; nothing was written", id));
+    }
     match id {
         "claude" => {
             let p = claude_settings();
@@ -156,6 +159,9 @@ pub fn install(id: &str) -> Result<String> {
 }
 
 pub fn uninstall(id: &str) -> Result<String> {
+    if crate::clean::read_only() {
+        return Ok(format!("POO_READ_ONLY set: would remove the {} hook; nothing was written", id));
+    }
     let (p, event) = match id {
         "claude" => (claude_settings(), "SessionEnd"),
         "codex" => (codex_dir().join("hooks.json"), "Stop"),

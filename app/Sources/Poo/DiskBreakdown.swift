@@ -216,8 +216,7 @@ struct SegmentCard: View {
             }
         }
         .padding(10)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.separator, lineWidth: 0.5))
+        .glassBackground(in: .rect(cornerRadius: 12, style: .continuous))
         .shadow(color: .black.opacity(0.15), radius: 8, y: 3)
     }
 

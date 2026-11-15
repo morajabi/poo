@@ -36,6 +36,15 @@ struct PooApp: App {
                     .disabled(!updater.enabled || !updater.canCheck)
                 Button("Set Up Poo…") { delegate.show("onboarding", title: "Set Up Poo") }
             }
+            CommandGroup(before: .toolbar) {
+                Button("Refresh") { Task { await store.scan() } }
+                    .keyboardShortcut("r")
+                    .disabled(store.scanning)
+                Button("Rescan Everything") { Task { await store.scan(full: true) } }
+                    .keyboardShortcut("r", modifiers: [.command, .shift])
+                    .disabled(store.scanning)
+                Divider()
+            }
             CommandGroup(after: .textEditing) {
                 Button("Find") { AppDelegate.focusToolbarSearch() }
                     .keyboardShortcut("f")

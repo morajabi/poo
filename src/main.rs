@@ -24,6 +24,9 @@ struct Cli {
     /// Human output even when piped.
     #[arg(long, global = true)]
     text: bool,
+    /// Interactive UI without motion (also POO_NO_ANIMATION or macOS Reduce Motion).
+    #[arg(long, global = true)]
+    no_animation: bool,
     #[command(subcommand)]
     cmd: Option<Cmd>,
 }
@@ -49,7 +52,9 @@ struct FilterArgs {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Overview: free space, buckets, plans (default command).
+    /// Interactive terminal UI (default with no command in a terminal).
+    Ui,
+    /// Overview: free space, buckets, plans (default command when piped or with --text).
     Overview {
         #[arg(long)]
         rescan: bool,
@@ -113,7 +118,8 @@ enum Cmd {
         /// commits (saved to a poo/ branch first). Asks you to type "dangerous".
         #[arg(long = "dangerously-include-protected", alias = "danger")]
         danger: bool,
-        /// Highest tier to clean in standard mode (default warm).
+        /// Highest tier to clean in standard mode (default warm). `auto`: the agent autonomy tier
+        /// (agents.auto_clean_max_tier); agents cleaning without asking pass it.
         #[arg(long)]
         max_tier: Option<String>,
         /// Stream progress as JSON lines on stderr.
@@ -187,6 +193,13 @@ enum Cmd {
     History {
         #[arg(long, short = 'n', default_value_t = 30)]
         limit: usize,
+    },
+    /// What grew: per bucket and group since a point in time, unusual growth, and how long
+    /// the free space lasts at this pace.
+    Growth {
+        /// How far back to compare: 24h, 7d, 2w...
+        #[arg(long, default_value = "7d")]
+        since: String,
     },
     /// Set up poo: choose dev roots (humans) or print the agent setup brief.
     Setup {
@@ -431,7 +444,13 @@ enum ConfigCmd {
     /// Every setting with its default and what it does.
     Keys,
     Get { key: String },
-    Set { key: String, value: String },
+    Set {
+        key: String,
+        value: String,
+        /// Confirm a change asked for by a coding agent (agents must ask the user first).
+        #[arg(long, short = 'y')]
+        yes: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -465,7 +484,12 @@ enum BackupsCmd {
 enum HooksCmd {
     Status,
     /// claude, codex or all
-    Install { agent: String },
+    Install {
+        agent: String,
+        /// Confirm a change asked for by a coding agent (agents must ask the user first).
+        #[arg(long, short = 'y')]
+        yes: bool,
+    },
     Uninstall { agent: String },
     /// Recent hook activity.
     Log {
@@ -522,9 +546,17 @@ enum ScheduleCmd {
         exclude_tag: Vec<String>,
         #[arg(long)]
         no_notify: bool,
+        /// Confirm a change asked for by a coding agent (agents must ask the user first).
+        #[arg(long, short = 'y')]
+        yes: bool,
     },
     Rm { id: String },
-    Enable { id: String },
+    Enable {
+        id: String,
+        /// Confirm a change asked for by a coding agent (agents must ask the user first).
+        #[arg(long, short = 'y')]
+        yes: bool,
+    },
     Disable { id: String },
     /// Run a schedule now.
     Run {
@@ -558,6 +590,9 @@ enum IntegrationCmd {
         skill_only: bool,
         #[arg(long)]
         mcp_only: bool,
+        /// Confirm a change asked for by a coding agent (agents must ask the user first).
+        #[arg(long, short = 'y')]
+        yes: bool,
     },
     Uninstall { agent: String },
 }
@@ -592,6 +627,24 @@ impl From<anyhow::Error> for CliError {
 
 type R = Result<(), CliError>;
 
+/// A coding agent asking for something that keeps acting after its session (schedules,
+/// hooks, integrations, more autonomy) must show the user first and pass `--yes`.
+fn agent_gate(yes: bool, what: String) -> R {
+    match poo::agent::agent_context() {
+        Some(agent) if !yes => Err(CliError::new("needs_approval", 5, format!("{} (asked from {}; nothing was changed)", what, agent))
+            .hint("show the user exactly this, ask, and rerun with --yes only after they agree")),
+        _ => Ok(()),
+    }
+}
+
+/// A config.toml that does not load: a typed error agents can act on.
+fn config_error(e: anyhow::Error) -> CliError {
+    CliError::new("invalid_config", 8, format!("{:#}", e)).hint(format!(
+        "fix the TOML in {} (show the user the error first), or move the file aside to start from defaults",
+        poo::config::config_path().display()
+    ))
+}
+
 fn emit(out: &Out, v: &Value) {
     if out.json {
         println!("{}", serde_json::to_string_pretty(v).unwrap_or_default());
@@ -617,6 +670,41 @@ fn filter(f: &FilterArgs) -> Result<Filter, CliError> {
         query: f.query.clone(),
         ..Default::default()
     })
+}
+
+/// `poo growth` for people: calm, a few lines.
+fn print_growth(g: &Value) {
+    let signed = |v: &Value| -> Option<String> {
+        let d = v.as_i64()?;
+        Some(format!("{}{}", if d < 0 { "-" } else { "+" }, bytes(d.unsigned_abs())))
+    };
+    if g["from"].is_null() {
+        println!("Not enough history for that range yet; poo keeps a sample each time it scans.");
+    } else {
+        let days = (g["to"].as_i64().unwrap_or(0) - g["from"].as_i64().unwrap_or(0)) as f64 / 86400.0;
+        println!("Since {} ({:.0} days ago)", poo::util::iso8601(g["from"].as_i64().unwrap_or(0)).get(..10).unwrap_or(""), days);
+        if let Some(f) = signed(&g["free_delta"]) {
+            println!("  free space   {}", f);
+        }
+        for b in g["buckets"].as_array().into_iter().flatten() {
+            if let Some(d) = signed(&b["delta"]).filter(|_| b["delta"].as_i64().unwrap_or(0).unsigned_abs() >= 50_000_000) {
+                println!("  {:<28} {:>10}  (now {})", b["name"].as_str().unwrap_or(""), d, bytes(b["bytes"].as_u64().unwrap_or(0)));
+            }
+        }
+        let groups = g["groups"].as_array().cloned().unwrap_or_default();
+        if !groups.is_empty() {
+            println!("Grew the most");
+            for x in groups.iter().take(5) {
+                println!("  {:<28} {:>10}", x["group"].as_str().unwrap_or(""), signed(&x["delta"]).unwrap_or_default());
+            }
+        }
+    }
+    for a in g["anomalies"].as_array().into_iter().flatten() {
+        println!("Note: {}", a["message"].as_str().unwrap_or(""));
+    }
+    if let Some(m) = g["forecast"]["message"].as_str() {
+        println!("{}", m);
+    }
 }
 
 fn scan_opts(out: &Out, progress_json: bool) -> ScanOptions {
@@ -734,11 +822,13 @@ fn run_clean_p(ctx: &Ctx, out: &Out, report: &mut poo::model::Report, items: Vec
     }
     clean::install_cancel_handler();
     let human_progress = !out.json && is_tty(2) && !dry;
+    let tick = std::cell::Cell::new(0usize);
     let cb = |p: &clean::CleanProgress| {
         if progress {
             eprintln!("{}", serde_json::to_string(p).unwrap_or_default());
         } else if human_progress {
-            eprint!("\r\x1b[2K{}/{}  freed {}  {}", p.done, p.total, bytes(p.freed_bytes), p.current.chars().take(50).collect::<String>());
+            eprint!("\r\x1b[2K{}", render::clean_progress_line(p, tick.get()));
+            tick.set(tick.get() + 1);
             let _ = std::io::stderr().flush();
         }
     };
@@ -752,25 +842,7 @@ fn run_clean_p(ctx: &Ctx, out: &Out, report: &mut poo::model::Report, items: Vec
     if out.json {
         emit(out, &serde_json::to_value(&res).unwrap_or_default());
     } else {
-        let st = render::Style::new();
-        for r in &res.results {
-            let mark = match r.status.as_str() {
-                "cleaned" => "✓",
-                "would-clean" => "·",
-                "failed" => "✗",
-                _ => "–",
-            };
-            println!(
-                "{} {:>9}  {}{}",
-                mark,
-                bytes(r.bytes),
-                r.name,
-                r.reason.as_ref().map(|x| st.dim(&format!("  ({})", x))).unwrap_or_default()
-            );
-            for n in &r.notes {
-                println!("            {}", st.dim(n));
-            }
-        }
+        render::clean_result_rows(&res);
         if let Some(n) = &res.snapshot_note {
             println!("\nnote: {}", n);
         }
@@ -780,17 +852,13 @@ fn run_clean_p(ctx: &Ctx, out: &Out, report: &mut poo::model::Report, items: Vec
         if res.background_delete {
             println!("\nErasing in the background; free space grows over the next minutes.");
         }
+        if let Some(n) = &res.read_only {
+            println!("\n{}", n);
+        }
         if dry {
-            println!("\nDry run: would free about {} ({} items, {} skipped).", bytes(res.freed_bytes), res.cleaned, res.skipped);
+            render::clean_summary(&res);
         } else {
-            println!(
-                "\nFreed about {} ({} cleaned, {} skipped, {} failed). Free space now {}.",
-                bytes(res.freed_bytes),
-                res.cleaned,
-                res.skipped,
-                res.failed,
-                bytes(res.disk_free_after)
-            );
+            render::clean_summary(&res);
         }
     }
     if res.failed > 0 && !dry {
@@ -801,15 +869,29 @@ fn run_clean_p(ctx: &Ctx, out: &Out, report: &mut poo::model::Report, items: Vec
 
 fn real_main(cli: Cli) -> R {
     let out = Out { json: cli.json || (!cli.text && !is_tty(1)) };
+    let explicit_json = cli.json;
     if cli.skill {
         print!("{}", poo::agent::SKILL);
         return Ok(());
     }
-    let cmd = cli.cmd.unwrap_or(Cmd::Overview { rescan: false });
+    let interactive = !cli.json && !cli.text && is_tty(0) && is_tty(1) && std::env::var("TERM").map_or(true, |t| t != "dumb");
+    let cmd = cli.cmd.unwrap_or(if interactive { Cmd::Ui } else { Cmd::Overview { rescan: false } });
+    if matches!(cmd, Cmd::Ui) {
+        if !is_tty(0) || !is_tty(1) {
+            return Err(CliError::new("usage", 2, "poo ui needs an interactive terminal").hint("use `poo --text` or `poo --json` when piping"));
+        }
+        // The daily update check still runs; its hint would be wiped by the full-screen UI.
+        if let Ok(cfg) = poo::config::Config::load() {
+            if cfg.updates.check && poo::update::background_allowed(true, true) {
+                let _ = poo::update::background(cfg.updates.auto);
+            }
+        }
+        return poo::tui::run(poo::tui::UiOptions::detect(cli.no_animation)).map_err(Into::into);
+    }
     if matches!(cmd, Cmd::Mcp) {
         return poo::mcp::serve().map_err(Into::into);
     }
-    let mut ctx = Ctx::load()?;
+    let mut ctx = Ctx::load().map_err(config_error)?;
     if ctx.cfg.updates.check && !matches!(cmd, Cmd::Update { .. } | Cmd::Watch { .. }) && poo::update::background_allowed(is_tty(0), is_tty(2)) {
         if let Some(n) = poo::update::background(ctx.cfg.updates.auto) {
             if !out.json && is_tty(2) {
@@ -895,14 +977,24 @@ fn real_main(cli: Cli) -> R {
             clear_progress(&out);
             let target = free.as_ref().and_then(|s| parse_bytes(s));
             let items = if !ids.is_empty() {
-                ops::resolve_ids(&r, &ids).map_err(|e| CliError::new("not_found", 3, e.to_string()))?
+                ops::resolve_ids(&r, &ids).map_err(|e| match e.downcast_ref::<ops::ReportOnlyError>() {
+                    Some(ro) => CliError::new("report_only", 2, ro.0.clone()).hint("poo never cleans report-only items; manage them where the message says"),
+                    None => CliError::new("not_found", 3, e.to_string()),
+                })?
             } else if let Some(p) = plan {
                 let f = Filter { buckets: bucket, tags: tag, ..Default::default() };
                 ops::make_plan(&ctx, &r, &p, target, &f).map_err(|e| CliError::new("not_found", 3, e.to_string()))?.items
             } else {
                 return Err(CliError::new("usage", 2, "pass item ids or --plan").hint("poo plan stale shows what --plan stale would clean"));
             };
-            let mt = max_tier.as_deref().and_then(Tier::parse);
+            // `auto` is the agent autonomy tier: what an agent may clean without asking.
+            let mt = match max_tier.as_deref() {
+                None => None,
+                Some("auto") => Some(ctx.cfg.agents.auto_clean_max_tier),
+                Some(t) => Some(Tier::parse(t).or_else(|| Tier::all().into_iter().find(|x| x.label() == t)).ok_or_else(|| {
+                    CliError::new("usage", 2, format!("unknown tier `{}`", t)).hint("junk, cold, idle, warm, or auto (agents.auto_clean_max_tier)")
+                })?),
+            };
             let mode = if danger { RiskLevel::Danger } else if force { RiskLevel::Force } else { RiskLevel::Standard };
             let mut r = r;
             run_clean_p(&ctx, &out, &mut r, items, dry_run, yes, trash, mode, mt, progress)?;
@@ -941,33 +1033,7 @@ fn real_main(cli: Cli) -> R {
             if out.json {
                 emit(&out, &v);
             } else {
-                let st = render::Style::new();
-                for repo in v["repos"].as_array().into_iter().flatten() {
-                    println!(
-                        "{}  {} across {} checkouts",
-                        st.bold(&tilde(std::path::Path::new(repo["repo"].as_str().unwrap_or("")))),
-                        bytes(repo["build_bytes"].as_u64().unwrap_or(0)),
-                        repo["checkouts"]
-                    );
-                    for w in repo["worktrees"].as_array().into_iter().flatten() {
-                        let item = &w["item"];
-                        let state = match (w["dirty"].as_bool(), w["merged"].as_bool()) {
-                            (Some(true), _) => "dirty",
-                            (_, Some(true)) => "merged",
-                            _ if w["kind"] == "repo" => "main",
-                            _ => "clean",
-                        };
-                        println!(
-                            "  {:>9} {:<7} {:<9} {:<10} {}  {}",
-                            bytes(item["total_bytes"].as_u64().unwrap_or(w["build_bytes"].as_u64().unwrap_or(0))),
-                            state,
-                            item["tier"].as_str().unwrap_or("-"),
-                            w["agent"].as_str().unwrap_or(""),
-                            tilde(std::path::Path::new(w["path"].as_str().unwrap_or(""))),
-                            st.dim(&format!("{} {}", w["branch"].as_str().unwrap_or("(detached)"), item["id"].as_str().unwrap_or("")))
-                        );
-                    }
-                }
+                render::worktrees(&v);
             }
         }
         Cmd::Roots { cmd } => match cmd.unwrap_or(RootsCmd::Ls) {
@@ -1176,8 +1242,7 @@ fn real_main(cli: Cli) -> R {
             if out.json {
                 emit(&out, &v);
             } else {
-                let r = poo::scan::load_report().unwrap_or_else(|| poo::scan::scan(&ctx.cfg, &ctx.cat, &ScanOptions { no_providers: true, roots: Some(vec![]), ..Default::default() }));
-                print!("{}", poo::agent::setup_brief(&ctx.cfg, &ctx.cat, &r).split("## Everything poo knows").nth(1).map(|s| format!("## Everything poo knows{}", s.split("## What to decide").next().unwrap_or(""))).unwrap_or_default());
+                print!("{}", poo::agent::catalog_section(&ctx.cat, None));
             }
         }
         Cmd::Config { cmd } => match cmd.unwrap_or(ConfigCmd::Show) {
@@ -1212,17 +1277,42 @@ fn real_main(cli: Cli) -> R {
                     println!("{}", cur);
                 }
             }
-            ConfigCmd::Set { key, value } => {
+            ConfigCmd::Set { key, value, yes } => {
+                if key == "agents.auto_clean_max_tier" && Tier::parse(&value).map_or(false, |t| t.rank() > ctx.cfg.agents.auto_clean_max_tier.rank()) {
+                    agent_gate(yes, format!("raising agents.auto_clean_max_tier from {} to {} lets agents clean more without asking", ctx.cfg.agents.auto_clean_max_tier.as_str(), value))?;
+                }
                 let cfg = ops::set_config_key(&ctx.cfg, &key, &value).map_err(|e| CliError::new("usage", 2, e.to_string()))?;
                 save(&cfg, &out, &format!("{} = {}", key, value))?;
             }
         },
+        Cmd::Growth { since } => {
+            let secs = poo::growth::parse_since(&since).ok_or_else(|| CliError::new("usage", 2, format!("bad duration `{}`", since)).hint("use 24h, 7d or 2w"))?;
+            let r = ops::report(&ctx, false, scan_opts(&out, false))?;
+            clear_progress(&out);
+            let g = poo::growth::report(&r, secs);
+            if out.json {
+                emit(&out, &g);
+            } else {
+                print_growth(&g);
+            }
+        }
         Cmd::History { limit } => {
             let h = clean::history(limit);
             if out.json {
                 emit(&out, &json!({"history": h}));
             } else {
                 for e in h {
+                    if e["status"].as_str() == Some("skipped") {
+                        println!(
+                            "{}  {:>9}  {:<6} {}  ({})",
+                            poo::util::iso8601(e["at"].as_i64().unwrap_or(0)),
+                            "skipped",
+                            e["actor"].as_str().unwrap_or(""),
+                            tilde(std::path::Path::new(e["path"].as_str().unwrap_or(""))),
+                            e["reason"].as_str().unwrap_or("")
+                        );
+                        continue;
+                    }
                     println!(
                         "{}  {:>9}  {:<6} {}",
                         poo::util::iso8601(e["at"].as_i64().unwrap_or(0)),
@@ -1245,7 +1335,8 @@ fn real_main(cli: Cli) -> R {
                 let r = ops::report(&ctx, false, scan_opts(&out, false))?;
                 clear_progress(&out);
                 let brief = poo::agent::setup_brief(&ctx.cfg, &ctx.cat, &r);
-                if out.json {
+                // The brief is markdown for agents: keep it readable when piped.
+                if out.json && (explicit_json || !agent) {
                     emit(&out, &json!({"brief": brief}));
                 } else {
                     print!("{}", brief);
@@ -1254,7 +1345,7 @@ fn real_main(cli: Cli) -> R {
             }
             human_setup(&mut ctx)?;
         }
-        Cmd::Mcp => unreachable!(),
+        Cmd::Mcp | Cmd::Ui => unreachable!(),
         Cmd::Integration { cmd } => match cmd.unwrap_or(IntegrationCmd::Status) {
             IntegrationCmd::Status => {
                 let st = poo::agent::status();
@@ -1273,7 +1364,8 @@ fn real_main(cli: Cli) -> R {
                     println!("\nInstall with `poo integration install <agent|all>`.");
                 }
             }
-            IntegrationCmd::Install { agent, skill_only, mcp_only } => {
+            IntegrationCmd::Install { agent, skill_only, mcp_only, yes } => {
+                agent_gate(yes, format!("installing the poo integration for {} edits that agent's own config files", agent))?;
                 let ids: Vec<String> = if agent == "all" {
                     poo::agent::status().into_iter().filter(|t| t.detected).map(|t| t.id.to_string()).collect()
                 } else {
@@ -1388,7 +1480,8 @@ fn real_main(cli: Cli) -> R {
                     println!("Hooks are off until you run `poo hooks install claude|codex|all`.");
                 }
             }
-            HooksCmd::Install { agent } => {
+            HooksCmd::Install { agent, yes } => {
+                agent_gate(yes, format!("installing the {} hook makes poo clean a worktree's build output whenever that agent finishes there", agent))?;
                 let ids: Vec<&str> = if agent == "all" { poo::hooks::status().iter().filter(|t| t.detected).map(|t| t.id).collect() } else { vec![agent.as_str()] };
                 let mut done = vec![];
                 for id in ids {
@@ -1467,6 +1560,19 @@ fn real_main(cli: Cli) -> R {
     Ok(())
 }
 
+/// What a schedule does and would clean right now, for the user to approve.
+fn schedule_summary(ctx: &mut Ctx, s: &poo::config::Schedule) -> String {
+    let when = format!("every {}{}{}", s.every, s.at.as_ref().map(|a| format!(" at {}", a)).unwrap_or_default(), s.when_free_below.as_ref().map(|b| format!(" when free space is below {}", b)).unwrap_or_default());
+    match poo::mcp::schedule_preview(ctx, s) {
+        Ok(v) => {
+            let w = &v["would_clean_now"];
+            let names: Vec<&str> = w["items"].as_array().map(|a| a.iter().take(8).filter_map(|i| i["name"].as_str()).collect()).unwrap_or_default();
+            format!("schedule `{}` runs plan `{}` {}; right now it would clean {} in {} items ({}). Scheduled runs skip items with risks", s.id, s.plan, when, bytes(w["bytes"].as_u64().unwrap_or(0)), w["count"], names.join(", "))
+        }
+        Err(_) => format!("schedule `{}` runs plan `{}` {}", s.id, s.plan, when),
+    }
+}
+
 fn schedule_cmd(ctx: &mut Ctx, out: &Out, cmd: ScheduleCmd) -> R {
     use poo::schedule as sch;
     let save_sync = |cfg: &poo::config::Config, what: String| -> R {
@@ -1499,22 +1605,8 @@ fn schedule_cmd(ctx: &mut Ctx, out: &Out, cmd: ScheduleCmd) -> R {
             } else if ctx.cfg.schedule.is_empty() {
                 println!("No schedules. Try `poo schedule add nightly` (see `poo schedule presets`).");
             } else {
-                for s in &ctx.cfg.schedule {
-                    let last = state.last_run.get(&s.id);
-                    println!(
-                        "{:<10} {:<9} plan {:<10} every {:<4}{}{}{}  {}",
-                        s.id,
-                        if s.enabled { "on" } else { "off" },
-                        s.plan,
-                        s.every,
-                        s.at.as_ref().map(|a| format!(" at {}", a)).unwrap_or_default(),
-                        s.when_free_below.as_ref().map(|a| format!(" when free < {}", a)).unwrap_or_default(),
-                        s.target_free.as_ref().map(|a| format!(" to {} free", a)).unwrap_or_default(),
-                        last.map(|l| format!("last: {} {} {}", poo::util::age(l.at), l.status, bytes(l.freed_bytes))).unwrap_or_else(|| "never ran".into())
-                    );
-                }
-                println!("
-scheduler agent: {}", if sch::agent_loaded() { "running" } else if sch::agent_installed() { "installed, not loaded" } else { "not installed" });
+                let agent = if sch::agent_loaded() { "running" } else if sch::agent_installed() { "installed, not loaded" } else { "not installed" };
+                render::schedules(&ctx.cfg.schedule, &state, agent);
             }
             Ok(())
         }
@@ -1529,7 +1621,7 @@ scheduler agent: {}", if sch::agent_loaded() { "running" } else if sch::agent_in
             }
             Ok(())
         }
-        ScheduleCmd::Add { id, preset, plan, every, at, when_free_below, target_free, max, bucket, exclude_bucket, tag, exclude_tag, no_notify } => {
+        ScheduleCmd::Add { id, preset, plan, every, at, when_free_below, target_free, max, bucket, exclude_bucket, tag, exclude_tag, no_notify, yes } => {
             let base = preset
                 .as_deref()
                 .or(if plan.is_none() && every.is_none() { Some(id.as_str()) } else { None })
@@ -1562,12 +1654,15 @@ scheduler agent: {}", if sch::agent_loaded() { "running" } else if sch::agent_in
             if !exclude_tag.is_empty() { s.exclude_tags = exclude_tag; }
             if no_notify { s.notify = false; }
             sch::validate(&s, &ctx.cat).map_err(|e| CliError::new("usage", 2, e.to_string()))?;
+            if !yes && poo::agent::agent_context().is_some() {
+                agent_gate(false, schedule_summary(ctx, &s))?;
+            }
             let mut cfg = ctx.cfg.clone();
             cfg.schedule.retain(|x| x.id != s.id);
             cfg.schedule.push(s.clone());
             save_sync(&cfg, format!("schedule `{}`: plan {} every {}{}", s.id, s.plan, s.every, s.at.map(|a| format!(" at {}", a)).unwrap_or_default()))
         }
-        ScheduleCmd::Rm { id } | ScheduleCmd::Enable { id } | ScheduleCmd::Disable { id } if !ctx.cfg.schedule.iter().any(|s| s.id == id) => {
+        ScheduleCmd::Rm { id } | ScheduleCmd::Enable { id, .. } | ScheduleCmd::Disable { id } if !ctx.cfg.schedule.iter().any(|s| s.id == id) => {
             Err(CliError::new("not_found", 3, format!("no schedule `{}`", id)))
         }
         ScheduleCmd::Rm { id } => {
@@ -1575,7 +1670,11 @@ scheduler agent: {}", if sch::agent_loaded() { "running" } else if sch::agent_in
             cfg.schedule.retain(|s| s.id != id);
             save_sync(&cfg, format!("removed schedule `{}`", id))
         }
-        ScheduleCmd::Enable { id } => {
+        ScheduleCmd::Enable { id, yes } => {
+            if !yes && poo::agent::agent_context().is_some() {
+                let s = ctx.cfg.schedule.iter().find(|s| s.id == id).cloned().unwrap();
+                agent_gate(false, schedule_summary(ctx, &s))?;
+            }
             let mut cfg = ctx.cfg.clone();
             cfg.schedule.iter_mut().filter(|s| s.id == id).for_each(|s| s.enabled = true);
             save_sync(&cfg, format!("enabled schedule `{}`", id))
@@ -1642,26 +1741,7 @@ fn backups_cmd(ctx: &Ctx, out: &Out, cmd: BackupsCmd) -> R {
             } else if list.is_empty() {
                 println!("No backups. poo saves small ignored files, stashes and rescue branches here before removing worktrees.");
             } else {
-                for b in &list {
-                    println!(
-                        "{:<12} {:<7} {:>9} {:>8}  {:<28} {}",
-                        b.id,
-                        b.kind,
-                        if b.kind == "files" { bytes(b.bytes) } else { format!("{} files", b.files) },
-                        poo::util::age(b.at),
-                        b.label,
-                        match b.kind.as_str() {
-                            "files" => b.path.as_deref().map(|p| tilde(std::path::Path::new(p))).unwrap_or_default(),
-                            _ => format!("{} in {}", b.r#ref.clone().unwrap_or_default(), b.repo.as_deref().map(|r| tilde(std::path::Path::new(r))).unwrap_or_default()),
-                        }
-                    );
-                }
-                println!(
-                    "\n{} in file backups (budget {}; {}).",
-                    bytes(total),
-                    bytes(ctx.cfg.backup.max_backup_bytes),
-                    if ctx.cfg.backup.auto_prune_days > 0 { format!("file backups older than {} days are pruned", ctx.cfg.backup.auto_prune_days) } else { "kept until you prune".into() }
-                );
+                render::backups(&list, total, &ctx.cfg.backup);
             }
             Ok(())
         }

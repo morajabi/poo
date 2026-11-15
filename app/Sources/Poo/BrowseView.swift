@@ -64,20 +64,26 @@ struct BrowseView: View {
                 }
             }
         }
-        .safeAreaInset(edge: .top, spacing: 0) { filterBar(bucket: bucket) }
+        .topBar { filterBar(bucket: bucket) }
         .searchable(text: $nav.browse.query, placement: .toolbar, prompt: "Name or path")
         .navigationTitle(lockedBucket != nil ? (bucket?.name ?? "Bucket") : "Browse")
-        .navigationSubtitle(subtitle(groups))
+        .freshSubtitle(subtitle(groups))
         .toolbar {
             ToolbarItemGroup(placement: .automatic) {
-                Picker("Group by", selection: $nav.browse.grouping) {
-                    ForEach(BrowseFilter.Grouping.allCases) { Text($0.label).tag($0) }
+                // One view-options menu, like Finder's group and sort button.
+                Menu {
+                    Picker("Group By", selection: $nav.browse.grouping) {
+                        ForEach(BrowseFilter.Grouping.allCases) { Text($0.label).tag($0) }
+                    }
+                    .pickerStyle(.inline)
+                    Picker("Sort By", selection: $nav.browse.sorting) {
+                        ForEach(BrowseFilter.Sorting.allCases) { Text($0.label).tag($0) }
+                    }
+                    .pickerStyle(.inline)
+                } label: {
+                    Label("Group and Sort", systemImage: "line.3.horizontal.decrease")
                 }
-                .help("Group by")
-                Picker("Sort by", selection: $nav.browse.sorting) {
-                    ForEach(BrowseFilter.Sorting.allCases) { Text($0.label).tag($0) }
-                }
-                .help("Sort by")
+                .help("Group by \(nav.browse.grouping.label.lowercased()), sorted by \(nav.browse.sorting.label.lowercased())")
                 AskAgentButton(target: askTarget(groups), title: "Ask")
                 Button { showInspector.toggle() } label: { Label("Inspector", systemImage: "sidebar.right") }
                     .help("Show the selected item's details")
@@ -209,8 +215,6 @@ struct BrowseView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
-        .background(.bar)
-        .overlay(alignment: .bottom) { Divider() }
     }
 
     private func statusHelp(_ s: ItemStatus) -> String {
@@ -318,10 +322,9 @@ struct SelectionBar: View {
                     .disabled(store.busy)
                     .help("Review first (⌫)")
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(.bar)
-            .overlay(alignment: .top) { Divider() }
+            .floatingBar()
         }
     }
 }

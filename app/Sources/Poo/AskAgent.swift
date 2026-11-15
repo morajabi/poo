@@ -61,8 +61,7 @@ struct ToastOverlay: View {
                 .font(.callout)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
-                .background(.regularMaterial, in: Capsule())
-                .overlay(Capsule().strokeBorder(.separator))
+                .glassBackground(in: Capsule())
                 .padding(.bottom, 56)
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
         }

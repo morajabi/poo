@@ -12,8 +12,8 @@ struct Env {
 }
 
 impl Env {
-    fn new() -> Env {
-        let dir = std::env::temp_dir().join(format!("poo-incremental-{}", std::process::id()));
+    fn new(name: &str) -> Env {
+        let dir = std::env::temp_dir().join(format!("poo-incremental-{}-{}", std::process::id(), name));
         let _ = std::fs::remove_dir_all(&dir);
         for d in ["home", "tmp", "poo/config", "root"] {
             std::fs::create_dir_all(dir.join(d)).unwrap();
@@ -111,7 +111,7 @@ fn settle() {
 
 #[test]
 fn incremental_scans_match_full_scans() {
-    let env = Env::new();
+    let env = Env::new("match");
     let root = env.root();
     let p1 = root.join("app");
     std::fs::create_dir_all(&p1).unwrap();
@@ -158,4 +158,31 @@ fn incremental_scans_match_full_scans() {
     let (full, _) = env.items(true);
     assert_eq!(inc, full);
     assert_eq!(full.get("/app/target delete"), Some(&3), "{:?}", full);
+}
+
+#[test]
+fn removing_a_subfolder_is_not_use() {
+    let env = Env::new("age");
+    let p = env.root().join("lib");
+    std::fs::create_dir_all(&p).unwrap();
+    std::fs::write(p.join("Cargo.toml"), "[package]\n").unwrap();
+    git(&p, &["init", "-q"]);
+    let f = p.join("target/debug/old.bin");
+    write_mb(&f, 3);
+    let month_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(30 * 86400);
+    std::fs::File::options().write(true).open(&f).unwrap().set_modified(month_ago).unwrap();
+
+    let age = |env: &Env, full: bool| -> i64 {
+        let _ = env.items(full);
+        let (v, _) = env.poo(&["ls", "-n", "0", "--json"]);
+        let item = v["items"].as_array().unwrap().iter().find(|i| i["path"].as_str().unwrap().ends_with("/lib/target")).cloned().expect("target item");
+        poo::util::now() - item["last_used"].as_i64().unwrap_or(0)
+    };
+    assert!(age(&env, true) > 29 * 86400);
+    // Something adds and removes a folder inside, without touching any file.
+    std::fs::create_dir_all(p.join("target/debug/tmp-x")).unwrap();
+    std::fs::remove_dir(p.join("target/debug/tmp-x")).unwrap();
+    settle();
+    assert!(age(&env, false) > 29 * 86400, "a removed folder must not count as use");
+    assert!(age(&env, true) > 29 * 86400, "full scans agree");
 }
