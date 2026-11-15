@@ -129,10 +129,93 @@ pub fn for_overview(r: &Report) -> Brief {
     Brief { title: "Ask about my disk".into(), prompt, cwd: home().to_string_lossy().to_string() }
 }
 
-/// Resolves `overview`, `bucket:<id>`, `project:<path>`, an item id or a path.
+fn item_line(i: &Item) -> String {
+    format!(
+        "- {} {} [{}] {}{} (poo id {})\n",
+        bytes(i.total_bytes),
+        i.path,
+        i.tier.label(),
+        i.reasons.join("; "),
+        i.risks.iter().filter(|r| r.level > crate::model::RiskLevel::Standard).map(|r| format!("; note: {}", r.message)).collect::<String>(),
+        i.id
+    )
+}
+
+/// A group of items the user is looking at or selected.
+pub fn for_items(r: &Report, ids: &[&str]) -> Option<Brief> {
+    let items: Vec<&Item> = ids.iter().filter_map(|id| r.items.iter().find(|i| i.id == *id)).collect();
+    if items.is_empty() {
+        return None;
+    }
+    let total: u64 = items.iter().map(|i| i.total_bytes).sum();
+    let mut facts = format!("{} items, {} in total:\n", items.len(), bytes(total));
+    for i in &items {
+        facts.push_str(&item_line(i));
+    }
+    let prompt = format!(
+        "poo, my disk-space tool, listed these and I want a second opinion before cleaning. Go through all of them together, not one question at a time.\n\n{facts}\nPlease:\n1. Group them by what they really are (which project, worktree, tool or task) and check the ones poo can't judge from the filesystem: git state, open PRs, whether I still work there, anything unique inside.\n2. Give me one table: item, what it is, keep / clean build output / remove, and why.\n3. Point out anything poo may have misjudged and suggest poo settings (project policies, rules) that would get it right next time.\n\n{RULES}"
+    );
+    Some(Brief { title: format!("Ask about {} items", items.len()), prompt, cwd: home().to_string_lossy().to_string() })
+}
+
+pub fn for_worktrees(r: &Report) -> Brief {
+    let mut facts = String::from("Linked git worktrees poo found (size includes build output inside):\n");
+    for i in r.items.iter().filter(|i| i.action.kind == crate::model::ActionKind::WorktreeRemove) {
+        let branch = i.meta.get("branch").and_then(|v| v.as_str()).unwrap_or("detached");
+        facts.push_str(&format!(
+            "- {} {} (repo {}, branch {}, agent {}) [{}] {} (poo id {})\n",
+            bytes(i.total_bytes),
+            i.path,
+            i.repo.as_deref().unwrap_or("?"),
+            branch,
+            i.agent.as_deref().unwrap_or("-"),
+            i.tier.label(),
+            i.reasons.join("; "),
+            i.id
+        ));
+    }
+    let prompt = format!(
+        "I lose track of my git worktrees; coding agents create many of them. poo, my disk-space tool, found these. Help me sort them out in one pass.\n\n{facts}\nPlease check each one's branch, recent commits, uncommitted work and PR status (gh pr list --head <branch> --state all), work out which task it was for, and give me one table: worktree, what it was for, status (merged / open PR / abandoned / active), and keep, clean build output, or remove. Run `poo worktrees` for more detail.\n\n{RULES}"
+    );
+    Brief { title: "Ask about my worktrees".into(), prompt, cwd: home().to_string_lossy().to_string() }
+}
+
+pub fn for_projects(r: &Report) -> Brief {
+    let mut facts = String::from("Projects and checkouts poo found, by build output and dependency size:\n");
+    for p in r.projects.iter().filter(|p| p.artifact_bytes > 0).take(40) {
+        facts.push_str(&format!(
+            "- {} {} [{}{}] stacks {}, last activity {}, status {}, policy {:?}\n",
+            bytes(p.artifact_bytes),
+            p.path,
+            p.kind,
+            p.branch.as_ref().map(|b| format!(", branch {}", b)).unwrap_or_default(),
+            p.stacks.join(","),
+            p.last_activity.map(crate::util::age).unwrap_or_else(|| "?".into()),
+            p.status,
+            p.policy
+        ));
+    }
+    let prompt = format!(
+        "poo, my disk-space tool, lists these projects. Help me tell poo which ones I actively work on, which are parked, and which hold anything precious, so its cleanups match how I work.\n\n{facts}\nUse what you know about me and the repos (recent commits, open PRs). Propose `poo projects set <path> active|stale|protected` commands for each, and ask me only about the unclear ones.\n\n{RULES}"
+    );
+    Brief { title: "Ask about my projects".into(), prompt, cwd: home().to_string_lossy().to_string() }
+}
+
+/// Resolves `overview`, `worktrees`, `projects`, `items:<ids>`, `bucket:<id>`,
+/// `project:<path>`, an item id or a path.
 pub fn brief(r: &Report, cat: &Catalog, target: &str) -> Result<Brief> {
     if target == "overview" || target.is_empty() {
         return Ok(for_overview(r));
+    }
+    if target == "worktrees" {
+        return Ok(for_worktrees(r));
+    }
+    if target == "projects" {
+        return Ok(for_projects(r));
+    }
+    if let Some(list) = target.strip_prefix("items:") {
+        let ids: Vec<&str> = list.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+        return for_items(r, &ids).ok_or_else(|| anyhow!("none of those ids are in the last scan"));
     }
     if let Some(b) = target.strip_prefix("bucket:") {
         return for_bucket(r, b).ok_or_else(|| anyhow!("no bucket `{}` in the last scan", b));
