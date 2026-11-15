@@ -198,7 +198,9 @@ pub fn items(list: &[&Item], show_bucket: bool) {
     let fixed = id_w + 2 + 9 + 2 + if bar_w > 0 { bar_w + 2 } else { 0 } + 11 + 2 + 9 + 2;
     let rest = w.saturating_sub(fixed);
     let longest_grp = list.iter().map(|i| if show_bucket { cells(&i.bucket) + 3 + cells(&i.group) } else { cells(&i.group) }).max().unwrap_or(0);
-    let grp_w = longest_grp.min(rest / 3).min(28);
+    // The group gets what the longest name leaves over (never less than a third).
+    let longest_name = list.iter().map(|i| cells(&i.name)).max().unwrap_or(0);
+    let grp_w = longest_grp.min(28).min((rest / 3).max(rest.saturating_sub(longest_name + 2)));
     let name_w = rest.saturating_sub(grp_w + 2).max(16);
     println!(
         "{}",
