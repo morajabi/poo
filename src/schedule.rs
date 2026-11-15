@@ -294,8 +294,8 @@ pub fn run(ctx: &Ctx, s: &Schedule, dry_run: bool) -> Result<RunRecord> {
             });
         }
     }
-    // Always rescan (from the journal when possible): never act on an old picture of the disk.
-    let report = crate::scan::scan_auto(&ctx.cfg, &ctx.cat, &ScanOptions::default());
+    // Always rescan: a scheduled run must not act on an old picture of the disk.
+    let report = crate::scan::scan(&ctx.cfg, &ctx.cat, &ScanOptions::default());
     crate::scan::save_report(&report)?;
     let target = match &s.target_free {
         Some(t) => Some(parse_amount(t, disk.total)?.saturating_sub(report.disk.free)),

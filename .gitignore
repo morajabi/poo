@@ -4,3 +4,6 @@
 /app/.swiftpm
 .DS_Store
 *.tmp
+.running
+.wip
+.committing

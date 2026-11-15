@@ -11,8 +11,8 @@ use serde_json::Value;
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
-/// An item before classification. Saved in the scan index for incremental rescans.
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+/// An item before classification.
+#[derive(Debug, Clone, Default)]
 pub struct Raw {
     pub path: PathBuf,
     pub name: String,
@@ -33,11 +33,7 @@ pub struct Raw {
     pub is_virtual: bool,
     /// Bytes counted elsewhere but freed together with this item.
     pub nested_bytes: u64,
-    #[serde(skip)]
     pub exclude: HashSet<PathBuf>,
-    /// Where it came from: walk, ignored, global, provider, slow, worktree.
-    #[serde(default)]
-    pub origin: String,
     /// Sized without its claimed descendants, so nested items are not double counted.
     pub disjoint: bool,
     pub risks: Vec<crate::model::Risk>,

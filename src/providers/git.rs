@@ -3,7 +3,7 @@
 use crate::util::run_capture;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone)]
 pub struct WorktreeInfo {
     pub path: PathBuf,
     pub head: Option<String>,

@@ -96,28 +96,10 @@ poo schedule ls
 A launchd agent wakes poo every 15 minutes; due schedules rescan first, respect bucket and
 tag filters, notify you, and log to `poo schedule log`.
 
-## Fast, current numbers
-
-The first scan walks everything (5-20 s with a warm disk cache). After that poo keeps an
-index in `~/.local/state/poo/index.json` and reads the macOS file-change journal
-(FSEvents) to see which folders changed since the last scan. Only those branches are
-measured again; big folders remember their sizes, so a change deep inside a 20 GB build
-folder costs a fraction of a second. Docker, Homebrew and simulator runtimes are asked again
-every 15 minutes, and a full walk still happens once a day or whenever the journal lost
-events, rules or roots changed.
-
-- Commands that read (`poo`, `ls`, `plan`, MCP tools) reuse a report from the last
-  `scan.fresh_seconds` (20 s), else update it from the journal first.
-- `poo scan` updates now; `poo scan --full` walks everything.
-- `poo watch` streams changes and keeps `report.json` current while something is looking
-  (the app runs it while its window or menu is open). `POO_TRACE=1` prints timings.
-
 ## CLI
 
 ```
 poo                         overview
-poo scan [--full]           update the report (incremental unless --full)
-poo watch                   keep the report current as files change
 poo ls [bucket] [--tier cold] [--project PATH] [--min 1G] [-q text]
 poo show <id|path>          why it is there, what it costs to rebuild, what is inside
 poo plan stale              preview a plan

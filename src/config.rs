@@ -75,11 +75,7 @@ pub struct ScanConfig {
     pub min_item_bytes: u64,
     /// Default warm window for rules that do not set one.
     pub warm_days: u32,
-    /// Reports younger than this are reused as they are; older ones update from the
-    /// file-change journal first (usually well under a second).
-    pub fresh_seconds: u64,
-    /// When the journal cannot help (it needs a full walk), reports younger than this are
-    /// still reused by `poo ls` and friends instead of blocking on a full walk.
+    /// Scan results younger than this are reused by `poo ls` and friends.
     pub cache_minutes: u64,
     /// Rebuildable things untouched this many days (and with nobody working there) are idle.
     pub idle_days: u32,
@@ -98,7 +94,6 @@ impl Default for ScanConfig {
             exclude: vec![],
             min_item_bytes: 1_000_000,
             warm_days: 14,
-            fresh_seconds: 20,
             cache_minutes: 60,
             idle_days: 3,
             keep_recent_checkouts: 2,
@@ -261,7 +256,7 @@ pub const KEYS: &[(&str, &str)] = &[
     ("scan.keep_recent_checkouts", "Per repo, this many most recent checkouts keep their builds in use (default 2)."),
     ("scan.idle_hours", "Builds of other checkouts go idle after this many hours (default 6)."),
     ("scan.landed_idle_hours", "Builds of worktrees whose work landed go unused after this many hours (default 2)."),
-    ("scan.max_depth / scan.exclude / scan.min_item_bytes / scan.fresh_seconds / scan.cache_minutes", "How deep and where poo walks, the smallest item shown, how long a report is reused before it updates from the file-change journal, and how long it is reused when a full walk would be needed."),
+    ("scan.max_depth / scan.exclude / scan.min_item_bytes / scan.cache_minutes", "How deep and where poo walks, the smallest item shown, how long a scan is reused."),
     ("backup.config_files", "Copy small ignored files (.env, Local.xcconfig) before removing a worktree (default on)."),
     ("backup.max_file_bytes / backup.max_total_bytes", "Largest file and most per worktree copied (1 MB / 50 MB)."),
     ("backup.stash_dirty", "Stash uncommitted work before an --include-in-use worktree removal (default on; off refuses)."),
