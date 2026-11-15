@@ -75,9 +75,16 @@ struct OverviewView: View {
                 }
             }
             DiskBreakdownBar(breakdown: d, onReview: { nav.review(plan: "stale") })
-            HStack(spacing: 18) {
-                ForEach(d.segments) { s in legend(s) }
-                Spacer(minLength: 0)
+            // One row when it fits, otherwise two; labels never wrap mid-word.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 18) {
+                    ForEach(d.segments) { s in legend(s) }
+                    Spacer(minLength: 0)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 18) { ForEach(d.segments.prefix(3)) { s in legend(s) } }
+                    HStack(spacing: 18) { ForEach(d.segments.dropFirst(3)) { s in legend(s) } }
+                }
             }
         }
         .padding(12)
@@ -100,6 +107,8 @@ struct OverviewView: View {
                 .contentTransition(.numericText())
         }
         .font(.callout)
+        .lineLimit(1)
+        .fixedSize()
         .contentShape(Rectangle())
         return Group {
             if let filter {

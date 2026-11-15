@@ -119,7 +119,7 @@ struct ItemRow: View {
             SelectBox(item: item)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text(item.name).lineLimit(1).truncationMode(.middle)
+                    Text(item.name).lineLimit(1).truncationMode(.middle).layoutPriority(1)
                     if let a = item.agent {
                         Text(a).font(.caption2).padding(.horizontal, 4).background(.quaternary, in: Capsule())
                     }

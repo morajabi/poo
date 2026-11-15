@@ -100,6 +100,12 @@ struct BrowseView: View {
             .inspectorColumnWidth(min: 260, ideal: 320, max: 440)
         }
         .onChange(of: inspected) { _, new in if new != nil { showInspector = true } }
+        .task {
+            // `--preview-inspect`: open the inspector on the biggest item not in use (screenshots).
+            if CommandLine.arguments.contains("--preview-inspect"), inspected == nil {
+                inspected = report?.items.filter { $0.status == .notInUse }.max { $0.total_bytes < $1.total_bytes }?.id
+            }
+        }
         .onKeyPress(.space) {
             // Space ticks the highlighted row, like Mail's and Finder's checkbox lists.
             guard let id = inspected, let i = report?.items.first(where: { $0.id == id }), i.isCleanable else { return .ignored }
@@ -172,7 +178,7 @@ struct BrowseView: View {
         }
     }
 
-    private func filterBar(bucket: BucketSummary?) -> some View {
+    private func statusChips(iconOnly: Bool) -> some View {
         @Bindable var nav = nav
         return HStack(spacing: 6) {
             ForEach(ItemStatus.allCases) { s in
@@ -180,11 +186,27 @@ struct BrowseView: View {
                     get: { nav.browse.statuses.contains(s) },
                     set: { on in if on { nav.browse.statuses.insert(s) } else { nav.browse.statuses.remove(s) } }
                 )) {
-                    Label(s.label, systemImage: s.symbol)
+                    if iconOnly {
+                        Label(s.label, systemImage: s.symbol).labelStyle(.iconOnly)
+                    } else {
+                        Label(s.label, systemImage: s.symbol)
+                    }
                 }
                 .toggleStyle(.button)
                 .controlSize(.small)
-                .help(statusHelp(s))
+                .fixedSize()
+                .help(iconOnly ? "\(s.label): \(statusHelp(s))" : statusHelp(s))
+            }
+        }
+    }
+
+    private func filterBar(bucket: BucketSummary?) -> some View {
+        @Bindable var nav = nav
+        return HStack(spacing: 6) {
+            // Labelled chips when there's room, icons alone when the inspector squeezes the list.
+            ViewThatFits(in: .horizontal) {
+                statusChips(iconOnly: false)
+                statusChips(iconOnly: true)
             }
             Divider().frame(height: 16)
             if lockedBucket == nil {
@@ -231,7 +253,9 @@ struct BrowseView: View {
         guard let r = report else { return [] }
         let buckets = Dictionary(uniqueKeysWithValues: r.buckets.map { ($0.id, $0) })
         let q = filter.query.trimmingCharacters(in: .whitespaces)
+        // Report-only items live in Overview › Elsewhere on this Mac, not in the cleanable list.
         let items = r.items.filter { i in
+            if i.isReportOnly { return false }
             if let bucket, i.bucket != bucket { return false }
             if bucket == nil, buckets[i.bucket]?.hidden == true { return false }
             if let g = filter.group, i.group != g { return false }

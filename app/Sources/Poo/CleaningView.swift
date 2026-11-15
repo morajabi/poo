@@ -282,8 +282,13 @@ struct CleaningPreview: View {
         .task {
             guard session == nil, let plan = await store.plan("stale") else { return }
             let free = store.report?.disk.free ?? 0
-            if CommandLine.arguments.contains("--preview-cleaning=fake") {
-                session = CleanSession.fake(items: plan.items, freeBefore: free, speed: 0.5)
+            // fake: simulated dry run. freed: the same simulation shown as a real clean (screenshots).
+            let args = CommandLine.arguments
+            if args.contains("--preview-cleaning=fake") || args.contains("--preview-cleaning=freed") {
+                let speed = Double(ProcessInfo.processInfo.environment["POO_PREVIEW_SPEED"] ?? "") ?? 0.5
+                let s = CleanSession.fake(items: plan.items, freeBefore: free, speed: speed)
+                if args.contains("--preview-cleaning=freed") { s.dryRun = false }
+                session = s
             } else {
                 session = store.startClean(plan.items, mode: .safe, dryRun: true)
             }

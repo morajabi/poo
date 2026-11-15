@@ -89,11 +89,12 @@ final class CleanSession: Identifiable {
     }
 
     private func finishFake(cancelled: Bool) {
-        let skipped = CleanItemResult(id: "x", path: "/tmp/x", name: "inline-timeline/target", status: "skipped", bytes: 0,
+        // Neutral sample names: this only feeds previews and screenshots.
+        let skipped = CleanItemResult(id: "x", path: "/tmp/x", name: "web-dash/.next", status: "skipped", bytes: 0,
                                       reason: "a build started in this checkout", warnings: nil, notes: nil)
-        let backup = CleanItemResult(id: "y", path: "/tmp/y", name: "inline-offmain", status: "cleaned", bytes: 0, reason: nil,
-                                     warnings: nil, notes: ["Backed up 3 ignored config files to Backups", "Branch inline-offmain stays"])
-        finish(CleanResult(dry_run: true, freed_bytes: freedBytes, cleaned: done, skipped: 1, failed: 0,
+        let backup = CleanItemResult(id: "y", path: "/tmp/y", name: "atlas-api-search", status: "cleaned", bytes: 0, reason: nil,
+                                     warnings: nil, notes: ["Backed up 2 ignored config files to Backups", "Branch feature/search stays"])
+        finish(CleanResult(dry_run: dryRun, freed_bytes: freedBytes, cleaned: done, skipped: 1, failed: 0,
                            disk_free_after: (freeBefore ?? 0) + freedBytes, results: [backup, skipped],
                            snapshot_note: nil, cancelled: cancelled, disk_free_before: freeBefore))
     }
