@@ -112,12 +112,14 @@ impl Default for ScanConfig {
 #[serde(deny_unknown_fields, default)]
 pub struct UpdatesConfig {
     pub check: bool,
+    /// Install new releases in the background (script installs only).
+    pub auto: bool,
     pub channel: String,
 }
 
 impl Default for UpdatesConfig {
     fn default() -> Self {
-        Self { check: true, channel: "stable".into() }
+        Self { check: true, auto: true, channel: "stable".into() }
     }
 }
 
@@ -312,7 +314,8 @@ pub const KEYS: &[(&str, &str)] = &[
     ("menubar.warn / menubar.warn_below", "Tint the menu bar number when free space is below this, \"10%\" or \"20G\" (default on, 10%)."),
     ("menubar.sections", "Panel sections in order: disk, areas, buckets, freed, schedules (default [disk, areas, freed, schedules])."),
     ("menubar.area_order / menubar.max_areas", "Areas in the panel by size | bucket | name, and how many before the rest fold (default size, 6)."),
-    ("updates.check", "Check for new versions once a day (default on)."),
+    ("updates.check", "Check for new versions once a day, in the background, from an interactive terminal (default on)."),
+    ("updates.auto", "Install new versions in the background when poo was installed by the script (default on). Off: print a one-line hint instead. Homebrew and Poo.app installs update through brew and the app."),
 ];
 
 /// Common places developers keep projects. Used when no roots are configured.
