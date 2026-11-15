@@ -29,6 +29,15 @@ struct PooApp: App {
         }
         .defaultSize(width: 1180, height: 760)
 
+        // `Poo --preview-menu` shows the menu bar panel in a window (screenshots, debugging).
+        Window("Poo Menu", id: "menu-preview") {
+            MenuBarView()
+                .environment(store)
+                .environment(updater)
+                .environment(nav)
+        }
+        .windowResizability(.contentSize)
+
         Settings {
             SettingsView()
                 .environment(store)
@@ -68,6 +77,10 @@ struct MenuBarLabel: View {
             NSApp.setActivationPolicy(.accessory)
             // `Poo --window` (and first launch) opens the main window right away.
             let firstLaunch = !UserDefaults.standard.bool(forKey: "launchedBefore")
+            if CommandLine.arguments.contains("--preview-menu") {
+                openWindow(id: "menu-preview")
+                NSApp.activate(ignoringOtherApps: true)
+            }
             if CommandLine.arguments.contains("--window") || firstLaunch {
                 UserDefaults.standard.set(true, forKey: "launchedBefore")
                 openWindow(id: "main")

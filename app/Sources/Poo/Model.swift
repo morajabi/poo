@@ -4,7 +4,7 @@ import SwiftUI
 // Mirrors the JSON contract of `poo` (src/model.rs). Unknown fields are ignored.
 
 enum Tier: String, Codable, CaseIterable, Identifiable {
-    case junk, cold, warm, hot, review, protected
+    case junk, cold, idle, warm, hot, review, protected
     var id: String { rawValue }
 
     var label: String { rawValue.capitalized }
@@ -13,6 +13,7 @@ enum Tier: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .junk: return .yellow
         case .cold: return .teal
+        case .idle: return .cyan
         case .warm: return .purple
         case .hot: return .red
         case .review: return .blue
@@ -23,8 +24,9 @@ enum Tier: String, Codable, CaseIterable, Identifiable {
     var explanation: String {
         switch self {
         case .junk: return "Nothing to rebuild"
-        case .cold: return "Unused for weeks or orphaned"
-        case .warm: return "Used recently; costs a rebuild or redownload"
+        case .cold: return "Unused for days, orphaned, or its work already landed"
+        case .idle: return "Nothing is using it right now; costs a rebuild if you return"
+        case .warm: return "In active use; costs a rebuild or redownload"
         case .hot: return "In use right now"
         case .review: return "Needs a human look"
         case .protected: return "Never cleaned automatically"
@@ -79,6 +81,24 @@ struct ItemAction: Codable, Hashable {
     var command: [String]?
 }
 
+struct Risk: Codable, Hashable {
+    var tag: String
+    var level: String
+    var message: String
+}
+
+enum CleanMode: String, CaseIterable, Identifiable {
+    case standard, force, danger
+    var id: String { rawValue }
+    var rank: Int { CleanMode.allCases.firstIndex(of: self) ?? 0 }
+    static func needed(for items: [Item]) -> CleanMode {
+        let levels = items.flatMap { $0.risks ?? [] }.map(\.level)
+        if levels.contains("danger") { return .danger }
+        if levels.contains("force") { return .force }
+        return .standard
+    }
+}
+
 struct Child: Codable, Hashable {
     var name: String
     var bytes: UInt64
@@ -91,6 +111,7 @@ struct Item: Codable, Hashable, Identifiable {
     var rule: String
     var bucket: String
     var group: String
+    var tags: [String]?
     var bytes: UInt64
     var total_bytes: UInt64
     var files: UInt64
@@ -103,6 +124,7 @@ struct Item: Codable, Hashable, Identifiable {
     var repo: String?
     var agent: String?
     var action: ItemAction
+    var risks: [Risk]?
     var children: [Child]?
 
     var isVirtual: Bool { path.contains("://") }
@@ -125,6 +147,8 @@ struct Project: Codable, Hashable, Identifiable {
     var status: String
     var dirty: Bool?
     var merged: Bool?
+    var recency_rank: Int?
+    var active: [String]?
     var id: String { path }
 }
 
@@ -141,6 +165,8 @@ struct Report: Codable {
     var projects: [Project]
     var items: [Item]
     var warnings: [String]
+    var detected: [String]?
+    var rule_hits: [String: [UInt64]]?
 
     var scannedAt: Date { Date(timeIntervalSince1970: TimeInterval(scanned_at)) }
     var visibleBuckets: [BucketSummary] { buckets.filter { !$0.hidden && $0.count > 0 } }
@@ -162,6 +188,8 @@ struct CleanItemResult: Codable, Identifiable {
     var status: String
     var bytes: UInt64
     var reason: String?
+    var warnings: [String]?
+    var notes: [String]?
 }
 
 struct CleanResult: Codable {
@@ -172,6 +200,7 @@ struct CleanResult: Codable {
     var failed: Int
     var disk_free_after: UInt64
     var results: [CleanItemResult]
+    var snapshot_note: String?
 }
 
 struct PlanResult: Codable {
@@ -208,6 +237,8 @@ struct CatalogRule: Codable, Identifiable, Hashable {
     var description: String
     var recommend: String?
     var source: String
+    var tags: [String]?
+    var stacks: [String]?
 }
 
 struct CatalogMod: Codable, Identifiable, Hashable {
@@ -226,6 +257,47 @@ struct Catalog: Codable {
     var buckets: [CatalogBucket]
     var rules: [CatalogRule]
     var errors: [String]
+}
+
+struct ScheduleSpec: Codable, Hashable {
+    var id: String
+    var plan: String
+    var every: String
+    var at: String?
+    var when_free_below: String?
+    var target_free: String?
+    var max_bytes: String?
+    var enabled: Bool
+}
+
+struct ScheduleRun: Codable, Hashable {
+    var at: Int64
+    var status: String
+    var freed_bytes: UInt64
+    var cleaned: Int
+    var skipped: Int
+    var message: String?
+}
+
+struct ScheduleEntry: Codable, Identifiable, Hashable {
+    var schedule: ScheduleSpec
+    var last_run: ScheduleRun?
+    var next_run: Int64?
+    var id: String { schedule.id }
+}
+
+struct ScheduleList: Codable {
+    var schedules: [ScheduleEntry]
+    var agent_loaded: Bool?
+}
+
+struct SchedulePreset: Codable, Identifiable, Hashable {
+    var id: String
+    var description: String
+}
+
+struct PresetList: Codable {
+    var presets: [SchedulePreset]
 }
 
 struct IntegrationTarget: Codable, Identifiable, Hashable {

@@ -18,7 +18,7 @@ struct MenuBarView: View {
                     BucketDonut(buckets: r.visibleBuckets, total: r.total_bytes) { b in
                         open(.bucket(b.id))
                     }
-                    .frame(width: 128, height: 128)
+                    .frame(width: 118, height: 118)
                     VStack(spacing: 5) {
                         ForEach(r.visibleBuckets.sorted { $0.bytes > $1.bytes }.prefix(6)) { b in
                             Button { open(.bucket(b.id)) } label: { BucketLegendRow(bucket: b) }
@@ -42,11 +42,17 @@ struct MenuBarView: View {
             if let e = store.error {
                 Text(e).font(.caption).foregroundStyle(.red).lineLimit(3)
             }
+            if let next = store.schedules.filter({ $0.schedule.enabled }).compactMap({ e in e.next_run.map { (e, $0) } }).min(by: { $0.1 < $1.1 }) {
+                Label("Auto-clean \(next.0.id) \(Fmt.ago(Date(timeIntervalSince1970: TimeInterval(next.1))))\(next.0.last_run.map { " · last freed \(Fmt.bytes($0.freed_bytes))" } ?? "")", systemImage: "clock.arrow.2.circlepath")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Divider()
             footer
         }
         .padding(16)
         .frame(width: 380)
+        .task { await store.loadSchedules() }
         .sheet(item: $confirming) { p in
             CleanConfirmView(planID: p.id, free: p.id == "emergency" ? UInt64(emergencyGB * 1e9) : nil)
                 .environment(store)
@@ -136,7 +142,8 @@ struct MenuBarView: View {
     }
 }
 
-/// Shows exactly what a plan or a selection will clean before doing it.
+/// Shows exactly what a plan or a selection will clean before doing it, with every risk
+/// the chosen mode accepts spelled out.
 struct CleanConfirmView: View {
     @Environment(Store.self) private var store
     @Environment(\.dismiss) private var dismiss
@@ -145,10 +152,15 @@ struct CleanConfirmView: View {
     var items: [Item]? = nil
     @State private var plan: PlanResult?
     @State private var loading = true
+    @State private var mode: CleanMode = .standard
+    @State private var dangerAck = false
 
     private var list: [Item] { items ?? plan?.items ?? [] }
-    private var total: UInt64 { items.map { $0.reduce(0) { $0 + $1.total_bytes } } ?? plan?.bytes ?? 0 }
-    private var risky: Bool { list.contains { $0.tier == .hot || $0.tier == .review } }
+    private var needed: CleanMode { CleanMode.needed(for: list) }
+    private var allowed: [Item] {
+        list.filter { i in (i.risks ?? []).allSatisfy { r in (CleanMode(rawValue: r.level)?.rank ?? 0) <= mode.rank } }
+    }
+    private var total: UInt64 { allowed.reduce(0) { $0 + $1.total_bytes } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -160,30 +172,49 @@ struct CleanConfirmView: View {
                 Text("Nothing to clean.").foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 120)
             } else {
                 List(list) { i in
-                    HStack {
-                        VStack(alignment: .leading) {
+                    let blocked = !allowed.contains(i)
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack {
                             Text(i.name).lineLimit(1).truncationMode(.middle)
-                            Text(i.reasons.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            Spacer()
+                            TierBadge(tier: i.tier)
+                            Text(Fmt.bytes(i.total_bytes)).monospacedDigit().frame(width: 72, alignment: .trailing)
                         }
-                        Spacer()
-                        TierBadge(tier: i.tier)
-                        Text(Fmt.bytes(i.total_bytes)).monospacedDigit().frame(width: 72, alignment: .trailing)
+                        Text(i.reasons.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        ForEach((i.risks ?? []).filter { $0.level != "standard" }, id: \.tag) { r in
+                            Label(r.message, systemImage: r.level == "danger" ? "exclamationmark.octagon.fill" : "exclamationmark.triangle.fill")
+                                .font(.caption)
+                                .foregroundStyle(r.level == "danger" ? .red : .orange)
+                        }
                     }
+                    .opacity(blocked ? 0.45 : 1)
                 }
-                .frame(minHeight: 240)
-                if risky {
-                    Label("Includes hot or review items. Poo still skips running builds and uncommitted worktrees.", systemImage: "exclamationmark.triangle")
-                        .font(.caption).foregroundStyle(.orange)
+                .frame(minHeight: 260)
+                if needed != .standard {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Picker("Mode", selection: $mode) {
+                            Text("Standard").tag(CleanMode.standard)
+                            Text("Force").tag(CleanMode.force)
+                            if needed == .danger { Text("Danger").tag(CleanMode.danger) }
+                        }
+                        .pickerStyle(.segmented)
+                        .fixedSize()
+                        Text(modeHelp).font(.caption).foregroundStyle(.secondary)
+                        if mode == .danger {
+                            Toggle("I understand these items may hold work, data or running builds", isOn: $dangerAck)
+                                .toggleStyle(.checkbox).font(.caption)
+                        }
+                    }
                 }
             }
             HStack {
-                Text("\(list.count) items · \(Fmt.bytes(total))").foregroundStyle(.secondary)
+                Text("\(allowed.count) of \(list.count) items · \(Fmt.bytes(total))").foregroundStyle(.secondary)
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Clean \(Fmt.bytes(total))", role: .destructive) {
                     Task {
-                        if let items {
-                            await store.clean(ids: items.map(\.id), force: risky)
+                        if items != nil {
+                            await store.clean(ids: allowed.map(\.id), mode: mode)
                         } else if let planID {
                             await store.clean(plan: planID, free: free)
                         }
@@ -191,16 +222,24 @@ struct CleanConfirmView: View {
                     }
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(list.isEmpty || store.busy)
+                .disabled(allowed.isEmpty || store.busy || (mode == .danger && !dangerAck))
             }
         }
         .padding(20)
-        .frame(width: 560)
+        .frame(width: 600)
         .task {
             if items == nil, let planID {
                 plan = await store.plan(planID, free: free)
             }
             loading = false
+        }
+    }
+
+    private var modeHelp: String {
+        switch mode {
+        case .standard: return "Items with warnings are skipped. Choose Force to include them."
+        case .force: return "Includes recently used items, checkouts an agent has open, and worktrees with uncommitted work (Poo stashes it first; see git stash list)."
+        case .danger: return "Also running builds, data, protected items and detached commits (saved to a poo/ branch first). Use with care."
         }
     }
 }

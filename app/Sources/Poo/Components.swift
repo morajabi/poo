@@ -105,23 +105,23 @@ struct BucketLegendRow: View {
     var bucket: BucketSummary
 
     var body: some View {
+        let unused = bucket.bytes(for: .junk) + bucket.bytes(for: .cold) + bucket.bytes(for: .idle)
         HStack(spacing: 8) {
             Image(systemName: bucket.symbol)
                 .foregroundStyle(bucket.swiftColor)
                 .frame(width: 18)
-            Text(bucket.name)
-                .lineLimit(1)
-            Spacer()
-            let stale = bucket.bytes(for: .junk) + bucket.bytes(for: .cold)
-            if stale > 0 {
-                Text("\(Fmt.bytes(stale)) stale")
-                    .font(.caption)
-                    .foregroundStyle(.teal)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(bucket.name).lineLimit(1)
+                if unused > 0 {
+                    Text("\(Fmt.bytes(unused)) not in use").font(.caption2).foregroundStyle(.teal)
+                }
             }
+            .layoutPriority(1)
+            Spacer(minLength: 4)
             Text(Fmt.bytes(bucket.bytes))
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
-                .frame(minWidth: 64, alignment: .trailing)
+                .fixedSize()
         }
         .contentShape(Rectangle())
     }
@@ -182,7 +182,7 @@ struct ItemRow: View {
             Toggle("", isOn: Binding(get: { selected }, set: { _ in onToggle() }))
                 .toggleStyle(.checkbox)
                 .labelsHidden()
-                .disabled(item.tier == .protected || item.action.kind == "none")
+                .disabled(item.action.kind == "none")
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(item.name).lineLimit(1).truncationMode(.middle)
@@ -196,6 +196,11 @@ struct ItemRow: View {
                     .lineLimit(1)
             }
             Spacer()
+            if let r = item.risks?.first(where: { $0.level != "standard" }) {
+                Image(systemName: r.level == "danger" ? "exclamationmark.octagon" : "exclamationmark.triangle")
+                    .foregroundStyle(r.level == "danger" ? .red : .orange)
+                    .help((item.risks ?? []).map(\.message).joined(separator: "\n"))
+            }
             TierBadge(tier: item.tier)
             Text(Fmt.ago(item.lastUsedDate))
                 .font(.caption)

@@ -14,6 +14,8 @@ final class Store {
     var catalog: Catalog?
     var integrations: [IntegrationTarget] = []
     var roots: RootsInfo?
+    var schedules: [ScheduleEntry] = []
+    var presets: [SchedulePreset] = []
 
     /// Item ids the user ticked in the window.
     var selection: Set<String> = []
@@ -72,12 +74,13 @@ final class Store {
         }
     }
 
-    func clean(ids: [String], force: Bool = false) async {
+    func clean(ids: [String], mode: CleanMode = .standard) async {
         guard !ids.isEmpty else { return }
         busy = true
         defer { busy = false }
         var args = ["clean"] + ids + ["--yes"]
-        if force { args += ["--force", "--max-tier", "review"] }
+        if mode == .force { args.append("--force") }
+        if mode == .danger { args.append("--danger") }
         await runClean(args)
     }
 
@@ -123,7 +126,18 @@ final class Store {
         catalog = try? await PooCLI.json(Catalog.self, ["catalog"])
         integrations = (try? await PooCLI.json(IntegrationStatus.self, ["integration", "status"]))?.targets ?? []
         roots = try? await PooCLI.json(RootsInfo.self, ["roots"])
+        await loadSchedules()
     }
+
+    func loadSchedules() async {
+        schedules = (try? await PooCLI.json(ScheduleList.self, ["schedule", "ls"]))?.schedules ?? []
+        if presets.isEmpty {
+            presets = (try? await PooCLI.json(PresetList.self, ["schedule", "presets"]))?.presets ?? []
+        }
+    }
+
+    /// Stacks and tools poo detected, for adapting what it shows.
+    var detected: Set<String> { Set(report?.detected ?? []) }
 
     func reveal(_ item: Item) {
         guard !item.isVirtual else { return }

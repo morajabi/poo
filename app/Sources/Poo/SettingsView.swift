@@ -7,6 +7,7 @@ struct SettingsView: View {
     var body: some View {
         TabView {
             GeneralSettings().tabItem { Label("General", systemImage: "gearshape") }
+            AutomationSettings().tabItem { Label("Automation", systemImage: "clock.arrow.2.circlepath") }
             BucketSettings().tabItem { Label("Buckets", systemImage: "square.stack.3d.up") }
             RuleSettings().tabItem { Label("Rules", systemImage: "list.bullet.rectangle") }
             AgentSettings().tabItem { Label("Agents", systemImage: "sparkles") }
@@ -141,13 +142,61 @@ struct BucketRow: View {
 struct RuleSettings: View {
     @Environment(Store.self) private var store
     @State private var query = ""
+    @State private var scope = "mac"
+
+    /// A rule is relevant when it found something here or belongs to a stack this Mac has.
+    private func relevant(_ r: CatalogRule) -> Bool {
+        if store.report?.rule_hits?[r.id] != nil { return true }
+        let stacks = r.stacks ?? []
+        return stacks.isEmpty || !store.detected.isDisjoint(with: stacks) || stacks.contains("macos")
+    }
+
+    private var packs: [(tag: String, total: Int, enabled: Int)] {
+        var counts: [String: (Int, Int)] = [:]
+        for r in store.catalog?.rules ?? [] where scope == "all" || relevant(r) {
+            for t in r.tags ?? [] {
+                var c = counts[t] ?? (0, 0)
+                c.0 += 1
+                if r.enabled { c.1 += 1 }
+                counts[t] = c
+            }
+        }
+        return counts.map { (tag: $0.key, total: $0.value.0, enabled: $0.value.1) }.sorted { $0.total > $1.total }
+    }
 
     var body: some View {
-        let rules = (store.catalog?.rules ?? []).filter {
-            query.isEmpty || $0.id.localizedCaseInsensitiveContains(query) || $0.name.localizedCaseInsensitiveContains(query) || $0.bucket.localizedCaseInsensitiveContains(query)
+        let rules = (store.catalog?.rules ?? []).filter { r in
+            (scope == "all" || relevant(r)) &&
+                (query.isEmpty || r.id.localizedCaseInsensitiveContains(query) || r.name.localizedCaseInsensitiveContains(query) || (r.tags ?? []).contains { $0.localizedCaseInsensitiveContains(query) })
         }
-        VStack(alignment: .leading) {
-            TextField("Search \(store.catalog?.rules.count ?? 0) rules", text: $query).textFieldStyle(.roundedBorder)
+        .sorted { a, b in
+            let ha = store.report?.rule_hits?[a.id]?.last ?? 0, hb = store.report?.rule_hits?[b.id]?.last ?? 0
+            return ha != hb ? ha > hb : a.id < b.id
+        }
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Picker("", selection: $scope) {
+                    Text("On this Mac").tag("mac")
+                    Text("All rules").tag("all")
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
+                TextField("Search rules or tags", text: $query).textFieldStyle(.roundedBorder)
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(packs.prefix(30), id: \.tag) { p in
+                        Toggle(isOn: Binding(get: { p.enabled > 0 }, set: { on in
+                            Task { await store.configure(["rules", on ? "enable" : "disable", "--tag", p.tag], rescan: true) }
+                        })) {
+                            Text("\(p.tag) \(p.enabled)/\(p.total)").font(.caption)
+                        }
+                        .toggleStyle(.button)
+                        .controlSize(.small)
+                        .help("Turn every rule tagged \(p.tag) on or off")
+                    }
+                }
+            }
             List(rules) { r in
                 HStack(alignment: .top) {
                     Toggle("", isOn: Binding(get: { r.enabled }, set: { on in
@@ -158,6 +207,9 @@ struct RuleSettings: View {
                         HStack {
                             Text(r.name).font(.callout.weight(.medium))
                             Text(r.id).font(.caption.monospaced()).foregroundStyle(.secondary)
+                            if let h = store.report?.rule_hits?[r.id], h.count == 2 {
+                                Text("\(Fmt.bytes(h[1])) here").font(.caption).foregroundStyle(.teal)
+                            }
                         }
                         Text(r.description).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                     }
@@ -175,12 +227,78 @@ struct RuleSettings: View {
                         }), in: 0...365) {
                             Text(r.warm_days == 0 ? "default" : "\(r.warm_days)d").font(.caption).monospacedDigit().frame(width: 50)
                         }
-                        .help("Used within this many days counts as warm (in use)")
+                        .help("Unused this many days counts as cold")
                     }
                 }
             }
         }
         .padding()
+    }
+}
+
+struct AutomationSettings: View {
+    @Environment(Store.self) private var store
+
+    var body: some View {
+        Form {
+            Section {
+                ForEach(store.presets) { p in
+                    let existing = store.schedules.first { $0.id == p.id }
+                    Toggle(isOn: Binding(get: { existing?.schedule.enabled ?? false }, set: { on in
+                        Task {
+                            if existing == nil {
+                                await store.configure(["schedule", "add", p.id])
+                            } else {
+                                await store.configure(["schedule", on ? "enable" : "disable", p.id])
+                            }
+                        }
+                    })) {
+                        VStack(alignment: .leading) {
+                            Text(p.id.capitalized)
+                            Text(p.description).font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            } header: {
+                Text("Routine cleanups run on their own, rescan first, and only clean items without warnings.")
+            }
+            if !store.schedules.isEmpty {
+                Section("Schedules") {
+                    ForEach(store.schedules) { e in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("\(e.schedule.id) · \(e.schedule.plan) every \(e.schedule.every)\(e.schedule.at.map { " at \($0)" } ?? "")")
+                                Text(detail(e)).font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button("Run now") { Task { await store.configure(["schedule", "run", e.id], rescan: false); await store.loadSchedules(); store.report = PooCLI.cachedReport() ?? store.report } }
+                            Button("Remove") { Task { await store.configure(["schedule", "rm", e.id]) } }
+                        }
+                    }
+                }
+            }
+            Section {
+                Text("Agents can manage schedules too: `poo schedule add nightly`, or the MCP `schedules` tool.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .task { await store.loadSchedules() }
+    }
+
+    private func detail(_ e: ScheduleEntry) -> String {
+        var parts: [String] = []
+        if let c = e.schedule.when_free_below { parts.append("when free < \(c)") }
+        if let t = e.schedule.target_free { parts.append("free up to \(t)") }
+        if let l = e.last_run {
+            parts.append("last \(Fmt.ago(Date(timeIntervalSince1970: TimeInterval(l.at)))): \(l.status) \(Fmt.bytes(l.freed_bytes))")
+        } else {
+            parts.append("never ran")
+        }
+        if e.schedule.enabled, let n = e.next_run {
+            parts.append("next \(Fmt.ago(Date(timeIntervalSince1970: TimeInterval(n))))")
+        }
+        return parts.joined(separator: " · ")
     }
 }
 

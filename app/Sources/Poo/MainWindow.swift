@@ -69,6 +69,17 @@ struct OverviewView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Disk").font(.title2.weight(.semibold))
                         DiskBar(report: r)
+                        if let d = r.detected, !d.isEmpty {
+                            HStack(spacing: 6) {
+                                Text("Found on this Mac").font(.caption).foregroundStyle(.secondary)
+                                ForEach(d, id: \.self) { s in
+                                    Text(s).font(.caption).padding(.horizontal, 6).padding(.vertical, 2).background(.quaternary, in: Capsule())
+                                }
+                            }
+                        }
+                        if let note = store.lastClean?.snapshot_note {
+                            Label(note, systemImage: "clock.arrow.circlepath").font(.caption).foregroundStyle(.orange)
+                        }
                     }
                     HStack(alignment: .top, spacing: 28) {
                         BucketDonut(buckets: r.visibleBuckets, total: r.total_bytes) { b in nav.section = .bucket(b.id) }
@@ -286,7 +297,7 @@ struct ItemInspector: View {
                     Button(store.selection.contains(item.id) ? "Deselect" : "Select") {
                         if store.selection.contains(item.id) { store.selection.remove(item.id) } else { store.selection.insert(item.id) }
                     }
-                    .disabled(item.tier == .protected)
+                    .disabled(item.action.kind == "none")
                 }
             }
             .padding(16)
@@ -430,7 +441,7 @@ struct WorktreeRow: View {
                 ))
                 .toggleStyle(.checkbox)
                 .labelsHidden()
-                .disabled(item.tier == .protected)
+                .disabled(item.action.kind == "none")
             }
         }
     }
