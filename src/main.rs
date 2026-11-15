@@ -166,6 +166,18 @@ enum Cmd {
     },
     /// Everything poo knows, for agents and curious humans.
     Catalog,
+    /// Big folders no rule explains yet, with draft rules to test and share.
+    Suggest {
+        /// Smallest folder worth a rule (default 200M).
+        #[arg(long)]
+        min: Option<String>,
+        /// Write the drafts (disabled) into this mod, e.g. `poo suggest --write mine`.
+        #[arg(long)]
+        write: Option<String>,
+        /// Id prefix for drafts (default: the --write mod id, or `local`).
+        #[arg(long)]
+        prefix: Option<String>,
+    },
     /// Read or change config.toml.
     Config {
         #[command(subcommand)]
@@ -368,6 +380,43 @@ enum ModsCmd {
     Enable { id: String },
     /// Print the mod format reference.
     Docs,
+    /// Safety lint for your mods, or for core with --core (CI uses this).
+    Lint {
+        /// Lint rules/core of this checkout and its matcher fixtures.
+        #[arg(long)]
+        core: bool,
+        /// With --core: rules missing at this git ref are new and need fixtures.
+        #[arg(long)]
+        base: Option<String>,
+        /// Repository root for --core (default: current folder).
+        #[arg(long)]
+        repo: Option<String>,
+    },
+    /// Share mods or rules with poo as a pull request: lint, remove personal details,
+    /// show everything, and only then open the PR (gh) or print prefilled links.
+    Submit {
+        /// Mod ids or rule ids from your mods.
+        #[arg(required = true)]
+        ids: Vec<String>,
+        /// Open the pull request without asking (only after a person approved the preview).
+        #[arg(long)]
+        yes: bool,
+        /// Only show what would be sent.
+        #[arg(long)]
+        dry_run: bool,
+        /// Leave out sizes, tool versions and matcher fixtures from this Mac.
+        #[arg(long)]
+        no_evidence: bool,
+        /// Also report `<tool> --version` (repeatable).
+        #[arg(long = "tool")]
+        tools: Vec<String>,
+        /// A sentence for reviewers (scrubbed like everything else).
+        #[arg(long)]
+        note: Option<String>,
+        /// Print prefilled GitHub links instead of using gh.
+        #[arg(long)]
+        no_gh: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1109,7 +1158,12 @@ fn real_main(cli: Cli) -> R {
                 save(&cfg, &out, &format!("enabled mod {}", id))?;
             }
             ModsCmd::Docs => print!("{}", poo::agent::MODS_DOCS),
+            ModsCmd::Lint { core, base, repo } => contrib_cmd::lint(&ctx, &out, core, base, repo)?,
+            ModsCmd::Submit { ids, yes, dry_run, no_evidence, tools, note, no_gh } => {
+                contrib_cmd::submit(&ctx, &out, &ids, yes, dry_run, !no_evidence, tools, note, no_gh)?
+            }
         },
+        Cmd::Suggest { min, write, prefix } => contrib_cmd::suggest(&ctx, &out, min, write, prefix)?,
         Cmd::Catalog => {
             let v = ops::catalog_json(&ctx.cat);
             if out.json {
@@ -1726,3 +1780,5 @@ fn main() -> ExitCode {
         }
     }
 }
+
+mod contrib_cmd;

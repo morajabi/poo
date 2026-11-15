@@ -8,6 +8,7 @@ pub mod bulk;
 pub mod catalog;
 pub mod clean;
 pub mod config;
+pub mod contrib;
 pub mod fsevents;
 pub mod fsutil;
 pub mod hooks;

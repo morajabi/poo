@@ -122,7 +122,7 @@ pub struct CleanResult {
 }
 
 /// Never touched, in any mode.
-const NEVER: &[&str] = &[
+pub const NEVER: &[&str] = &[
     ".ssh", ".gnupg", "Keychains", "Mobile Documents", ".password-store", ".aws", ".kube",
     "1Password", "com.apple.TCC", "Photos Library.photoslibrary", "Mail", "CloudStorage",
     // A connected device's filesystem, mounted under ~/Library/Developer/CoreDevice.
