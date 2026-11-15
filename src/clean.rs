@@ -92,6 +92,8 @@ pub struct CleanResult {
 const NEVER: &[&str] = &[
     ".ssh", ".gnupg", "Keychains", "Mobile Documents", ".password-store", ".aws", ".kube",
     "1Password", "com.apple.TCC", "Photos Library.photoslibrary", "Mail", "CloudStorage",
+    // A connected device's filesystem, mounted under ~/Library/Developer/CoreDevice.
+    "DeviceFS",
 ];
 
 /// System paths danger mode still refuses.
