@@ -1,0 +1,231 @@
+use crate::model::{Child, DiskInfo};
+use crate::util::system_time_secs;
+use rayon::prelude::*;
+use std::collections::HashSet;
+use std::os::unix::fs::MetadataExt;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Mutex;
+
+#[derive(Debug, Clone)]
+pub struct Entry {
+    pub name: String,
+    pub path: PathBuf,
+    pub is_dir: bool,
+    pub is_symlink: bool,
+    pub alloc: u64,
+    pub mtime: i64,
+    pub dev: u64,
+    pub ino: u64,
+    pub nlink: u64,
+}
+
+pub fn read_entries(dir: &Path) -> Vec<Entry> {
+    let Ok(rd) = std::fs::read_dir(dir) else { return vec![] };
+    let mut out = Vec::new();
+    for e in rd.flatten() {
+        let Ok(md) = e.metadata() else { continue };
+        let ft = md.file_type();
+        out.push(Entry {
+            name: e.file_name().to_string_lossy().into_owned(),
+            path: e.path(),
+            is_dir: ft.is_dir(),
+            is_symlink: ft.is_symlink(),
+            alloc: md.blocks() * 512,
+            mtime: md.mtime(),
+            dev: md.dev(),
+            ino: md.ino(),
+            nlink: md.nlink(),
+        });
+    }
+    out
+}
+
+pub fn names(entries: &[Entry]) -> Vec<String> {
+    entries.iter().map(|e| e.name.clone()).collect()
+}
+
+/// Shared state for one scan: hardlink dedupe, progress counters and cancellation.
+#[derive(Default)]
+pub struct SizeCtx {
+    seen: Mutex<HashSet<(u64, u64)>>,
+    pub files: AtomicU64,
+    pub bytes: AtomicU64,
+    pub cancel: AtomicBool,
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct Sized {
+    pub bytes: u64,
+    pub files: u64,
+    pub newest: i64,
+}
+
+impl Sized {
+    fn add(mut self, o: Sized) -> Sized {
+        self.bytes += o.bytes;
+        self.files += o.files;
+        self.newest = self.newest.max(o.newest);
+        self
+    }
+}
+
+impl SizeCtx {
+    fn file_bytes(&self, e: &Entry) -> u64 {
+        if e.nlink > 1 && !e.is_dir {
+            let mut seen = self.seen.lock().unwrap();
+            if !seen.insert((e.dev, e.ino)) {
+                return 0;
+            }
+        }
+        e.alloc
+    }
+
+    /// Sizes a directory tree without following symlinks or crossing devices.
+    pub fn size_dir(&self, path: &Path, dev: u64, exclude: &HashSet<PathBuf>) -> Sized {
+        if self.cancel.load(Ordering::Relaxed) {
+            return Sized::default();
+        }
+        let entries = read_entries(path);
+        self.size_entries(&entries, dev, exclude).0
+    }
+
+    /// Sizes already-read entries and returns per-child sizes for breakdowns.
+    pub fn size_entries(&self, entries: &[Entry], dev: u64, exclude: &HashSet<PathBuf>) -> (Sized, Vec<Child>) {
+        let mut total = Sized::default();
+        let mut children = Vec::with_capacity(entries.len());
+        let mut dirs = vec![];
+        for e in entries {
+            if !exclude.is_empty() && exclude.contains(&e.path) {
+                continue;
+            }
+            if e.is_dir && !e.is_symlink {
+                if e.dev != dev {
+                    continue;
+                }
+                dirs.push(e);
+                continue;
+            }
+            let b = self.file_bytes(e);
+            total.bytes += b;
+            total.files += 1;
+            total.newest = total.newest.max(e.mtime);
+            children.push(Child { name: e.name.clone(), bytes: b });
+        }
+        self.files.fetch_add(total.files, Ordering::Relaxed);
+        self.bytes.fetch_add(total.bytes, Ordering::Relaxed);
+        let sub: Vec<(String, Sized)> = dirs
+            .par_iter()
+            .map(|d| {
+                let mut s = self.size_dir(&d.path, dev, exclude);
+                s.bytes += d.alloc;
+                s.newest = s.newest.max(d.mtime);
+                (d.name.clone(), s)
+            })
+            .collect();
+        for (name, s) in sub {
+            children.push(Child { name, bytes: s.bytes });
+            total = total.add(s);
+        }
+        children.sort_by(|a, b| b.bytes.cmp(&a.bytes));
+        (total, children)
+    }
+
+    /// Sizes a path that may be a file or a directory.
+    pub fn size_path(&self, path: &Path, exclude: &HashSet<PathBuf>) -> Option<(Sized, Vec<Child>)> {
+        let md = std::fs::symlink_metadata(path).ok()?;
+        if md.file_type().is_symlink() {
+            return Some((Sized { bytes: 0, files: 0, newest: md.mtime() }, vec![]));
+        }
+        if md.is_dir() {
+            let entries = read_entries(path);
+            let (mut s, children) = self.size_entries(&entries, md.dev(), exclude);
+            s.bytes += md.blocks() * 512;
+            s.newest = s.newest.max(md.mtime());
+            Some((s, children))
+        } else {
+            let e = Entry {
+                name: String::new(),
+                path: path.to_path_buf(),
+                is_dir: false,
+                is_symlink: false,
+                alloc: md.blocks() * 512,
+                mtime: md.mtime(),
+                dev: md.dev(),
+                ino: md.ino(),
+                nlink: md.nlink(),
+            };
+            let b = self.file_bytes(&e);
+            self.bytes.fetch_add(b, Ordering::Relaxed);
+            Some((Sized { bytes: b, files: 1, newest: md.mtime() }, vec![]))
+        }
+    }
+}
+
+pub fn has_glob(s: &str) -> bool {
+    s.contains('*') || s.contains('?') || s.contains('[') || s.contains('{')
+}
+
+/// Expands a path pattern component by component. Only matching components read directories.
+pub fn expand_glob(pattern: &Path) -> Vec<PathBuf> {
+    let mut current: Vec<PathBuf> = vec![PathBuf::from("/")];
+    for comp in pattern.components() {
+        let c = comp.as_os_str().to_string_lossy();
+        if c == "/" {
+            continue;
+        }
+        let mut next = vec![];
+        if has_glob(&c) {
+            let Ok(g) = globset::Glob::new(&c) else { return vec![] };
+            let m = g.compile_matcher();
+            for base in &current {
+                let Ok(rd) = std::fs::read_dir(base) else { continue };
+                for e in rd.flatten() {
+                    let n = e.file_name();
+                    if m.is_match(n.to_string_lossy().as_ref()) {
+                        next.push(base.join(n));
+                    }
+                }
+            }
+        } else {
+            for base in &current {
+                let p = base.join(c.as_ref());
+                if std::fs::symlink_metadata(&p).is_ok() {
+                    next.push(p);
+                }
+            }
+        }
+        current = next;
+        if current.is_empty() {
+            break;
+        }
+    }
+    current.sort();
+    current
+}
+
+pub fn disk_info(path: &Path) -> DiskInfo {
+    use std::ffi::CString;
+    let Ok(c) = CString::new(path.as_os_str().to_string_lossy().as_bytes()) else {
+        return DiskInfo::default();
+    };
+    let mut s: libc::statfs = unsafe { std::mem::zeroed() };
+    if unsafe { libc::statfs(c.as_ptr(), &mut s) } != 0 {
+        return DiskInfo::default();
+    }
+    let bsize = s.f_bsize as u64;
+    let total = s.f_blocks as u64 * bsize;
+    let free = s.f_bavail as u64 * bsize;
+    DiskInfo { total, free, used: total.saturating_sub(free) }
+}
+
+pub fn mtime(path: &Path) -> Option<i64> {
+    std::fs::symlink_metadata(path)
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .map(system_time_secs)
+}
+
+pub fn dev_of(path: &Path) -> Option<u64> {
+    std::fs::symlink_metadata(path).ok().map(|m| m.dev())
+}

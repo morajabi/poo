@@ -1,0 +1,21 @@
+//! poo: find and safely free disk space eaten by dev builds, worktrees, caches,
+//! simulators and the rest. Every piece of knowledge lives in mods (`rules/core`).
+
+pub mod agent;
+pub mod catalog;
+pub mod clean;
+pub mod config;
+pub mod fsutil;
+pub mod mcp;
+pub mod ops;
+pub mod render;
+pub mod model;
+pub mod plan;
+pub mod procs;
+pub mod providers;
+pub mod scan;
+pub mod update;
+pub mod util;
+
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const REPO: &str = "morajabi/poo";
