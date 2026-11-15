@@ -40,9 +40,12 @@ echo "==> Poo.app"
 # deployment target as its SDK version, and macOS then draws the app with legacy window
 # chrome (old traffic lights, corner radius, toolbars). One build per arch, then lipo.
 app_bins=()
+SWIFT_BIN=""
 for a in $ARCHS; do
   swift build -c release --build-system native --package-path "$ROOT/app" --arch "$a"
-  app_bins+=("$(swift build -c release --build-system native --package-path "$ROOT/app" --arch "$a" --show-bin-path)/Poo")
+  dir="$(swift build -c release --build-system native --package-path "$ROOT/app" --arch "$a" --show-bin-path)"
+  app_bins+=("$dir/Poo")
+  SWIFT_BIN="${SWIFT_BIN:-$dir}"
 done
 BIN_DIR="$OUT/app-bin"
 mkdir -p "$BIN_DIR"
@@ -58,7 +61,8 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/bin" "$APP/Contents/Frameworks"
 cp "$BIN_DIR/Poo" "$APP/Contents/MacOS/Poo"
 # Sparkle ships as a binary framework; keep its symlinks (ditto) and point the app at it.
-ditto "$BIN_DIR/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
+# The framework is already universal, so any arch's copy will do.
+ditto "$SWIFT_BIN/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
 install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP/Contents/MacOS/Poo"
 cp "$OUT/poo" "$APP/Contents/Resources/bin/poo"
 "$ROOT/scripts/build-icon.sh" "$APP/Contents/Resources"

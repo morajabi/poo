@@ -2,7 +2,7 @@
 
 [![ci](https://github.com/morajabi/poo/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/morajabi/poo/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/morajabi/poo?sort=semver)](https://github.com/morajabi/poo/releases/latest)
-[![macOS 14+](https://img.shields.io/badge/macOS-14%2B-black?logo=apple)](https://github.com/morajabi/poo/releases/latest/download/Poo.app.zip)
+[![macOS 15+](https://img.shields.io/badge/macOS-15%2B-black?logo=apple)](https://github.com/morajabi/poo/releases/latest/download/Poo.app.zip)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 **Find and safely free the disk space your dev work eats.** A CLI, a macOS menu bar
@@ -57,7 +57,7 @@ Or download the latest release directly (these links always point at the newest 
 
 | | |
 |---|---|
-| **Poo.app** (macOS 14+, Apple silicon and Intel, CLI included) | [Poo.app.zip](https://github.com/morajabi/poo/releases/latest/download/Poo.app.zip) |
+| **Poo.app** (macOS 15+, Apple silicon and Intel, CLI included) | [Poo.app.zip](https://github.com/morajabi/poo/releases/latest/download/Poo.app.zip) |
 | CLI, macOS Apple silicon | [poo-aarch64-apple-darwin.tar.gz](https://github.com/morajabi/poo/releases/latest/download/poo-aarch64-apple-darwin.tar.gz) |
 | CLI, macOS Intel | [poo-x86_64-apple-darwin.tar.gz](https://github.com/morajabi/poo/releases/latest/download/poo-x86_64-apple-darwin.tar.gz) |
 | CLI, Linux x86_64 | [poo-x86_64-unknown-linux-gnu.tar.gz](https://github.com/morajabi/poo/releases/latest/download/poo-x86_64-unknown-linux-gnu.tar.gz) |

@@ -227,7 +227,7 @@ jobs:
           set -eu
           base="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}"
           cat > notes.md <<NOTES
-          **Poo.app** (macOS 14+, universal, CLI included): [Poo.app.zip](${base}/Poo.app.zip). ${SIGNING}.
+          **Poo.app** (macOS 15+, universal, CLI included): [Poo.app.zip](${base}/Poo.app.zip). ${SIGNING}.
 
           **CLI**: \`curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/install.sh | sh\`, or a tarball below. Checksums in \`SHA256SUMS\`.
           NOTES
