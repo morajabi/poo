@@ -1,20 +1,29 @@
 name: ci
 
+# A green run of this workflow on main triggers release.yml.
 on:
   push:
     branches: [main]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   rust:
     strategy:
+      fail-fast: false
       matrix:
         os: [macos-15, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
+    env:
+      CARGO_TERM_COLOR: always
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test
+      # Unit tests plus tests/core.rs, tests/bulk.rs and tests/incremental.rs (macOS only).
+      - run: cargo test --all-targets
       - name: core mods load without errors
         run: cargo run --quiet -- mods validate --text
 
@@ -23,3 +32,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: swift build --package-path app
+      - run: swift test --package-path app
+      - name: release scripts parse
+        run: bash -n scripts/build-app.sh scripts/sparkle.sh scripts/release-version.sh scripts/stamp-version.sh && sh -n install.sh
