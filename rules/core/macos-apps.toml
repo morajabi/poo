@@ -1,0 +1,753 @@
+# Per-app caches for common macOS apps: chat and meetings, mail and office, media and
+# design, games, notes, cloud sync and app updaters. Specific paths here win over the
+# generic ~/Library/Caches and Application Support sweeps in system.toml, and add a
+# running-app check so nothing is cleaned while its app is open.
+# Never matched: messages, mailboxes, vaults, notes, libraries, projects, offline
+# downloads you chose to keep, cookies, Local Storage and IndexedDB.
+
+# ---------------------------------------------------------------------------
+# Kept on purpose
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "app.protected-caches"
+name = "Password manager and VPN app caches (kept)"
+bucket = "system"
+group = "App caches"
+kind = "path"
+paths = [
+  "~/Library/Application Support/{1Password,1Password 7,Bitwarden,Dashlane,Enpass,KeePassXC,Proton Pass,Proton VPN,ProtonVPN,Mullvad VPN,NordVPN,ExpressVPN,Surfshark,Windscribe,Tailscale,mihomo-party,Clash Verge,clash-verge,ClashX,ClashX Pro}/{Cache,Code Cache,GPUCache,DawnCache,DawnGraphiteCache,DawnWebGPUCache,GrShaderCache,GraphiteDawnCache,ShaderCache,GPUPersistentCache}",
+  "~/Library/Application Support/{1Password,Bitwarden,Dashlane,Proton Pass,Mullvad VPN,mihomo-party,Clash Verge,clash-verge}/Service Worker/{CacheStorage,ScriptCache}",
+  "~/Library/Application Support/{1Password,Bitwarden,Dashlane,Proton Pass}/Partitions/*/{Cache,Code Cache,GPUCache}",
+]
+cost = "rebuild"
+tier = "protected"
+tags = ["password-managers", "vpn", "protected"]
+stacks = ["macos"]
+description = "Electron caches of password managers and VPN apps, claimed here so the generic Electron sweep never picks them up; poo never cleans them."
+
+# ---------------------------------------------------------------------------
+# App updaters
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "app.electron-update-staging"
+name = "Staged Electron app updates"
+bucket = "system"
+group = "App updaters"
+kind = "path"
+paths = ["~/Library/Caches/*.ShipIt"]
+cost = "none"
+contents = true
+min_age_days = 7
+tags = ["updaters", "electron", "shipit"]
+stacks = ["macos", "electron"]
+description = "Update downloads and logs that Squirrel's ShipIt leaves behind for Electron apps (Slack, Claude, GitHub Desktop...) once a week has passed."
+
+[[rule]]
+id = "app.sparkle-update-staging"
+name = "Staged Sparkle app updates"
+bucket = "system"
+group = "App updaters"
+kind = "path"
+paths = [
+  "~/Library/Caches/*/org.sparkle-project.Sparkle/Installation",
+  "~/Library/Caches/*/org.sparkle-project.Sparkle/PersistentDownloads",
+]
+cost = "none"
+contents = true
+min_age_days = 14
+tags = ["updaters", "sparkle"]
+stacks = ["macos"]
+description = "Update archives that Sparkle-based apps downloaded or unpacked but never finished installing, after two weeks."
+recommend = "A pending update is downloaded again the next time the app checks; nothing about the installed app changes."
+
+[[rule]]
+id = "app.microsoft-autoupdate"
+name = "Microsoft AutoUpdate caches"
+bucket = "system"
+group = "App updaters"
+kind = "path"
+paths = ["~/Library/Caches/com.microsoft.autoupdate*", "~/Library/Caches/Microsoft/MAU*"]
+cost = "redownload"
+contents = true
+running_apps = ["Microsoft AutoUpdate", "Microsoft Update Assistant"]
+warm_days = 14
+tags = ["updaters", "microsoft", "office"]
+stacks = ["macos"]
+description = "Update packages and catalogs Microsoft AutoUpdate downloaded for Office, Edge, Teams and Defender."
+
+[[rule]]
+id = "app.microsoft-autoupdate-system"
+name = "Microsoft AutoUpdate system downloads"
+bucket = "system"
+group = "App updaters"
+kind = "path"
+paths = ["/Library/Caches/com.microsoft.autoupdate.helper", "/Library/Caches/com.microsoft.autoupdate.fba"]
+system = true
+enabled = false
+cost = "redownload"
+contents = true
+running_apps = ["Microsoft AutoUpdate", "Microsoft Update Assistant"]
+warm_days = 14
+tags = ["updaters", "microsoft", "office", "needs-admin"]
+stacks = ["macos"]
+description = "Update payloads Microsoft's privileged updater keeps in /Library/Caches; off by default because the files belong to root and need admin rights."
+
+# ---------------------------------------------------------------------------
+# Chat and meetings
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "app.slack-cache"
+name = "Slack cache"
+bucket = "system"
+group = "Chat & meetings"
+kind = "path"
+paths = [
+  "~/Library/Application Support/Slack/{Cache,Code Cache,GPUCache,DawnCache,DawnGraphiteCache,DawnWebGPUCache}",
+  "~/Library/Application Support/Slack/Service Worker/{CacheStorage,ScriptCache}",
+  "~/Library/Caches/com.tinyspeck.slackmacgap",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["Slack"]
+warm_days = 7
+tags = ["chat", "electron", "cache"]
+stacks = ["macos", "electron"]
+description = "Slack's web, code, GPU and service worker caches; messages and files stay on Slack's servers."
+
+[[rule]]
+id = "app.discord-cache"
+name = "Discord cache"
+bucket = "system"
+group = "Chat & meetings"
+kind = "path"
+paths = [
+  "~/Library/Application Support/{discord,discordptb,discordcanary,legcord}/{Cache,Code Cache,GPUCache,DawnCache,DawnGraphiteCache,DawnWebGPUCache}",
+  "~/Library/Application Support/vesktop/sessionData/{Cache,Code Cache,GPUCache}",
+  "~/Library/Caches/com.hnc.Discord*",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["Discord", "Discord PTB", "Discord Canary", "Vesktop", "Legcord"]
+warm_days = 7
+tags = ["chat", "electron", "cache"]
+stacks = ["macos", "electron"]
+description = "Media and code caches of Discord (stable, PTB, Canary) and the Vesktop and Legcord clients."
+
+[[rule]]
+id = "app.teams-cache"
+name = "Microsoft Teams cache"
+bucket = "system"
+group = "Chat & meetings"
+kind = "path"
+paths = [
+  "~/Library/Application Support/Microsoft/Teams/{Cache,Code Cache,GPUCache,Application Cache,tmp}",
+  "~/Library/Caches/com.microsoft.teams",
+  "~/Library/Caches/com.microsoft.teams2",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["Microsoft Teams", "Microsoft Teams classic", "MSTeams"]
+warm_days = 7
+tags = ["chat", "meetings", "microsoft", "cache"]
+stacks = ["macos"]
+description = "Caches of classic and new Microsoft Teams; the new app's sandboxed caches are covered by app.office-container-caches."
+
+[[rule]]
+id = "app.zoom-cache"
+name = "Zoom cache"
+bucket = "system"
+group = "Chat & meetings"
+kind = "path"
+paths = ["~/Library/Caches/us.zoom.xos"]
+cost = "rebuild"
+contents = true
+running_apps = ["zoom.us"]
+warm_days = 7
+tags = ["meetings", "cache"]
+stacks = ["macos"]
+description = "Zoom's app cache; recordings in ~/Documents/Zoom are never touched."
+
+[[rule]]
+id = "app.telegram-cache"
+name = "Telegram cache"
+bucket = "system"
+group = "Chat & meetings"
+kind = "path"
+paths = [
+  "~/Library/Caches/ru.keepcoder.Telegram",
+  "~/Library/Caches/org.telegram.desktop",
+  "~/Library/Application Support/Telegram Desktop/tdata/user_data/{cache,media_cache}",
+]
+cost = "redownload"
+contents = true
+running_apps = ["Telegram"]
+warm_days = 14
+tags = ["chat", "media", "cache"]
+stacks = ["macos"]
+description = "Media Telegram downloaded while you scrolled (Telegram for macOS and Telegram Desktop); chats stay in the cloud."
+
+[[rule]]
+id = "app.whatsapp-cache"
+name = "WhatsApp cache"
+bucket = "system"
+group = "Chat & meetings"
+kind = "path"
+paths = [
+  "~/Library/Caches/net.whatsapp.WhatsApp",
+  "~/Library/Caches/desktop.WhatsApp",
+  "~/Library/Application Support/WhatsApp/{Cache,Code Cache,GPUCache}",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["WhatsApp"]
+warm_days = 7
+tags = ["chat", "cache"]
+stacks = ["macos"]
+description = "WhatsApp's app caches; the message database and media in its group container are never touched."
+
+[[rule]]
+id = "app.signal-cache"
+name = "Signal cache"
+bucket = "system"
+group = "Chat & meetings"
+kind = "path"
+paths = ["~/Library/Application Support/Signal/{Cache,Code Cache,GPUCache,DawnCache,DawnGraphiteCache,DawnWebGPUCache}"]
+cost = "rebuild"
+contents = true
+running_apps = ["Signal"]
+warm_days = 7
+tags = ["chat", "electron", "cache"]
+stacks = ["macos", "electron"]
+description = "Signal's Electron caches; the encrypted database and attachments are never touched."
+
+[[rule]]
+id = "app.beeper-cache"
+name = "Beeper cache"
+bucket = "system"
+group = "Chat & meetings"
+kind = "path"
+paths = [
+  "~/Library/Application Support/{BeeperTexts,Beeper}/{Cache,Code Cache,GPUCache,DawnCache,DawnGraphiteCache,DawnWebGPUCache,GraphiteDawnCache,GPUPersistentCache}",
+  "~/Library/Caches/com.automattic.beeper.desktop",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["Beeper Desktop", "Beeper"]
+warm_days = 7
+tags = ["chat", "electron", "cache"]
+stacks = ["macos", "electron"]
+description = "Beeper's Electron caches; its account database and local storage are never touched."
+
+[[rule]]
+id = "app.skype-cache"
+name = "Skype cache"
+bucket = "system"
+group = "Chat & meetings"
+kind = "path"
+paths = [
+  "~/Library/Caches/com.skype.skype",
+  "~/Library/Application Support/Microsoft/Skype for Desktop/{Cache,Code Cache,GPUCache}",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["Skype"]
+warm_days = 7
+tags = ["chat", "meetings", "microsoft", "cache"]
+stacks = ["macos"]
+description = "Caches of Skype, which Microsoft retired in 2025."
+
+[[rule]]
+id = "app.asia-chat-cache"
+name = "WeChat, QQ, WeCom, Lark and Tencent Meeting caches"
+bucket = "system"
+group = "Chat & meetings"
+kind = "path"
+paths = [
+  "~/Library/Caches/com.tencent.{xinWeChat,WeWorkMac,qq,meeting}",
+  "~/Library/Caches/com.feishu.*",
+  "~/Library/Caches/LarkShell",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["WeChat", "QQ", "企业微信", "WeCom", "TencentMeeting", "Lark", "Feishu", "飞书"]
+warm_days = 7
+tags = ["chat", "meetings", "cache"]
+stacks = ["macos"]
+description = "Caches these chat apps keep in ~/Library/Caches; their sandboxed data is never touched."
+
+# ---------------------------------------------------------------------------
+# Mail and office
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "app.mail-cache"
+name = "Apple Mail cache"
+bucket = "system"
+group = "Mail & office"
+kind = "path"
+paths = ["~/Library/Caches/com.apple.mail"]
+cost = "rebuild"
+contents = true
+running_apps = ["Mail"]
+warm_days = 14
+tags = ["mail", "cache", "macos"]
+stacks = ["macos"]
+description = "Apple Mail's cache folder; mailboxes in ~/Library/Mail are never touched."
+
+[[rule]]
+id = "app.mail-container-downloads"
+name = "Mail attachment copies (sandboxed Mail)"
+bucket = "junk"
+group = "Mail"
+kind = "path"
+paths = ["~/Library/Containers/com.apple.mail/Data/Library/Mail Downloads"]
+each = true
+files = true
+enabled = false
+cost = "none"
+running_apps = ["Mail"]
+min_age_days = 30
+tags = ["mail", "attachments", "needs-permission"]
+stacks = ["macos"]
+description = "Attachment copies that current macOS versions of Mail keep in its container; off by default because macOS asks for permission to read it."
+
+[[rule]]
+id = "app.mail-clients-cache"
+name = "Mail client caches"
+bucket = "system"
+group = "Mail & office"
+kind = "path"
+paths = [
+  "~/Library/Caches/Thunderbird",
+  "~/Library/Caches/org.mozilla.thunderbird",
+  "~/Library/Caches/com.readdle.smartemail-Mac",
+  "~/Library/Caches/com.airmail.*",
+  "~/Library/Caches/com.microsoft.Outlook",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["thunderbird", "Spark", "Spark Desktop", "Airmail 5", "Airmail", "Microsoft Outlook"]
+warm_days = 14
+tags = ["mail", "cache"]
+stacks = ["macos"]
+description = "Caches of Thunderbird, Spark, Airmail and Outlook; mail stays on the server and in local mail stores, which are never touched."
+
+[[rule]]
+id = "app.office-cache"
+name = "Office app caches"
+bucket = "system"
+group = "Mail & office"
+kind = "path"
+paths = [
+  "~/Library/Caches/com.microsoft.{Word,Excel,Powerpoint,onenote.mac}",
+  "~/Library/Caches/com.apple.iWork.*",
+  "~/Library/Caches/com.kingsoft.wpsoffice.mac",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["Microsoft Word", "Microsoft Excel", "Microsoft PowerPoint", "Microsoft OneNote", "Pages", "Numbers", "Keynote", "wpsoffice"]
+warm_days = 14
+tags = ["office", "microsoft", "cache"]
+stacks = ["macos"]
+description = "Caches of Word, Excel, PowerPoint, OneNote, Pages, Numbers, Keynote and WPS; documents are never touched."
+
+[[rule]]
+id = "app.office-container-caches"
+name = "Office and Teams sandbox caches"
+bucket = "system"
+group = "Mail & office"
+kind = "path"
+paths = [
+  "~/Library/Containers/com.microsoft.{Word,Excel,Powerpoint,Outlook,onenote.mac,teams2}/Data/Library/{Caches,Logs}",
+  "~/Library/Containers/com.microsoft.{Word,Excel,Powerpoint,Outlook,onenote.mac}/Data/tmp",
+]
+enabled = false
+cost = "rebuild"
+contents = true
+running_apps = ["Microsoft Word", "Microsoft Excel", "Microsoft PowerPoint", "Microsoft Outlook", "Microsoft OneNote", "MSTeams"]
+warm_days = 14
+tags = ["office", "microsoft", "cache", "sandboxed", "needs-permission"]
+stacks = ["macos"]
+description = "Caches, logs and temp files inside the Office and new Teams containers; off by default because macOS asks for permission to read other apps' containers."
+
+# ---------------------------------------------------------------------------
+# Cloud sync clients (app caches only, never synced files)
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "app.cloud-sync-caches"
+name = "Cloud sync app caches"
+bucket = "system"
+group = "Cloud sync"
+kind = "path"
+paths = [
+  "~/Library/Caches/com.getdropbox.dropbox",
+  "~/Library/Caches/com.dropbox.*",
+  "~/Library/Caches/com.google.GoogleDrive",
+  "~/Library/Caches/com.microsoft.OneDrive*",
+  "~/Library/Caches/com.box.desktop*",
+  "~/Library/Caches/com.baidu.netdisk",
+  "~/Library/Caches/com.alibaba.teambitiondisk",
+]
+cost = "rebuild"
+tier = "review"
+contents = true
+running_apps = ["Dropbox", "Google Drive", "OneDrive", "Box", "Box Drive", "BaiduNetdisk_mac", "aDrive"]
+warm_days = 30
+tags = ["cloud-sync", "cache"]
+stacks = ["macos"]
+description = "The sync apps' own cache folders in ~/Library/Caches, shown for review only; synced files, CloudStorage and DriveFS content caches are never matched."
+recommend = "Quit the sync app before cleaning. Pending uploads never live here, but a missing cache can trigger a full re-index."
+
+# ---------------------------------------------------------------------------
+# Media, music and video
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "app.spotify-cache"
+name = "Spotify cache"
+bucket = "system"
+group = "Media & design"
+kind = "path"
+paths = ["~/Library/Application Support/Spotify/PersistentCache", "~/Library/Caches/com.spotify.client"]
+cost = "redownload"
+contents = true
+running_apps = ["Spotify"]
+warm_days = 14
+tags = ["music", "media", "cache"]
+stacks = ["macos"]
+description = "Spotify's streaming cache, which also holds songs you downloaded for offline listening."
+recommend = "Offline playlists download again the next time you open Spotify online."
+
+[[rule]]
+id = "app.apple-media-cache"
+name = "Music, TV and Podcasts caches"
+bucket = "system"
+group = "Media & design"
+kind = "path"
+paths = ["~/Library/Caches/com.apple.Music", "~/Library/Caches/com.apple.TV", "~/Library/Caches/com.apple.podcasts"]
+cost = "rebuild"
+contents = true
+running_apps = ["Music", "TV", "Podcasts"]
+warm_days = 14
+tags = ["music", "video", "media", "cache", "macos"]
+stacks = ["macos"]
+description = "Streaming and artwork caches of Apple's media apps; your library and downloaded episodes are never touched."
+
+[[rule]]
+id = "app.video-players-cache"
+name = "Video player caches"
+bucket = "system"
+group = "Media & design"
+kind = "path"
+paths = [
+  "~/Library/Caches/{org.videolan.vlc,com.colliderli.iina,io.mpv,tv.plex.player.desktop,tv.plex.desktop}",
+  "~/Library/Application Support/Kodi/userdata/Thumbnails",
+  "~/Library/Caches/com.downie.Downie-*",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["VLC", "IINA", "mpv", "Plex", "Plex HTPC", "Kodi", "Downie", "Downie 4"]
+warm_days = 14
+tags = ["video", "media", "cache"]
+stacks = ["macos"]
+description = "Caches and artwork thumbnails of VLC, IINA, mpv, Plex, Kodi and Downie; media files are never touched."
+
+[[rule]]
+id = "app.stremio-cache"
+name = "Stremio streaming cache"
+bucket = "system"
+group = "Media & design"
+kind = "path"
+paths = ["~/Library/Application Support/stremio/stremio-server/stremio-cache", "~/Library/Caches/smart.stremio*"]
+cost = "redownload"
+contents = true
+running_apps = ["stremio", "Stremio", "stremio-runtime", "stremio-service"]
+warm_days = 7
+tags = ["video", "media", "cache"]
+stacks = ["macos"]
+description = "Video chunks Stremio's local server buffered while streaming."
+
+[[rule]]
+id = "app.torrent-clients-cache"
+name = "Download manager caches"
+bucket = "system"
+group = "Media & design"
+kind = "path"
+paths = [
+  "~/Library/Caches/{com.qbittorrent.qBittorrent,org.m0k.transmission,net.xmac.aria2gui}",
+  "~/Library/Caches/com.folx.*",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["qbittorrent", "qBittorrent", "Transmission", "Aria2GUI", "Folx"]
+warm_days = 14
+tags = ["downloads", "cache"]
+stacks = ["macos"]
+description = "App caches of torrent and download managers; downloads themselves are never touched."
+
+[[rule]]
+id = "app.adobe-media-cache"
+name = "Adobe media cache"
+bucket = "system"
+group = "Media & design"
+kind = "path"
+paths = [
+  "~/Library/Application Support/Adobe/Common/{Media Cache Files,Media Cache,Peak Files}",
+  "~/Library/Caches/Adobe",
+  "~/Library/Caches/com.adobe.*",
+]
+cost = "rebuild"
+contents = true
+running_apps = [
+  "Adobe Premiere Pro 2024", "Adobe Premiere Pro 2025", "Adobe Premiere Pro 2026",
+  "After Effects", "Adobe Media Encoder 2024", "Adobe Media Encoder 2025", "Adobe Media Encoder 2026",
+  "Adobe Audition 2025", "Adobe Photoshop 2025", "Adobe Photoshop 2026", "Adobe Lightroom", "Adobe Lightroom Classic",
+  "Adobe Illustrator", "Creative Cloud",
+]
+warm_days = 14
+tags = ["video", "design", "adobe", "cache"]
+stacks = ["macos"]
+description = "Conformed audio, peak files and media caches of Premiere, After Effects and Media Encoder plus Adobe app caches; projects and Auto-Save are never touched."
+recommend = "Premiere and After Effects rebuild these on the next project open, which takes a while for large projects."
+
+[[rule]]
+id = "app.video-editors-cache"
+name = "Video editor caches"
+bucket = "system"
+group = "Media & design"
+kind = "path"
+paths = [
+  "~/Movies/CacheClip",
+  "~/Library/Caches/com.blackmagic-design.DaVinciResolve",
+  "~/Library/Caches/com.apple.FinalCut",
+  "~/Library/Caches/net.telestream.screenflow*",
+  "~/Movies/{JianyingPro,CapCut}/User Data/Cache/{recognize,frameThumbnail,audioWave,AlgorithmCache,ttsTemp,tmp}",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["Resolve", "Final Cut Pro", "ScreenFlow", "CapCut", "JianyingPro", "VideoFusion-macOS"]
+warm_days = 14
+tags = ["video", "media", "cache"]
+stacks = ["macos"]
+description = "DaVinci Resolve's render cache, Final Cut and ScreenFlow caches, and the regenerable thumbnail and waveform caches of CapCut; render files inside libraries are not touched."
+
+[[rule]]
+id = "app.design-cache"
+name = "Design app caches"
+bucket = "system"
+group = "Media & design"
+kind = "path"
+paths = [
+  "~/Library/Caches/com.figma.*",
+  "~/Library/Application Support/Figma/{Cache,Code Cache,GPUCache,DawnCache,DawnGraphiteCache,DawnWebGPUCache}",
+  "~/Library/Application Support/Figma/Service Worker/{CacheStorage,ScriptCache}",
+  "~/Library/Caches/com.bohemiancoding.sketch3",
+  "~/Library/Application Support/com.bohemiancoding.sketch3/cache",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["Figma", "Figma Beta", "figma_agent", "Sketch"]
+warm_days = 14
+tags = ["design", "electron", "cache"]
+stacks = ["macos"]
+description = "Caches of Figma and Sketch; files live in the cloud or your documents and are never touched."
+
+[[rule]]
+id = "app.3d-cache"
+name = "3D app caches"
+bucket = "system"
+group = "Media & design"
+kind = "path"
+paths = [
+  "~/Library/Caches/org.blenderfoundation.blender",
+  "~/Library/Caches/com.maxon.cinema4d",
+  "~/Library/Caches/com.sketchup.*",
+  "~/Library/Caches/com.autodesk.*",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["Blender", "Cinema 4D", "SketchUp", "Maya", "Fusion", "Autodesk Fusion"]
+warm_days = 14
+tags = ["design", "3d", "cache"]
+stacks = ["macos"]
+description = "App caches of Blender, Cinema 4D, SketchUp and Autodesk apps."
+
+[[rule]]
+id = "app.screen-tools-cache"
+name = "Screen capture app caches"
+bucket = "system"
+group = "Media & design"
+kind = "path"
+paths = ["~/Library/Caches/{com.cleanshot.*,com.xnipapp.xnip,com.reincubate.camo}"]
+cost = "rebuild"
+contents = true
+running_apps = ["CleanShot X", "Xnip", "Camo"]
+warm_days = 14
+tags = ["media", "cache"]
+stacks = ["macos"]
+description = "App caches of screenshot and camera tools; captures you saved are never touched."
+
+# ---------------------------------------------------------------------------
+# Games and launchers
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "app.steam-cache"
+name = "Steam caches"
+bucket = "system"
+group = "Games"
+kind = "path"
+paths = [
+  "~/Library/Application Support/Steam/{appcache,htmlcache,depotcache}",
+  "~/Library/Application Support/Steam/steamapps/shadercache",
+  "~/Library/Caches/com.valvesoftware.steam",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["steam_osx", "Steam"]
+warm_days = 14
+tags = ["games", "cache", "gpu-cache"]
+stacks = ["macos"]
+description = "Steam's web, app info, depot manifest and shader caches; installed games and saves are untouched."
+
+[[rule]]
+id = "app.game-launchers-cache"
+name = "Game launcher caches"
+bucket = "system"
+group = "Games"
+kind = "path"
+paths = [
+  "~/Library/Caches/com.epicgames.EpicGamesLauncher",
+  "~/Library/Caches/com.blizzard.Battle.net",
+  "~/Library/Application Support/Battle.net/Cache",
+  "~/Library/Caches/com.gog.galaxy",
+  "~/Library/Caches/com.ea.*",
+  "~/Library/Caches/com.riotgames.*",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["EpicGamesLauncher", "Battle.net", "GalaxyClient", "EA", "Origin", "RiotClientServices", "Riot Client"]
+warm_days = 14
+tags = ["games", "cache"]
+stacks = ["macos"]
+description = "Web and app caches of the Epic, Battle.net, GOG Galaxy, EA and Riot launchers."
+
+[[rule]]
+id = "app.minecraft-cache"
+name = "Minecraft caches"
+bucket = "system"
+group = "Games"
+kind = "path"
+paths = [
+  "~/Library/Application Support/minecraft/{webcache,webcache2}",
+  "~/.lunarclient/{game-cache,launcher-cache}",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["Minecraft", "minecraft-launcher", "Lunar Client"]
+warm_days = 14
+tags = ["games", "cache"]
+stacks = ["macos"]
+description = "Launcher web caches of Minecraft and Lunar Client; worlds, packs and saves are never touched."
+
+[[rule]]
+id = "app.emulators-cache"
+name = "Emulator caches"
+bucket = "system"
+group = "Games"
+kind = "path"
+paths = [
+  "~/Library/Application Support/PCSX2/cache",
+  "~/Library/Caches/{net.pcsx2.PCSX2,net.rpcs3.rpcs3}",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["PCSX2", "rpcs3"]
+warm_days = 14
+tags = ["games", "emulators", "cache"]
+stacks = ["macos"]
+description = "Game list and app caches of PCSX2 and RPCS3; games, memory cards and saves are never touched."
+
+# ---------------------------------------------------------------------------
+# Notes, productivity and launchers
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "app.notion-cache"
+name = "Notion cache"
+bucket = "system"
+group = "Notes & productivity"
+kind = "path"
+paths = [
+  "~/Library/Application Support/{Notion,Notion Calendar}/{Cache,Code Cache,GPUCache,DawnCache,DawnGraphiteCache,DawnWebGPUCache}",
+  "~/Library/Application Support/Notion/Partitions/*/{Cache,Code Cache,GPUCache}",
+  "~/Library/Application Support/Notion/Partitions/*/Service Worker/{CacheStorage,ScriptCache}",
+  "~/Library/Caches/notion.id",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["Notion", "Notion Calendar"]
+warm_days = 7
+tags = ["notes", "electron", "cache"]
+stacks = ["macos", "electron"]
+description = "Notion's web, code and service worker caches; offline pages live in its database, which is never touched."
+
+[[rule]]
+id = "app.obsidian-cache"
+name = "Obsidian cache"
+bucket = "system"
+group = "Notes & productivity"
+kind = "path"
+paths = [
+  "~/Library/Application Support/obsidian/{Cache,Code Cache,GPUCache,DawnCache,DawnGraphiteCache,DawnWebGPUCache}",
+  "~/Library/Caches/md.obsidian",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["Obsidian"]
+warm_days = 7
+tags = ["notes", "electron", "cache"]
+stacks = ["macos", "electron"]
+description = "Obsidian's Electron caches; vaults live elsewhere and are never touched."
+
+[[rule]]
+id = "app.notes-apps-cache"
+name = "Notes and task app caches"
+bucket = "system"
+group = "Notes & productivity"
+kind = "path"
+paths = [
+  "~/Library/Caches/com.logseq.*",
+  "~/Library/Caches/com.evernote.*",
+  "~/Library/Caches/com.yinxiang.*",
+  "~/Library/Caches/com.todoist.mac.Todoist",
+  "~/Library/Caches/com.any.do.*",
+  "~/Library/Caches/com.flomoapp.mac",
+  "~/Library/Caches/com.tw93.MiaoYan",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["Logseq", "Evernote", "印象笔记", "Todoist", "Any.do", "flomo", "MiaoYan"]
+warm_days = 14
+tags = ["notes", "productivity", "cache"]
+stacks = ["macos"]
+description = "App caches of Logseq, Evernote, Todoist, Any.do, flomo and MiaoYan; notes and tasks are never touched."
+
+[[rule]]
+id = "app.launchers-cache"
+name = "Launcher caches"
+bucket = "system"
+group = "Notes & productivity"
+kind = "path"
+paths = ["~/Library/Caches/com.raycast.macos", "~/Library/Caches/com.runningwithcrayons.Alfred"]
+cost = "rebuild"
+contents = true
+running_apps = ["Raycast", "Alfred"]
+warm_days = 14
+tags = ["launchers", "cache"]
+stacks = ["macos"]
+description = "Favicon, preview and web caches of Raycast and Alfred; clipboard history, snippets and settings live elsewhere and are never touched."

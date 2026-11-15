@@ -1,0 +1,119 @@
+# Leftovers of apps that are no longer installed. The app-leftovers provider lists entries
+# named like a bundle id (com.vendor.App) that no app in /Applications, ~/Applications,
+# /System/Applications, Setapp or the Homebrew Caskroom claims, including helpers and
+# extensions inside installed apps. Apple's own ids are always skipped.
+#
+# What it cannot see: apps kept in subfolders (Adobe installs into /Applications/Adobe ...),
+# apps on other volumes, Steam games, and command-line tools that use a bundle-id-style
+# folder name. Those families are excluded below, together with anything sensitive.
+
+[[rule]]
+id = "leftovers.caches"
+name = "Caches and logs of uninstalled apps"
+bucket = "junk"
+group = "App leftovers"
+kind = "provider"
+provider = "app-leftovers"
+params.locations = [
+  "~/Library/Caches",
+  "~/Library/Logs",
+  "~/Library/HTTPStorages",
+  "~/Library/WebKit",
+  "~/Library/Saved Application State",
+]
+exclude = [
+  # cookies and keychains, even for apps that look gone
+  "*.binarycookies", "*keychain*", "*Keychain*",
+  # password managers, VPNs, sync clients, device management and security agents
+  "*1password*", "*1Password*", "*agilebits*", "*bitwarden*", "*Bitwarden*", "*lastpass*", "*LastPass*",
+  "*dashlane*", "*Dashlane*", "*keepass*", "*KeePass*", "*enpass*", "*Enpass*", "*strongbox*", "*outercorner*",
+  "*proton*", "*Proton*", "*tailscale*", "*Tailscale*", "*wireguard*", "*WireGuard*", "*nordvpn*", "*expressvpn*",
+  "*mullvad*", "*surfshark*", "*windscribe*", "*openvpn*", "*anyconnect*", "*globalprotect*", "*zscaler*",
+  "*dropbox*", "*Dropbox*", "*OneDrive*", "*onedrive*", "*GoogleDrive*", "*box.desktop*", "*backblaze*", "*synology*",
+  "*jamf*", "*Jamf*", "*kandji*", "*mosyle*", "*munki*", "*crowdstrike*", "*sentinelone*", "*kolide*",
+  # updaters and installers that live outside /Applications
+  "com.google.Keystone*", "com.google.keystone*", "com.google.GoogleUpdater*", "com.google.SoftwareUpdate*",
+  "com.microsoft.autoupdate*", "com.microsoft.SyncReporter*", "com.setapp.*", "org.sparkle-project.*",
+  "com.paddle.*", "com.devmate.*",
+  # apps installed in subfolders or other libraries, and CLI tools with bundle-style names
+  "com.adobe.*", "com.valvesoftware.*", "homebrew.*", "sh.brew.*", "com.openai.codex*", "com.morajabi.poo*",
+  "com.anthropic.claude-code*", "com.onevcat.Kingfisher*", "com.crashlytics*", "io.sentry*",
+  "org.swift.*", "org.carthage.*", "org.xcodes.*", "com.plausiblelabs.*", "com.microsoft.appcenter*", "com.jetbrains.*",
+  # vendors whose helpers or shared data use a different id than the installed app
+  "com.raycast.*", "com.openai.*",
+  # virtual machines and containers keep disk images here
+  "com.docker.*", "dev.orbstack.*", "com.utmapp.*", "com.parallels.*", "com.vmware.*", "org.virtualbox.*",
+]
+cost = "none"
+min_age_days = 30
+tags = ["leftovers", "cache", "logs", "uninstalled"]
+stacks = ["macos"]
+description = "Caches, logs, web storage and window state of apps that are no longer installed and have not been touched for a month."
+recommend = "Reinstalling the app recreates what it needs. Entries in ~/Library/Caches and ~/Library/Logs usually show under the broader sweeps instead."
+
+[[rule]]
+id = "leftovers.support-data"
+name = "Support data of uninstalled apps"
+bucket = "junk"
+group = "App leftovers"
+kind = "provider"
+provider = "app-leftovers"
+params.locations = ["~/Library/Application Support"]
+exclude = [
+  "*keychain*", "*Keychain*",
+  "*1password*", "*1Password*", "*agilebits*", "*bitwarden*", "*Bitwarden*", "*lastpass*", "*LastPass*",
+  "*dashlane*", "*Dashlane*", "*keepass*", "*KeePass*", "*enpass*", "*Enpass*", "*strongbox*", "*outercorner*",
+  "*proton*", "*Proton*", "*tailscale*", "*Tailscale*", "*wireguard*", "*WireGuard*", "*nordvpn*", "*expressvpn*",
+  "*mullvad*", "*surfshark*", "*windscribe*", "*openvpn*", "*anyconnect*", "*globalprotect*", "*zscaler*",
+  "*dropbox*", "*Dropbox*", "*OneDrive*", "*onedrive*", "*GoogleDrive*", "*box.desktop*", "*backblaze*", "*synology*",
+  "*jamf*", "*Jamf*", "*kandji*", "*mosyle*", "*munki*", "*crowdstrike*", "*sentinelone*", "*kolide*",
+  "com.google.Keystone*", "com.google.keystone*", "com.google.GoogleUpdater*", "com.google.SoftwareUpdate*",
+  "com.microsoft.autoupdate*", "com.microsoft.SyncReporter*", "com.setapp.*", "org.sparkle-project.*",
+  "com.paddle.*", "com.devmate.*",
+  "com.adobe.*", "com.valvesoftware.*", "homebrew.*", "sh.brew.*", "com.openai.codex*", "com.morajabi.poo*",
+  "com.anthropic.claude-code*",
+  "org.swift.*", "org.carthage.*", "org.xcodes.*", "com.plausiblelabs.*", "com.microsoft.appcenter*", "com.jetbrains.*",
+  # vendors whose helpers or shared data use a different id than the installed app
+  "com.raycast.*", "com.openai.*",
+  # virtual machines and containers keep disk images here
+  "com.docker.*", "dev.orbstack.*", "com.utmapp.*", "com.parallels.*", "com.vmware.*", "org.virtualbox.*",
+]
+cost = "data"
+tier = "review"
+min_age_days = 30
+tags = ["leftovers", "app-data", "uninstalled"]
+stacks = ["macos"]
+description = "Application Support folders named after apps that are no longer installed; they can hold documents, libraries or licenses, so they are only shown for review."
+recommend = "Open the folder before deleting it. Apps that store data under a different vendor id than their app id can show up here while still installed."
+
+[[rule]]
+id = "leftovers.containers"
+name = "Containers of uninstalled apps"
+bucket = "junk"
+group = "App leftovers"
+kind = "provider"
+provider = "app-leftovers"
+params.locations = ["~/Library/Containers"]
+enabled = false
+exclude = [
+  "*keychain*", "*Keychain*",
+  "*1password*", "*1Password*", "*agilebits*", "*bitwarden*", "*Bitwarden*", "*lastpass*", "*LastPass*",
+  "*dashlane*", "*Dashlane*", "*keepass*", "*KeePass*", "*enpass*", "*Enpass*", "*strongbox*", "*outercorner*",
+  "*proton*", "*Proton*", "*tailscale*", "*Tailscale*", "*wireguard*", "*WireGuard*", "*nordvpn*", "*expressvpn*",
+  "*mullvad*", "*surfshark*", "*windscribe*", "*openvpn*", "*anyconnect*", "*globalprotect*", "*zscaler*",
+  "*dropbox*", "*Dropbox*", "*OneDrive*", "*onedrive*", "*GoogleDrive*", "*box.desktop*", "*backblaze*", "*synology*",
+  "*jamf*", "*Jamf*", "*kandji*", "*mosyle*", "*munki*", "*crowdstrike*", "*sentinelone*", "*kolide*",
+  "com.adobe.*", "com.valvesoftware.*",
+  "org.swift.*", "org.carthage.*", "org.xcodes.*", "com.plausiblelabs.*", "com.microsoft.appcenter*", "com.jetbrains.*",
+  # vendors whose helpers or shared data use a different id than the installed app
+  "com.raycast.*", "com.openai.*",
+  # virtual machines and containers keep disk images here
+  "com.docker.*", "dev.orbstack.*", "com.utmapp.*", "com.parallels.*", "com.vmware.*", "org.virtualbox.*",
+]
+cost = "data"
+tier = "review"
+min_age_days = 30
+tags = ["leftovers", "app-data", "uninstalled", "sandboxed", "needs-permission"]
+stacks = ["macos"]
+description = "Sandbox containers of App Store apps that are no longer installed, shown for review; off by default because macOS asks for permission to read other apps' containers."
+recommend = "Containers hold the app's documents and settings. Reinstalling the app picks its container up again, so look before you delete."

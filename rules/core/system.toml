@@ -1,6 +1,11 @@
-# macOS and app caches, logs, temp files, installers and the Trash.
-# Loaded after the stack-specific files, so exact paths there win over the
-# generic sweeps here.
+# Generic macOS sweeps: app caches, logs, temp files, installers, Homebrew and the Trash.
+# Files load in name order and the first exact claim on a path wins, so the per-app
+# and per-browser rules in macos-*.toml (and the stack files) beat the sweeps here.
+# Any path a specific rule claims is also subtracted from the sweep item it sits in.
+
+# ---------------------------------------------------------------------------
+# Homebrew
+# ---------------------------------------------------------------------------
 
 [[rule]]
 id = "system.homebrew-cache"
@@ -11,7 +16,10 @@ kind = "path"
 paths = ["~/Library/Caches/Homebrew/downloads", "~/Library/Caches/Homebrew/Cask"]
 cost = "redownload"
 warm_days = 14
-description = "Bottles and cask installers Homebrew downloaded. Its api and bootsnap caches are left alone so brew stays fast."
+tags = ["homebrew", "downloads"]
+stacks = ["homebrew", "macos"]
+description = "Bottles and cask installers Homebrew downloaded; its api and bootsnap caches stay so brew remains fast."
+recommend = "`brew cleanup --prune=all` does the same and also drops old versions."
 
 [[rule]]
 id = "system.homebrew-old"
@@ -21,7 +29,28 @@ group = "Homebrew"
 kind = "provider"
 provider = "homebrew"
 cost = "none"
+tags = ["homebrew", "old-versions"]
+stacks = ["homebrew", "macos"]
 description = "Superseded formula and cask versions that `brew cleanup` removes."
+
+[[rule]]
+id = "system.homebrew-cask-installers"
+name = "Kept cask installer packages"
+bucket = "caches"
+group = "Homebrew"
+kind = "path"
+paths = ["/opt/homebrew/Caskroom/*/*/*.{pkg,mpkg}", "/usr/local/Caskroom/*/*/*.{pkg,mpkg}"]
+system = true
+cost = "redownload"
+tier = "review"
+tags = ["homebrew", "installers"]
+stacks = ["homebrew", "macos"]
+description = "Installer packages Homebrew keeps inside the Caskroom after a pkg-based cask is installed; the installed software does not need them."
+recommend = "Only the .pkg files are listed, never Caskroom binaries or apps. Uninstalls use the package receipts, not these files."
+
+# ---------------------------------------------------------------------------
+# App caches
+# ---------------------------------------------------------------------------
 
 [[rule]]
 id = "system.app-caches"
@@ -32,17 +61,34 @@ kind = "path"
 paths = ["~/Library/Caches"]
 each = true
 exclude = [
-  "com.apple.*", "Homebrew", "CloudKit", "FamilyCircle", "com.apple.HomeKit", "GeoServices",
-  "*1password*", "*1Password*", "*agilebits*", "*bitwarden*", "*Bitwarden*", "*lastpass*", "*dashlane*", "*keepass*", "*KeePass*",
-  "*tailscale*", "*Tailscale*", "*wireguard*", "*nordvpn*", "*expressvpn*", "*mullvad*", "*surge*", "*clash*",
-  "*dropbox*", "*Dropbox*", "*OneDrive*", "*GoogleDrive*", "com.google.GoogleDrive",
-  "com.docker.*", "*orbstack*", "pypoetry", "pnpm", "llama.cpp", "kitty", "com.apple.FontRegistry",
-  "org.R-project.R", "tealdeer", "Buzz", "*ShortcutsSandboxCache", "GIPPseudonymousID", "CCTClearcutLogger",
+  # Apple and system daemons (some without a com.apple prefix)
+  "com.apple.*", "CloudKit", "FamilyCircle", "familycircled", "GeoServices", "PassKit", "GameKit", "Animoji",
+  "AMSDataMigratorTool", "askpermissiond", "mbuseragent", "BotPresenceAvatarAtlas", "*ShortcutsSandboxCache",
+  # password managers and keychains
+  "*1password*", "*1Password*", "*agilebits*", "*bitwarden*", "*Bitwarden*", "*lastpass*", "*LastPass*",
+  "*dashlane*", "*Dashlane*", "*keepass*", "*KeePass*", "*enpass*", "*Enpass*", "*strongbox*", "*Strongbox*",
+  "*outercorner*", "*proton*", "*Proton*", "*keychain*", "*Keychain*",
+  # VPNs and proxies
+  "*tailscale*", "*Tailscale*", "*wireguard*", "*WireGuard*", "*nordvpn*", "*NordVPN*", "*expressvpn*", "*ExpressVPN*",
+  "*mullvad*", "*Mullvad*", "*surfshark*", "*windscribe*", "*privateinternetaccess*", "*openvpn*", "*OpenVPN*",
+  "*anyconnect*", "*globalprotect*", "*GlobalProtect*", "*zscaler*", "*Zscaler*", "*surge*", "*clash*", "*Clash*",
+  "*mihomo*", "*v2ray*", "*shadowrocket*", "*Shadowrocket*",
+  # sync clients (see app.cloud-sync-caches)
+  "*dropbox*", "*Dropbox*", "*OneDrive*", "*GoogleDrive*", "com.google.GoogleDrive", "*box.desktop*", "*backblaze*",
+  "*synology*", "*nextcloud*", "*Nextcloud*", "*owncloud*", "*pcloud*", "*pCloud*",
+  # device management and security agents
+  "*jamf*", "*Jamf*", "*kandji*", "*Kandji*", "*mosyle*", "*munki*", "*crowdstrike*", "*CrowdStrike*",
+  "*sentinelone*", "*SentinelOne*", "*kolide*",
+  # owned by other rules or tools that keep state here
+  "Homebrew", "com.docker.*", "*orbstack*", "pypoetry", "pnpm", "llama.cpp", "kitty", "org.R-project.R",
+  "tealdeer", "Buzz", "GIPPseudonymousID", "CCTClearcutLogger",
 ]
 cost = "rebuild"
 warm_days = 30
-description = "One item per app cache folder. Apps rebuild these; first launch afterwards can be slower."
-recommend = "Caches untouched for a month are the easy win. Apple, password manager, VPN and sync-client caches are excluded."
+tags = ["cache", "apps"]
+stacks = ["macos"]
+description = "One item per folder in ~/Library/Caches that no specific rule claims; apps rebuild these, so the next launch can be slower."
+recommend = "Caches untouched for a month are the easy win. Apple, password manager, VPN, sync and device-management caches are excluded."
 
 [[rule]]
 id = "system.sandbox-caches"
@@ -56,7 +102,10 @@ cost = "rebuild"
 contents = true
 warm_days = 30
 min_bytes = 50000000
-description = "Caches inside App Store app containers. Only the Caches folder is emptied. Off by default: reading other apps' containers makes macOS ask for permission."
+tags = ["cache", "apps", "sandboxed", "needs-permission"]
+stacks = ["macos"]
+description = "Caches inside App Store app containers, emptied but kept; off by default because macOS asks for permission to read other apps' containers."
+recommend = "When you turn this on, check that no password manager or VPN container shows up before cleaning."
 
 [[rule]]
 id = "system.chromium-app-caches"
@@ -65,144 +114,18 @@ bucket = "system"
 group = "App caches"
 kind = "path"
 paths = [
-  "~/Library/Application Support/*/Cache",
-  "~/Library/Application Support/*/Code Cache",
-  "~/Library/Application Support/*/GPUCache",
-  "~/Library/Application Support/*/DawnCache",
-  "~/Library/Application Support/*/DawnGraphiteCache",
-  "~/Library/Application Support/*/DawnWebGPUCache",
-  "~/Library/Application Support/*/GrShaderCache",
-  "~/Library/Application Support/*/GraphiteDawnCache",
-  "~/Library/Application Support/*/ShaderCache",
-  "~/Library/Application Support/*/Crashpad/completed",
-  "~/Library/Application Support/*/Service Worker/CacheStorage",
-  "~/Library/Application Support/*/Partitions/*/Cache",
-  "~/Library/Application Support/*/Partitions/*/Code Cache",
+  "~/Library/Application Support/*/{Cache,Code Cache,GPUCache,DawnCache,DawnGraphiteCache,DawnWebGPUCache,GrShaderCache,GraphiteDawnCache,ShaderCache,GPUPersistentCache}",
+  "~/Library/Application Support/*/Service Worker/{CacheStorage,ScriptCache}",
+  "~/Library/Application Support/*/Partitions/*/{Cache,Code Cache,GPUCache}",
+  "~/Library/Application Support/*/Partitions/*/Service Worker/CacheStorage",
 ]
 cost = "rebuild"
 contents = true
 warm_days = 14
-description = "Chromium-style caches of Electron apps (Slack, Discord, Notion, Figma, Linear...)."
-
-[[rule]]
-id = "system.browser-caches"
-name = "Browser caches"
-bucket = "system"
-group = "Browsers"
-kind = "path"
-paths = [
-  "~/Library/Caches/Google/Chrome",
-  "~/Library/Application Support/Google/Chrome/*/Service Worker/CacheStorage",
-  "~/Library/Application Support/Google/Chrome/*/Code Cache",
-  "~/Library/Application Support/Google/Chrome/*/GPUCache",
-  "~/Library/Application Support/Google/Chrome/component_crx_cache",
-  "~/Library/Application Support/Google/Chrome/OptGuideOnDeviceModel",
-  "~/Library/Application Support/Google/GoogleUpdater/crx_cache",
-  "~/Library/Caches/BraveSoftware/Brave-Browser",
-  "~/Library/Application Support/BraveSoftware/Brave-Browser/*/Service Worker/CacheStorage",
-  "~/Library/Application Support/BraveSoftware/Brave-Browser/*/Code Cache",
-  "~/Library/Caches/company.thebrowser.Browser",
-  "~/Library/Caches/company.thebrowser.dia",
-  "~/Library/Application Support/Arc/User Data/*/Service Worker/CacheStorage",
-  "~/Library/Application Support/Arc/User Data/*/Code Cache",
-  "~/Library/Caches/com.microsoft.edgemac",
-  "~/Library/Application Support/Microsoft Edge/*/Service Worker/CacheStorage",
-  "~/Library/Caches/Firefox",
-  "~/Library/Application Support/Firefox/Profiles/*/cache2",
-  "~/Library/Caches/com.vivaldi.Vivaldi",
-  "~/Library/Caches/com.operasoftware.Opera",
-  "~/Library/Caches/Chromium",
-  "~/Library/Caches/zen",
-]
-cost = "rebuild"
-contents = true
-running_apps = ["Google Chrome", "Brave Browser", "Arc", "Dia", "Microsoft Edge", "firefox", "Vivaldi", "Opera", "Chromium", "zen"]
-warm_days = 7
-description = "Browser HTTP, code and service worker caches. Cleaned only while the browser is closed."
-
-[[rule]]
-id = "system.safari-cache"
-name = "Safari cache"
-bucket = "system"
-group = "Browsers"
-kind = "path"
-paths = ["~/Library/Caches/com.apple.Safari", "~/Library/Caches/com.apple.WebKit.Networking"]
-cost = "rebuild"
-contents = true
-running_apps = ["Safari"]
-warm_days = 7
-description = "Safari's web cache."
-
-[[rule]]
-id = "system.chat-apps"
-name = "Chat app caches"
-bucket = "system"
-group = "Chat & meetings"
-kind = "path"
-paths = [
-  "~/Library/Application Support/Slack/Cache",
-  "~/Library/Application Support/Slack/Service Worker/CacheStorage",
-  "~/Library/Application Support/discord/Cache",
-  "~/Library/Application Support/Microsoft/Teams/Cache",
-  "~/Library/Caches/com.microsoft.teams2",
-  "~/Library/Caches/us.zoom.xos",
-  "~/Library/Caches/ru.keepcoder.Telegram",
-  "~/Library/Caches/net.whatsapp.WhatsApp",
-  "~/Library/Application Support/Notion/Partitions/*/Service Worker/CacheStorage",
-]
-cost = "rebuild"
-contents = true
-running_apps = ["Slack", "Discord", "Microsoft Teams", "zoom.us", "Telegram", "WhatsApp", "Notion"]
-warm_days = 7
-description = "Message and media caches of chat apps. Your messages live on their servers."
-
-[[rule]]
-id = "system.media-apps"
-name = "Media and design app caches"
-bucket = "system"
-group = "Media & design"
-kind = "path"
-paths = [
-  "~/Library/Application Support/Spotify/PersistentCache",
-  "~/Library/Caches/com.spotify.client",
-  "~/Library/Application Support/Adobe/Common/Media Cache Files",
-  "~/Library/Application Support/Adobe/Common/Media Cache",
-  "~/Library/Caches/Adobe",
-  "~/Library/Caches/com.figma.Desktop",
-  "~/Library/Caches/com.bohemiancoding.sketch3",
-  "~/Library/Caches/org.blenderfoundation.blender",
-  "~/Library/Caches/com.apple.FinalCut",
-  "~/Library/Caches/com.blackmagic-design.DaVinciResolve",
-  "~/Movies/CacheClip",
-]
-cost = "rebuild"
-contents = true
-running_apps = ["Spotify", "Adobe Premiere Pro", "After Effects", "Figma", "Sketch", "Blender", "Final Cut Pro", "Resolve"]
-warm_days = 14
-description = "Streaming, render and preview caches."
-
-[[rule]]
-id = "system.game-caches"
-name = "Game launcher caches"
-bucket = "system"
-group = "Games"
-kind = "path"
-paths = [
-  "~/Library/Application Support/Steam/appcache",
-  "~/Library/Application Support/Steam/htmlcache",
-  "~/Library/Application Support/Steam/depotcache",
-  "~/Library/Application Support/Steam/logs",
-  "~/Library/Application Support/Steam/steamapps/shadercache",
-  "~/Library/Caches/com.epicgames.EpicGamesLauncher",
-  "~/Library/Caches/com.blizzard.Battle.net",
-  "~/Library/Application Support/minecraft/logs",
-  "~/Library/Application Support/minecraft/webcache2",
-]
-cost = "rebuild"
-contents = true
-running_apps = ["steam_osx", "Steam", "EpicGamesLauncher", "Battle.net"]
-warm_days = 14
-description = "Launcher web caches, shader caches and logs. Games and saves are untouched."
+tags = ["cache", "electron", "chromium", "gpu-cache"]
+stacks = ["macos", "electron"]
+description = "HTTP, code, GPU and service worker caches of Electron and Chromium-based apps that no per-app rule covers."
+recommend = "Per-app rules (app.*) add running-app checks for the common ones; password manager and VPN apps are claimed by app.protected-caches and never cleaned."
 
 [[rule]]
 id = "system.saved-state"
@@ -215,19 +138,35 @@ each = true
 exclude = ["com.apple.*"]
 cost = "none"
 min_age_days = 30
+tags = ["macos", "window-state"]
+stacks = ["macos"]
 description = "Window restoration state of apps you have not opened in a month."
 
 [[rule]]
 id = "system.quicklook"
-name = "Quick Look and misc system caches"
+name = "macOS caches"
 bucket = "system"
 group = "macOS"
 kind = "path"
-paths = ["~/Library/Caches/Quick Look", "~/Library/Caches/com.apple.helpd", "~/Library/Caches/com.apple.parsecd", "~/Library/Caches/com.apple.duetexpertd", "~/Library/Caches/com.apple.AppleMediaServices", "~/Library/Caches/com.apple.python"]
+paths = [
+  "~/Library/Caches/Quick Look",
+  "~/Library/Caches/com.apple.QuickLook.thumbnailcache",
+  "~/Library/Caches/com.apple.iconservices*",
+  "~/Library/Caches/GeoServices",
+  "~/Library/Caches/com.apple.helpd",
+  "~/Library/Caches/com.apple.parsecd",
+  "~/Library/Caches/com.apple.duetexpertd",
+  "~/Library/Caches/com.apple.AppleMediaServices",
+  "~/Library/Caches/com.apple.python",
+  "~/Library/Caches/com.apple.rosetta.update",
+  "~/Library/Caches/com.apple.amp.mediasevicesd",
+]
 cost = "rebuild"
 contents = true
 warm_days = 7
-description = "macOS caches that refill on demand."
+tags = ["macos", "quick-look", "thumbnails", "cache"]
+stacks = ["macos"]
+description = "Quick Look thumbnails, your icon cache, Maps tiles, Help, Spotlight suggestions and other macOS caches that refill on demand."
 
 [[rule]]
 id = "system.messages-previews"
@@ -240,7 +179,9 @@ cost = "rebuild"
 contents = true
 running_apps = ["Messages"]
 warm_days = 14
-description = "Thumbnail and sticker caches. Real attachments are never touched."
+tags = ["macos", "messages", "thumbnails"]
+stacks = ["macos"]
+description = "Thumbnail and sticker caches of Messages; real attachments are never touched."
 
 [[rule]]
 id = "system.mail-downloads"
@@ -253,7 +194,13 @@ each = true
 cost = "none"
 running_apps = ["Mail"]
 min_age_days = 30
-description = "Copies of attachments you opened from Mail. The originals stay in your mailbox."
+tags = ["macos", "mail", "attachments"]
+stacks = ["macos"]
+description = "Copies of attachments you opened from Mail; the originals stay in your mailbox."
+
+# ---------------------------------------------------------------------------
+# Logs and crash reports
+# ---------------------------------------------------------------------------
 
 [[rule]]
 id = "junk.user-logs"
@@ -266,7 +213,38 @@ each = true
 files = true
 exclude = ["DiagnosticReports", "CoreSimulator", "JetBrains", "Zed", "Claude", "mole", "poo", "com.apple.*"]
 cost = "none"
+tags = ["logs"]
+stacks = ["macos"]
 description = "Logs apps write to ~/Library/Logs."
+
+[[rule]]
+id = "junk.app-support-logs"
+name = "App logs in Application Support"
+bucket = "junk"
+group = "Logs"
+kind = "path"
+paths = [
+  "~/Library/Application Support/Slack/logs",
+  "~/Library/Application Support/Signal/logs",
+  "~/Library/Application Support/discord/logs",
+  "~/Library/Application Support/BeeperTexts/{logs,Logs}",
+  "~/Library/Application Support/GitHub Desktop/{logs,Logs}",
+  "~/Library/Application Support/Microsoft/Teams/logs",
+  "~/Library/Application Support/Microsoft/Skype for Desktop/logs",
+  "~/Library/Application Support/Steam/logs",
+  "~/Library/Application Support/Epic/EpicGamesLauncher/Saved/Logs",
+  "~/Library/Application Support/minecraft/logs",
+  "~/Library/Application Support/rpcs3/logs",
+  "~/Library/Application Support/iDingTalk/log",
+  "~/Library/Application Support/iDingTalk/holmeslogs",
+  "~/.lunarclient/logs",
+  "~/.lunarclient/offline/*/logs",
+]
+cost = "none"
+contents = true
+tags = ["logs", "chat", "games", "electron"]
+stacks = ["macos"]
+description = "Log folders that chat apps, launchers and games keep next to their data instead of in ~/Library/Logs."
 
 [[rule]]
 id = "junk.crash-reports"
@@ -274,10 +252,21 @@ name = "Crash reports"
 bucket = "junk"
 group = "Logs"
 kind = "path"
-paths = ["~/Library/Logs/DiagnosticReports", "~/Library/Application Support/CrashReporter", "~/Library/Caches/SentryCrash", "~/Library/Caches/KSCrash", "~/Library/Caches/com.crashlytics.data"]
+paths = [
+  "~/Library/Logs/DiagnosticReports",
+  "~/Library/Application Support/CrashReporter",
+  "~/Library/Caches/SentryCrash",
+  "~/Library/Caches/KSCrash",
+  "~/Library/Caches/com.crashlytics.data",
+  "~/Library/Application Support/*/Crashpad/completed",
+  "~/Library/Application Support/{Google,BraveSoftware,Microsoft,Yandex,Arc,Dia}/*/Crashpad/completed",
+  "~/Library/Application Support/minecraft/crash-reports",
+]
 cost = "none"
 contents = true
-description = "Crash and hang reports already sent (or never going to be)."
+tags = ["logs", "crash-reports"]
+stacks = ["macos"]
+description = "Crash and hang reports, including Chromium and Electron Crashpad reports that were already handled."
 
 [[rule]]
 id = "junk.homebrew-logs"
@@ -291,7 +280,13 @@ files = true
 system = true
 cost = "none"
 min_age_days = 7
+tags = ["homebrew", "logs"]
+stacks = ["homebrew", "macos"]
 description = "Logs of brew services (postgres, redis...) older than a week."
+
+# ---------------------------------------------------------------------------
+# Temp files
+# ---------------------------------------------------------------------------
 
 [[rule]]
 id = "junk.temp"
@@ -305,7 +300,9 @@ files = true
 exclude = ["com.apple.*", "*.sock", "*.socket", "TemporaryItems", "claude-*", "codex-*", "poo-*"]
 cost = "none"
 min_age_days = 3
-description = "Your temp folder entries untouched for 3 days."
+tags = ["temp"]
+stacks = ["macos"]
+description = "Entries in your temp folder untouched for 3 days."
 
 [[rule]]
 id = "junk.playwright-profiles"
@@ -316,7 +313,13 @@ kind = "path"
 paths = ["$TMPDIR/playwright_chromiumdev_profile-*", "$TMPDIR/puppeteer_dev_chrome_profile-*", "$TMPDIR/lighthouse.*"]
 cost = "none"
 min_age_days = 1
+tags = ["temp", "browsers", "automation"]
+stacks = ["macos", "node"]
 description = "Profiles left behind by Playwright, Puppeteer and Lighthouse runs."
+
+# ---------------------------------------------------------------------------
+# Downloads and installers
+# ---------------------------------------------------------------------------
 
 [[rule]]
 id = "junk.incomplete-downloads"
@@ -324,9 +327,11 @@ name = "Incomplete downloads"
 bucket = "junk"
 group = "Installers"
 kind = "path"
-paths = ["~/Downloads/*.crdownload", "~/Downloads/*.download", "~/Downloads/*.part"]
+paths = ["~/Downloads/*.{crdownload,download,part,opdownload}"]
 cost = "none"
 min_age_days = 2
+tags = ["downloads"]
+stacks = ["macos", "browsers"]
 description = "Browser downloads that never finished."
 
 [[rule]]
@@ -335,13 +340,15 @@ name = "Installers in Downloads"
 bucket = "junk"
 group = "Installers"
 kind = "path"
-paths = ["~/Downloads", "~/Desktop"]
-each = true
-files = true
-extensions = ["dmg", "pkg", "mpkg", "iso", "xip", "ipsw"]
+paths = [
+  "~/Downloads/*.{dmg,DMG,pkg,PKG,mpkg,iso,ISO,xip,ipsw}",
+  "~/Desktop/*.{dmg,DMG,pkg,PKG,mpkg,iso,ISO,xip,ipsw}",
+]
 cost = "redownload"
 warm_days = 14
-description = "Disk images and installer packages. Once an app is installed, its installer is dead weight."
+tags = ["installers", "downloads"]
+stacks = ["macos"]
+description = "Disk images, installer packages and firmware files at the top of Downloads and Desktop; once installed, they are dead weight."
 
 [[rule]]
 id = "junk.macos-installers"
@@ -354,7 +361,9 @@ system = true
 cost = "redownload"
 tier = "review"
 action = "trash"
-description = "Full macOS installer apps (12+ GB)."
+tags = ["installers", "macos"]
+stacks = ["macos"]
+description = "Full macOS installer apps of 12 GB or more."
 
 [[rule]]
 id = "junk.trash"
@@ -367,7 +376,13 @@ each = true
 files = true
 cost = "none"
 tier = "review"
-description = "Things you already threw away. Cleaning here is permanent."
+tags = ["trash"]
+stacks = ["macos"]
+description = "Things you already threw away; cleaning here is permanent."
+
+# ---------------------------------------------------------------------------
+# ~/.cache
+# ---------------------------------------------------------------------------
 
 [[rule]]
 id = "system.xdg-cache"
@@ -380,4 +395,6 @@ each = true
 exclude = ["huggingface", "torch", "puppeteer", "pre-commit", "uv", "pip", "zig", "bazel", "bazelisk", "sccache", "ccache", "deno", "yarn", "node", "node-gyp", "electron", "codex-runtimes", "opencode", "chrome-devtools-mcp", "ms-playwright-mcp", "coursier", "tuist", "gh", "terraform", "helm", "pipenv", "composer", "whisper", "clip", "modelscope", "lm-evaluation-harness", "lm-studio", "gpt4all", "mole", "poo"]
 cost = "rebuild"
 warm_days = 30
+tags = ["cache", "cli"]
+stacks = ["macos"]
 description = "Tool caches in ~/.cache that no specific rule covers."

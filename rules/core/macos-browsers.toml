@@ -1,0 +1,450 @@
+# Web browsers on macOS: HTTP, code, GPU/shader and service worker caches per browser,
+# downloaded browser components, on-device AI models and superseded framework versions.
+# Cookies, Local Storage, IndexedDB, history, bookmarks and passwords are never matched.
+# Crashpad crash reports are handled by junk.crash-reports.
+#
+# Chromium layout on macOS: the HTTP and code caches live in ~/Library/Caches/<browser>,
+# GPU and shader caches and downloaded components in ~/Library/Application Support/<browser>,
+# one folder per profile (Default, Profile 1...) plus a few shared folders at the root.
+
+# ---------------------------------------------------------------------------
+# Google Chrome (stable, Beta, Dev, Canary, Chrome for Testing)
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "browser.chrome-cache"
+name = "Chrome caches"
+bucket = "system"
+group = "Browsers"
+kind = "path"
+paths = [
+  "~/Library/Caches/Google/Chrome*",
+  "~/Library/Application Support/Google/Chrome*/*/{Code Cache,GPUCache,DawnCache,DawnGraphiteCache,DawnWebGPUCache,GrShaderCache,GraphiteDawnCache,Application Cache}",
+  "~/Library/Application Support/Google/Chrome*/*/Service Worker/{CacheStorage,ScriptCache}",
+  "~/Library/Application Support/Google/Chrome*/{ShaderCache,GrShaderCache,GraphiteDawnCache,GPUPersistentCache,component_crx_cache,extensions_crx_cache}",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["Google Chrome", "Google Chrome Beta", "Google Chrome Dev", "Google Chrome Canary", "Google Chrome for Testing"]
+warm_days = 7
+tags = ["browsers", "chrome", "chromium", "cache", "gpu-cache", "service-worker"]
+stacks = ["browsers", "macos"]
+description = "Chrome's HTTP, code, GPU, shader and service worker caches for every profile and channel."
+recommend = "Close Chrome first. Sites and offline web apps refill their service worker caches on the next visit; you stay signed in."
+
+[[rule]]
+id = "browser.chrome-ai-models"
+name = "Chrome on-device AI models"
+bucket = "system"
+group = "Browsers"
+kind = "path"
+paths = [
+  "~/Library/Application Support/Google/Chrome*/OptGuideOnDeviceModel",
+  "~/Library/Application Support/Google/Chrome*/OptGuideOnDeviceClassifierModel",
+  "~/Library/Application Support/Google/Chrome*/optimization_guide_model_store",
+]
+cost = "redownload"
+contents = true
+running_apps = ["Google Chrome", "Google Chrome Beta", "Google Chrome Dev", "Google Chrome Canary", "Google Chrome for Testing"]
+warm_days = 30
+tags = ["browsers", "chrome", "ai-models"]
+stacks = ["browsers", "macos"]
+description = "Gemini Nano and other on-device models Chrome downloads for its built-in AI features, often several GB."
+recommend = "Chrome downloads them again when a feature needs them. Turn the AI features off in chrome://settings to keep them away."
+
+[[rule]]
+id = "browser.chrome-old-versions"
+name = "Old Chrome framework versions"
+bucket = "system"
+group = "Browsers"
+kind = "provider"
+provider = "versions"
+params.path = "/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions"
+params.pattern = "[0-9]*"
+params.active = ["/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/Current"]
+params.keep = 1
+system = true
+cost = "none"
+running_apps = ["Google Chrome"]
+tags = ["browsers", "chrome", "old-versions"]
+stacks = ["browsers", "macos"]
+description = "Superseded Chrome versions left inside the app after self-updates; the current one and the newest other one are always kept."
+
+[[rule]]
+id = "browser.google-updater"
+name = "Google updater downloads"
+bucket = "system"
+group = "Browsers"
+kind = "path"
+paths = ["~/Library/Application Support/Google/GoogleUpdater/crx_cache"]
+cost = "redownload"
+contents = true
+running_apps = ["GoogleUpdater", "Google Chrome"]
+warm_days = 7
+tags = ["browsers", "chrome", "updaters"]
+stacks = ["browsers", "macos"]
+description = "Update packages Google's updater downloaded for Chrome and other Google apps."
+
+[[rule]]
+id = "browser.google-updater-old-versions"
+name = "Old Google updater versions"
+bucket = "system"
+group = "Browsers"
+kind = "provider"
+provider = "versions"
+params.path = "~/Library/Application Support/Google/GoogleUpdater"
+params.pattern = "[0-9]*"
+params.active = ["~/Library/Application Support/Google/GoogleUpdater/Current"]
+params.keep = 0
+cost = "none"
+min_age_days = 7
+running_apps = ["GoogleUpdater"]
+tags = ["browsers", "chrome", "updaters", "old-versions"]
+stacks = ["browsers", "macos"]
+description = "Previous copies of Google's updater that its Current link no longer points to."
+
+# ---------------------------------------------------------------------------
+# Brave
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "browser.brave-cache"
+name = "Brave caches"
+bucket = "system"
+group = "Browsers"
+kind = "path"
+paths = [
+  "~/Library/Caches/BraveSoftware/Brave-Browser*",
+  "~/Library/Application Support/BraveSoftware/Brave-Browser*/*/{Code Cache,GPUCache,DawnCache,DawnGraphiteCache,DawnWebGPUCache,GrShaderCache,GraphiteDawnCache,Application Cache}",
+  "~/Library/Application Support/BraveSoftware/Brave-Browser*/*/Service Worker/{CacheStorage,ScriptCache}",
+  "~/Library/Application Support/BraveSoftware/Brave-Browser*/{ShaderCache,GrShaderCache,GraphiteDawnCache,GPUPersistentCache,component_crx_cache,extensions_crx_cache}",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["Brave Browser", "Brave Browser Beta", "Brave Browser Nightly"]
+warm_days = 7
+tags = ["browsers", "brave", "chromium", "cache", "gpu-cache", "service-worker"]
+stacks = ["browsers", "macos"]
+description = "Brave's HTTP, code, GPU, shader and service worker caches for every profile and channel."
+
+[[rule]]
+id = "browser.brave-old-versions"
+name = "Old Brave framework versions"
+bucket = "system"
+group = "Browsers"
+kind = "provider"
+provider = "versions"
+params.path = "/Applications/Brave Browser.app/Contents/Frameworks/Brave Browser Framework.framework/Versions"
+params.pattern = "[0-9]*"
+params.active = ["/Applications/Brave Browser.app/Contents/Frameworks/Brave Browser Framework.framework/Versions/Current"]
+params.keep = 1
+system = true
+cost = "none"
+running_apps = ["Brave Browser"]
+tags = ["browsers", "brave", "old-versions"]
+stacks = ["browsers", "macos"]
+description = "Superseded Brave versions left inside the app after self-updates; the current one and the newest other one are always kept."
+
+# ---------------------------------------------------------------------------
+# Microsoft Edge
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "browser.edge-cache"
+name = "Edge caches"
+bucket = "system"
+group = "Browsers"
+kind = "path"
+paths = [
+  "~/Library/Caches/com.microsoft.edgemac*",
+  "~/Library/Caches/Microsoft Edge*",
+  "~/Library/Application Support/Microsoft Edge*/*/{Code Cache,GPUCache,DawnCache,DawnGraphiteCache,DawnWebGPUCache,GrShaderCache,GraphiteDawnCache,Application Cache}",
+  "~/Library/Application Support/Microsoft Edge*/*/Service Worker/{CacheStorage,ScriptCache}",
+  "~/Library/Application Support/Microsoft Edge*/{ShaderCache,GrShaderCache,GraphiteDawnCache,GPUPersistentCache,component_crx_cache,extensions_crx_cache}",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["Microsoft Edge", "Microsoft Edge Beta", "Microsoft Edge Dev", "Microsoft Edge Canary"]
+warm_days = 7
+tags = ["browsers", "edge", "chromium", "cache", "gpu-cache", "service-worker"]
+stacks = ["browsers", "macos"]
+description = "Edge's HTTP, code, GPU, shader and service worker caches for every profile and channel."
+
+[[rule]]
+id = "browser.edge-old-versions"
+name = "Old Edge framework versions"
+bucket = "system"
+group = "Browsers"
+kind = "provider"
+provider = "versions"
+params.path = "/Applications/Microsoft Edge.app/Contents/Frameworks/Microsoft Edge Framework.framework/Versions"
+params.pattern = "[0-9]*"
+params.active = ["/Applications/Microsoft Edge.app/Contents/Frameworks/Microsoft Edge Framework.framework/Versions/Current"]
+params.keep = 1
+system = true
+cost = "none"
+running_apps = ["Microsoft Edge"]
+tags = ["browsers", "edge", "old-versions"]
+stacks = ["browsers", "macos"]
+description = "Superseded Edge versions left inside the app after self-updates; the current one and the newest other one are always kept."
+
+[[rule]]
+id = "browser.edge-updater-old-versions"
+name = "Old Edge updater payloads"
+bucket = "system"
+group = "Browsers"
+kind = "provider"
+provider = "versions"
+params.path = "~/Library/Application Support/Microsoft/EdgeUpdater/apps/msedge-stable"
+params.pattern = "[0-9]*"
+params.keep = 1
+cost = "none"
+running_apps = ["Microsoft Edge", "EdgeUpdater"]
+tags = ["browsers", "edge", "updaters", "old-versions"]
+stacks = ["browsers", "macos"]
+description = "Edge installers the Edge updater staged for earlier versions; the newest one is kept."
+
+# ---------------------------------------------------------------------------
+# The Browser Company: Arc and Dia
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "browser.arc-cache"
+name = "Arc caches"
+bucket = "system"
+group = "Browsers"
+kind = "path"
+paths = [
+  "~/Library/Caches/company.thebrowser.Browser",
+  "~/Library/Caches/Arc",
+  "~/Library/Application Support/Arc/User Data/*/{Code Cache,GPUCache,DawnCache,DawnGraphiteCache,DawnWebGPUCache,GrShaderCache,GraphiteDawnCache,Application Cache}",
+  "~/Library/Application Support/Arc/User Data/*/Service Worker/{CacheStorage,ScriptCache}",
+  "~/Library/Application Support/Arc/User Data/{ShaderCache,GrShaderCache,GraphiteDawnCache,GPUPersistentCache,component_crx_cache,extensions_crx_cache}",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["Arc"]
+warm_days = 7
+tags = ["browsers", "arc", "chromium", "cache", "gpu-cache", "service-worker"]
+stacks = ["browsers", "macos"]
+description = "Arc's HTTP, code, GPU, shader and service worker caches; spaces, tabs and sidebar data are untouched."
+
+[[rule]]
+id = "browser.dia-cache"
+name = "Dia caches"
+bucket = "system"
+group = "Browsers"
+kind = "path"
+paths = [
+  "~/Library/Caches/Dia/User Data/*/{Cache,Code Cache}",
+  "~/Library/Application Support/Dia/User Data/*/{GPUCache,DawnCache,DawnGraphiteCache,DawnWebGPUCache,GrShaderCache,GraphiteDawnCache}",
+  "~/Library/Application Support/Dia/User Data/*/Service Worker/{CacheStorage,ScriptCache}",
+  "~/Library/Application Support/Dia/User Data/{ShaderCache,GrShaderCache,GraphiteDawnCache,GPUPersistentCache,component_crx_cache,extensions_crx_cache}",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["Dia"]
+warm_days = 7
+tags = ["browsers", "dia", "chromium", "cache", "gpu-cache", "service-worker"]
+stacks = ["browsers", "macos"]
+description = "Dia's HTTP, code, GPU, shader and service worker caches; its bundle-id cache folder is left to the generic sweep because it also stages updates."
+
+# ---------------------------------------------------------------------------
+# Other Chromium browsers
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "browser.vivaldi-cache"
+name = "Vivaldi caches"
+bucket = "system"
+group = "Browsers"
+kind = "path"
+paths = [
+  "~/Library/Caches/com.vivaldi.Vivaldi*",
+  "~/Library/Caches/Vivaldi*",
+  "~/Library/Application Support/Vivaldi*/*/{Code Cache,GPUCache,DawnCache,DawnGraphiteCache,DawnWebGPUCache,GrShaderCache,GraphiteDawnCache,Application Cache}",
+  "~/Library/Application Support/Vivaldi*/*/Service Worker/{CacheStorage,ScriptCache}",
+  "~/Library/Application Support/Vivaldi*/{ShaderCache,GrShaderCache,GraphiteDawnCache,GPUPersistentCache,component_crx_cache,extensions_crx_cache}",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["Vivaldi", "Vivaldi Snapshot"]
+warm_days = 7
+tags = ["browsers", "vivaldi", "chromium", "cache", "gpu-cache", "service-worker"]
+stacks = ["browsers", "macos"]
+description = "Vivaldi's HTTP, code, GPU, shader and service worker caches, including Snapshot builds."
+
+[[rule]]
+id = "browser.opera-cache"
+name = "Opera caches"
+bucket = "system"
+group = "Browsers"
+kind = "path"
+paths = [
+  "~/Library/Caches/com.operasoftware.*",
+  "~/Library/Application Support/com.operasoftware.*/{Code Cache,GPUCache,DawnCache,DawnGraphiteCache,DawnWebGPUCache,GrShaderCache,GraphiteDawnCache,ShaderCache,GPUPersistentCache,Application Cache,component_crx_cache,extensions_crx_cache}",
+  "~/Library/Application Support/com.operasoftware.*/Service Worker/{CacheStorage,ScriptCache}",
+  "~/Library/Application Support/com.operasoftware.*/_side_profiles/*/{Code Cache,GPUCache}",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["Opera", "Opera GX", "Opera Air", "Opera Beta", "Opera Developer"]
+warm_days = 7
+tags = ["browsers", "opera", "chromium", "cache", "gpu-cache", "service-worker"]
+stacks = ["browsers", "macos"]
+description = "Caches of Opera, Opera GX and Opera Air, whose main profile sits directly in the support folder."
+
+[[rule]]
+id = "browser.helium-cache"
+name = "Helium caches"
+bucket = "system"
+group = "Browsers"
+kind = "path"
+paths = [
+  "~/Library/Caches/net.imput.helium",
+  "~/Library/Application Support/net.imput.helium/*/{Code Cache,GPUCache,DawnCache,DawnGraphiteCache,DawnWebGPUCache,GrShaderCache,GraphiteDawnCache,Application Cache}",
+  "~/Library/Application Support/net.imput.helium/*/Service Worker/{CacheStorage,ScriptCache}",
+  "~/Library/Application Support/net.imput.helium/{ShaderCache,GrShaderCache,GraphiteDawnCache,GPUPersistentCache,component_crx_cache,extensions_crx_cache}",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["Helium"]
+warm_days = 7
+tags = ["browsers", "helium", "chromium", "cache", "gpu-cache", "service-worker"]
+stacks = ["browsers", "macos"]
+description = "Helium's HTTP, code, GPU, shader and service worker caches."
+
+[[rule]]
+id = "browser.comet-cache"
+name = "Comet caches"
+bucket = "system"
+group = "Browsers"
+kind = "path"
+paths = [
+  "~/Library/Caches/Comet",
+  "~/Library/Application Support/Comet/*/{Code Cache,GPUCache,DawnCache,DawnGraphiteCache,DawnWebGPUCache,GrShaderCache,GraphiteDawnCache,Application Cache}",
+  "~/Library/Application Support/Comet/*/Service Worker/{CacheStorage,ScriptCache}",
+  "~/Library/Application Support/Comet/{ShaderCache,GrShaderCache,GraphiteDawnCache,GPUPersistentCache,component_crx_cache,extensions_crx_cache}",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["Comet"]
+warm_days = 7
+tags = ["browsers", "comet", "chromium", "cache", "gpu-cache", "service-worker"]
+stacks = ["browsers", "macos"]
+description = "Caches of Perplexity's Comet browser."
+
+[[rule]]
+id = "browser.chromium-cache"
+name = "Chromium, Thorium, Yandex and BrowserOS caches"
+bucket = "system"
+group = "Browsers"
+kind = "path"
+paths = [
+  "~/Library/Caches/{Chromium,Thorium}",
+  "~/Library/Caches/Yandex/YandexBrowser",
+  "~/Library/Caches/BrowserOS/*/{Cache,Code Cache}",
+  "~/Library/Application Support/{Chromium,Thorium,BrowserOS,Yandex/YandexBrowser}/*/{Code Cache,GPUCache,DawnCache,DawnGraphiteCache,DawnWebGPUCache,GrShaderCache,GraphiteDawnCache,Application Cache}",
+  "~/Library/Application Support/{Chromium,Thorium,BrowserOS,Yandex/YandexBrowser}/*/Service Worker/{CacheStorage,ScriptCache}",
+  "~/Library/Application Support/{Chromium,Thorium,BrowserOS,Yandex/YandexBrowser}/{ShaderCache,GrShaderCache,GraphiteDawnCache,GPUPersistentCache,component_crx_cache,extensions_crx_cache}",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["Chromium", "Thorium", "Yandex", "BrowserOS"]
+warm_days = 7
+tags = ["browsers", "chromium", "cache", "gpu-cache", "service-worker"]
+stacks = ["browsers", "macos"]
+description = "Caches of plain Chromium (including ungoogled builds), Thorium, Yandex Browser and BrowserOS."
+
+# ---------------------------------------------------------------------------
+# Firefox family
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "browser.firefox-cache"
+name = "Firefox caches"
+bucket = "system"
+group = "Browsers"
+kind = "path"
+paths = [
+  "~/Library/Caches/Firefox",
+  "~/Library/Caches/Mozilla",
+  "~/Library/Application Support/Firefox/Profiles/*/{cache2,startupCache,shader-cache}",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["firefox"]
+warm_days = 7
+tags = ["browsers", "firefox", "gecko", "cache"]
+stacks = ["browsers", "macos"]
+description = "Firefox's disk, startup and shader caches for every profile (also Developer Edition and Nightly)."
+
+[[rule]]
+id = "browser.zen-cache"
+name = "Zen caches"
+bucket = "system"
+group = "Browsers"
+kind = "path"
+paths = [
+  "~/Library/Caches/zen",
+  "~/Library/Application Support/zen/Profiles/*/{cache2,startupCache,shader-cache}",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["zen"]
+warm_days = 7
+tags = ["browsers", "zen", "gecko", "cache"]
+stacks = ["browsers", "macos"]
+description = "Zen's disk, startup and shader caches."
+
+[[rule]]
+id = "browser.firefox-forks-cache"
+name = "LibreWolf, Waterfox and Floorp caches"
+bucket = "system"
+group = "Browsers"
+kind = "path"
+paths = [
+  "~/Library/Caches/{librewolf,LibreWolf,Waterfox,waterfox,Floorp,floorp}",
+  "~/Library/Application Support/{librewolf,LibreWolf,Waterfox,Floorp}/Profiles/*/{cache2,startupCache,shader-cache}",
+]
+cost = "rebuild"
+contents = true
+running_apps = ["librewolf", "waterfox", "floorp"]
+warm_days = 7
+tags = ["browsers", "gecko", "cache"]
+stacks = ["browsers", "macos"]
+description = "Disk, startup and shader caches of Firefox-based browsers."
+
+# ---------------------------------------------------------------------------
+# WebKit browsers
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "browser.safari-cache"
+name = "Safari cache"
+bucket = "system"
+group = "Browsers"
+kind = "path"
+paths = ["~/Library/Caches/com.apple.Safari", "~/Library/Caches/com.apple.SafariTechnologyPreview", "~/Library/Caches/com.apple.WebKit.Networking"]
+cost = "rebuild"
+contents = true
+running_apps = ["Safari", "Safari Technology Preview"]
+warm_days = 7
+tags = ["browsers", "safari", "webkit", "cache"]
+stacks = ["browsers", "macos"]
+description = "Safari's web cache and the shared WebKit network cache."
+
+[[rule]]
+id = "browser.orion-cache"
+name = "Orion cache"
+bucket = "system"
+group = "Browsers"
+kind = "path"
+paths = ["~/Library/Caches/com.kagi.kagimacOS"]
+cost = "rebuild"
+contents = true
+running_apps = ["Orion"]
+warm_days = 7
+tags = ["browsers", "orion", "webkit", "cache"]
+stacks = ["browsers", "macos"]
+description = "Kagi Orion's web cache."

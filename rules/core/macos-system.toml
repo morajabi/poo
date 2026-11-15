@@ -1,0 +1,160 @@
+# macOS-level caches beyond ~/Library/Caches: GPU shader caches in your private cache
+# folder, WebKit caches of apps, device firmware, Apple app containers and the system-wide
+# /Library folders. Rules that would make macOS ask for permission, or that need admin
+# rights, are off by default and say so.
+#
+# Not here on purpose: Time Machine local snapshots and unfinished backups (managed with
+# `tmutil`, not files poo can clean), /Library/Updates (owned by Software Update), font
+# caches, CloudKit, Keychains, Preferences and recent-items lists.
+
+[[rule]]
+id = "macos.gpu-shader-caches"
+name = "Metal shader caches"
+bucket = "system"
+group = "macOS"
+kind = "path"
+paths = [
+  "/private/var/folders/*/*/C/*/com.apple.metal",
+  "/private/var/folders/*/*/C/*/com.apple.metalfe",
+  "/private/var/folders/*/*/C/*/com.apple.gpuarchiver",
+]
+system = true
+cost = "rebuild"
+min_age_days = 3
+min_bytes = 5000000
+warm_days = 14
+tags = ["macos", "gpu-cache", "shaders"]
+stacks = ["macos"]
+description = "Compiled Metal shaders each app keeps in your private cache folder; apps recompile them on demand, at the cost of a brief stutter."
+recommend = "Only your own folder is readable, so other users' caches never show up. Small ones are skipped to keep the list short."
+
+[[rule]]
+id = "macos.webkit-cache-storage"
+name = "WebKit cache storage of apps"
+bucket = "system"
+group = "macOS"
+kind = "path"
+paths = [
+  "~/Library/WebKit/*/WebsiteData/CacheStorage",
+  "~/Library/WebKit/*/WebsiteData/Default/*/*/CacheStorage",
+]
+cost = "rebuild"
+contents = true
+min_bytes = 10000000
+warm_days = 30
+tags = ["macos", "webkit", "cache", "service-worker"]
+stacks = ["macos"]
+description = "Cache API storage of web views inside apps; their Local Storage, IndexedDB and cookies next to it are never touched."
+
+[[rule]]
+id = "macos.appletv-firmware"
+name = "Apple TV firmware downloads"
+bucket = "junk"
+group = "Installers"
+kind = "path"
+paths = ["~/Library/iTunes/Apple TV Software Updates"]
+cost = "redownload"
+warm_days = 7
+tags = ["installers", "firmware", "devices"]
+stacks = ["macos"]
+description = "Firmware files Finder or iTunes downloaded to restore or update an Apple TV."
+
+[[rule]]
+id = "macos.configurator-firmware"
+name = "Apple Configurator firmware"
+bucket = "junk"
+group = "Installers"
+kind = "path"
+paths = ["~/Library/Group Containers/*.group.com.apple.configurator/Library/Caches/Firmware"]
+enabled = false
+cost = "redownload"
+contents = true
+running_apps = ["Apple Configurator", "Apple Configurator 2"]
+warm_days = 7
+tags = ["installers", "firmware", "devices", "needs-permission"]
+stacks = ["macos"]
+description = "Device firmware Apple Configurator downloaded; off by default because macOS asks for permission to read group containers."
+
+[[rule]]
+id = "macos.apple-container-caches"
+name = "Apple app container caches"
+bucket = "system"
+group = "macOS"
+kind = "path"
+paths = [
+  "~/Library/Containers/com.apple.{mediaanalysisd,AppStore,stocks,AMPArtworkAgent,AvatarUI.AvatarPickerMemojiPicker,CoreDevice.CoreDeviceService,NeptuneOneExtension}/Data/Library/Caches",
+  "~/Library/Containers/com.apple.{mediaanalysisd,geod,configurator.xpc.InternetService,wallpaper.extension.aerials,AppleMediaServicesUI.UtilityExtension}/Data/tmp",
+  "~/Library/Containers/com.apple.podcasts/Data/tmp/StreamedMedia",
+]
+enabled = false
+cost = "rebuild"
+contents = true
+warm_days = 14
+tags = ["macos", "cache", "sandboxed", "needs-permission"]
+stacks = ["macos"]
+description = "Caches and temp files of Apple's own sandboxed apps and services (App Store, Stocks, Music artwork, media analysis, Podcasts streams); off by default because macOS asks for permission to read app containers."
+
+[[rule]]
+id = "macos.handoff-pasteboard"
+name = "Handoff clipboard copies"
+bucket = "junk"
+group = "Temp"
+kind = "path"
+paths = ["~/Library/Group Containers/group.com.apple.coreservices.useractivityd/shared-pasteboard"]
+each = true
+files = true
+enabled = false
+cost = "none"
+min_age_days = 1
+tags = ["macos", "temp", "handoff", "needs-permission"]
+stacks = ["macos"]
+description = "Files copied between your devices with Universal Clipboard that stayed behind; off by default because macOS asks for permission to read group containers."
+
+[[rule]]
+id = "macos.library-caches"
+name = "System-wide caches"
+bucket = "system"
+group = "macOS"
+kind = "path"
+paths = ["/Library/Caches"]
+each = true
+exclude = ["com.apple.*", "*microsoft.autoupdate*", "*crowdstrike*", "*jamf*", "*Jamf*", "*kandji*", "*mosyle*", "*munki*", "*sentinel*"]
+system = true
+enabled = false
+cost = "rebuild"
+warm_days = 30
+tags = ["macos", "cache", "needs-admin"]
+stacks = ["macos"]
+description = "Caches third-party installers and services keep in /Library/Caches; off by default because most belong to root and need admin rights."
+
+[[rule]]
+id = "macos.library-logs"
+name = "System-wide logs"
+bucket = "junk"
+group = "Logs"
+kind = "path"
+paths = ["/Library/Logs"]
+each = true
+files = true
+exclude = ["DiagnosticReports", "com.apple.*", "Install*.log"]
+system = true
+enabled = false
+cost = "none"
+min_age_days = 7
+tags = ["logs", "macos", "needs-admin"]
+stacks = ["macos"]
+description = "Logs of third-party services and installers (Adobe, Creative Cloud, Microsoft...) in /Library/Logs; off by default because most belong to root and need admin rights."
+
+[[rule]]
+id = "macos.rosetta-update"
+name = "Rosetta update bundle"
+bucket = "system"
+group = "macOS"
+kind = "path"
+paths = ["/Library/Apple/usr/share/rosetta/rosetta_update_bundle"]
+system = true
+enabled = false
+cost = "redownload"
+tags = ["macos", "rosetta", "needs-admin"]
+stacks = ["macos"]
+description = "The Rosetta 2 update package macOS keeps after installing Rosetta; off by default because it belongs to root."
