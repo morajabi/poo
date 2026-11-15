@@ -21,6 +21,14 @@ pub struct Entry {
 }
 
 pub fn read_entries(dir: &Path) -> Vec<Entry> {
+    if let Some(v) = crate::bulk::read_entries_bulk(dir) {
+        return v;
+    }
+    read_entries_std(dir)
+}
+
+/// Portable reader: `read_dir` plus an `lstat` per entry. Fallback for `read_entries`.
+pub fn read_entries_std(dir: &Path) -> Vec<Entry> {
     let Ok(rd) = std::fs::read_dir(dir) else { return vec![] };
     let mut out = Vec::new();
     for e in rd.flatten() {
@@ -54,7 +62,7 @@ pub struct SizeCtx {
     pub cancel: AtomicBool,
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct Sized {
     pub bytes: u64,
     pub files: u64,

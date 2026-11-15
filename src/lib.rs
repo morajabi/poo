@@ -4,9 +4,11 @@
 pub mod agent;
 pub mod ask;
 pub mod backup;
+pub mod bulk;
 pub mod catalog;
 pub mod clean;
 pub mod config;
+pub mod fsevents;
 pub mod fsutil;
 pub mod hooks;
 pub mod mcp;
