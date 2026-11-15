@@ -1,25 +1,63 @@
 name: ci
 
+# A green run of this workflow on main triggers release.yml.
 on:
   push:
     branches: [main]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   rust:
     strategy:
+      fail-fast: false
       matrix:
         os: [macos-15, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
+    env:
+      CARGO_TERM_COLOR: always
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test
+      # Unit tests plus tests/core.rs, tests/bulk.rs and tests/incremental.rs (macOS only).
+      - run: cargo test --all-targets
       - name: core mods load without errors
         run: cargo run --quiet -- mods validate --text
 
   app:
-    runs-on: macos-15
+    runs-on: macos-26  # the app links against the macOS 26 SDK (Xcode 26+)
     steps:
       - uses: actions/checkout@v4
       - run: swift build --package-path app
+      - run: swift test --package-path app
+      - name: release scripts parse
+        run: for f in scripts/*.sh; do bash -n "$f"; done && sh -n install.sh
+
+  # The release build path, ad-hoc and one arch: icon, Sparkle embedding, signing order.
+  bundle:
+    runs-on: macos-26  # Xcode 26+: build-app.sh refuses an older SDK; actool needs it for the .icon
+    steps:
+      - uses: actions/checkout@v4
+      - name: newest Xcode (actool compiles the Icon Composer icon)
+        run: |
+          x="$(ls -d /Applications/Xcode_*.app | grep -v -i beta | sort -V | tail -n1)"
+          sudo xcode-select -s "$x"
+          xcodebuild -version
+      - uses: dtolnay/rust-toolchain@stable
+      - run: ./scripts/build-app.sh
+      - name: bundle is complete and launches
+        run: |
+          set -eu
+          A=dist/Poo.app
+          codesign --verify --deep --strict "$A"
+          test -f "$A/Contents/Frameworks/Sparkle.framework/Versions/B/Sparkle"
+          test -f "$A/Contents/Resources/AppIcon.icns"
+          "$A/Contents/Resources/bin/poo" --version
+          # dyld must find Sparkle; give it a few seconds, then stop it.
+          POO_NO_WATCH=1 "$A/Contents/MacOS/Poo" > launch.log 2>&1 & pid=$!
+          sleep 8
+          if ! kill -0 "$pid" 2>/dev/null; then cat launch.log; exit 1; fi
+          kill "$pid"

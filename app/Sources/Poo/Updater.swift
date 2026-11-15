@@ -1,121 +1,105 @@
 import AppKit
-import CryptoKit
 import Foundation
 import Observation
+import Sparkle
 
-/// Self-update from the same `latest.json` manifest the CLI and install script use.
-/// The app bundle carries its own copy of the CLI, so updating the app updates both.
+/// App updates through Sparkle 2. Releases publish an EdDSA-signed `appcast.xml`; the
+/// bundled CLI lives inside Poo.app, so updating the app updates the CLI with it.
+///
+/// Sparkle only starts in a bundled build whose Info.plist carries `SUFeedURL` and
+/// `SUPublicEDKey` (release builds). `swift run` and unsigned local builds leave it off.
 @MainActor
 @Observable
-final class Updater {
+final class Updater: NSObject {
+    /// The version Sparkle found, while one is waiting to be installed.
     var available: String?
-    var checking = false
+    var canCheck = false
     var status: String?
-    private var manifest: Manifest?
 
-    struct Manifest: Decodable {
-        var version: String
-        var notes: String?
-        var assets: [String: String]
-        var sha256: [String: String]
+    var automaticallyChecks: Bool {
+        get { access(keyPath: \.automaticallyChecks); return controller.updater.automaticallyChecksForUpdates }
+        set { withMutation(keyPath: \.automaticallyChecks) { controller.updater.automaticallyChecksForUpdates = newValue } }
     }
 
-    static var manifestURL: URL {
-        if let s = ProcessInfo.processInfo.environment["POO_RELEASES_URL"], let u = URL(string: s) { return u }
-        return URL(string: "https://github.com/morajabi/poo/releases/latest/download/latest.json")!
+    var automaticallyDownloads: Bool {
+        get { access(keyPath: \.automaticallyDownloads); return controller.updater.automaticallyDownloadsUpdates }
+        set { withMutation(keyPath: \.automaticallyDownloads) { controller.updater.automaticallyDownloadsUpdates = newValue } }
     }
+
+    /// False in builds without a feed or signing key; the settings say why.
+    let enabled: Bool
+
+    @ObservationIgnored private var controller: SPUStandardUpdaterController!
+    @ObservationIgnored private var observation: NSKeyValueObservation?
 
     var currentVersion: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
     }
 
-    init() {
-        Task {
-            try? await Task.sleep(for: .seconds(20))
-            while true {
-                await check(userInitiated: false)
-                try? await Task.sleep(for: .seconds(6 * 3600))
-            }
-        }
-    }
-
-    func check(userInitiated: Bool) async {
-        checking = true
-        defer { checking = false }
-        do {
-            let (data, _) = try await URLSession.shared.data(from: Self.manifestURL)
-            let m = try JSONDecoder().decode(Manifest.self, from: data)
-            manifest = m
-            if Self.isNewer(m.version, than: currentVersion) {
-                available = m.version
-                status = m.notes
-            } else {
-                available = nil
-                if userInitiated { status = "You have the latest version." }
-            }
-        } catch {
-            if userInitiated { status = "Could not check: \(error.localizedDescription)" }
-        }
-    }
-
-    nonisolated static func isNewer(_ a: String, than b: String) -> Bool {
-        let parse: (String) -> [Int] = { $0.trimmingCharacters(in: CharacterSet(charactersIn: "v")).split(whereSeparator: { $0 == "." || $0 == "-" }).map { Int($0) ?? 0 } }
-        let x = parse(a), y = parse(b)
-        for i in 0..<max(x.count, y.count) {
-            let l = i < x.count ? x[i] : 0, r = i < y.count ? y[i] : 0
-            if l != r { return l > r }
-        }
-        return false
-    }
-
-    func install() async {
-        guard let m = manifest, let urlString = m.assets["app-macos"], let url = URL(string: urlString),
-              let expected = m.sha256["app-macos"] else {
-            status = "No app download in the release."
+    override init() {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let key = (info["SUPublicEDKey"] as? String) ?? ""
+        let feed = (info["SUFeedURL"] as? String) ?? ""
+        enabled = Bundle.main.bundleURL.pathExtension == "app" && !key.isEmpty && !feed.isEmpty
+            && ProcessInfo.processInfo.environment["POO_NO_SPARKLE"] == nil
+        super.init()
+        controller = SPUStandardUpdaterController(startingUpdater: false, updaterDelegate: self, userDriverDelegate: self)
+        guard enabled else {
+            status = "Updates are off in this build (no Sparkle feed or key)."
             return
         }
-        status = "Downloading \(m.version)…"
-        do {
-            let (tmp, _) = try await URLSession.shared.download(from: url)
-            let data = try Data(contentsOf: tmp)
-            let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-            guard digest.lowercased() == expected.lowercased() else {
-                status = "Download checksum did not match; update cancelled."
-                return
-            }
-            let work = FileManager.default.temporaryDirectory.appendingPathComponent("poo-update-\(UUID().uuidString)")
-            try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
-            let zip = work.appendingPathComponent("Poo.zip")
-            try data.write(to: zip)
-            try run("/usr/bin/ditto", ["-x", "-k", zip.path, work.path])
-            let newApp = work.appendingPathComponent("Poo.app")
-            guard FileManager.default.fileExists(atPath: newApp.path) else {
-                status = "The download did not contain Poo.app."
-                return
-            }
-            let current = Bundle.main.bundleURL
-            var trashed: NSURL?
-            try FileManager.default.trashItem(at: current, resultingItemURL: &trashed)
-            try FileManager.default.moveItem(at: newApp, to: current)
-            status = "Restarting…"
-            let p = Process()
-            p.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-            p.arguments = ["-n", current.path]
-            try p.run()
-            NSApp.terminate(nil)
-        } catch {
-            status = "Update failed: \(error.localizedDescription)"
+        controller.startUpdater()
+        observation = controller.updater.observe(\.canCheckForUpdates, options: [.initial, .new]) { [weak self] u, _ in
+            let can = u.canCheckForUpdates
+            Task { @MainActor in self?.canCheck = can }
         }
     }
 
-    private func run(_ tool: String, _ args: [String]) throws {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: tool)
-        p.arguments = args
-        try p.run()
-        p.waitUntilExit()
-        if p.terminationStatus != 0 {
-            throw NSError(domain: "poo", code: Int(p.terminationStatus), userInfo: [NSLocalizedDescriptionKey: "\(tool) failed"])
+    /// Shows Sparkle's update window: checks, then offers to download and install.
+    func checkForUpdates() {
+        guard enabled else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        controller.checkForUpdates(nil)
+    }
+
+    /// Kept for the menu bar's Update button.
+    func install() async { checkForUpdates() }
+}
+
+extension Updater: SPUUpdaterDelegate {
+    nonisolated func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+        let v = item.displayVersionString
+        Task { @MainActor in self.available = v }
+    }
+
+    nonisolated func updaterDidNotFindUpdate(_ updater: SPUUpdater) {
+        Task { @MainActor in self.available = nil }
+    }
+
+    nonisolated func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
+        let msg = error.localizedDescription
+        Task { @MainActor in self.status = msg }
+    }
+}
+
+extension Updater: SPUStandardUserDriverDelegate {
+    /// Poo is a menu bar app, so scheduled updates show as a gentle reminder
+    /// (the menu's Update button) instead of a window popping up over other work.
+    nonisolated var supportsGentleScheduledUpdateReminders: Bool { true }
+
+    nonisolated func standardUserDriverShouldHandleShowingScheduledUpdate(_ update: SUAppcastItem, andInImmediateFocus immediateFocus: Bool) -> Bool {
+        immediateFocus
+    }
+
+    nonisolated func standardUserDriverWillHandleShowingUpdate(_ handleShowingUpdate: Bool, forUpdate update: SUAppcastItem, state: SPUUserUpdateState) {
+        let v = update.displayVersionString
+        Task { @MainActor in
+            self.available = v
+            if handleShowingUpdate { NSApp.activate(ignoringOtherApps: true) }
         }
+    }
+
+    nonisolated func standardUserDriverWillFinishUpdateSession() {
+        Task { @MainActor in self.available = nil }
     }
 }

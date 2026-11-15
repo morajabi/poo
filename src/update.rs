@@ -58,7 +58,11 @@ pub fn newer(latest: &str, current: &str) -> bool {
 /// Which package manager owns this binary, if any.
 pub fn managed_by(exe: &Path) -> Option<String> {
     let s = exe.to_string_lossy();
-    if s.contains("/Cellar/") || s.contains("/homebrew/") || s.contains("/linuxbrew/") {
+    // Before Homebrew: the cask links the app's bundled CLI into the brew prefix.
+    if s.contains(".app/Contents/") {
+        return Some("the Poo app: Sparkle updates the app and its bundled CLI together (Poo > Check for Updates…)".into());
+    }
+    if s.contains("/Cellar/") || s.contains("/Caskroom/") || s.contains("/homebrew/") || s.contains("/linuxbrew/") {
         return Some("brew upgrade poo".into());
     }
     if s.contains("/nix/store/") {
@@ -67,10 +71,11 @@ pub fn managed_by(exe: &Path) -> Option<String> {
     if s.contains("/mise/installs/") {
         return Some("mise upgrade poo".into());
     }
-    if s.contains(".app/Contents/") {
-        return Some("the Poo app (it updates itself and its bundled CLI)".into());
-    }
     None
+}
+
+fn current_exe() -> PathBuf {
+    std::env::current_exe().map(|p| std::fs::canonicalize(&p).unwrap_or(p)).unwrap_or_default()
 }
 
 fn fetch(url: &str) -> Result<Vec<u8>> {
@@ -91,7 +96,7 @@ pub fn fetch_manifest() -> Result<Manifest> {
 
 pub fn check() -> Result<Check> {
     let m = fetch_manifest()?;
-    let exe = std::env::current_exe().unwrap_or_default();
+    let exe = current_exe();
     let _ = record_check(&m.version);
     Ok(Check {
         current: VERSION.into(),
@@ -105,12 +110,16 @@ pub fn check() -> Result<Check> {
 /// Downloads, verifies and swaps in the new binary. Returns the new version.
 pub fn run(force: bool) -> Result<String> {
     let m = fetch_manifest()?;
+    install(&m, force)
+}
+
+fn install(m: &Manifest, force: bool) -> Result<String> {
     if !force && !newer(&m.version, VERSION) {
         return Ok(VERSION.into());
     }
     let exe = std::fs::canonicalize(std::env::current_exe()?)?;
     if let Some(mgr) = managed_by(&exe) {
-        bail!("poo was installed by a package manager; update with: {}", mgr);
+        bail!("poo is not updated in place here; it is managed by {}", mgr);
     }
     let key = target_key();
     let url = m.assets.get(&key).with_context(|| format!("no release asset for {}", key))?;
@@ -138,7 +147,7 @@ pub fn run(force: bool) -> Result<String> {
     std::fs::rename(&new_bin, &exe).context("could not replace the poo binary (permissions?)")?;
     let _ = std::fs::remove_dir_all(&staging);
     let _ = record_check(&m.version);
-    Ok(m.version)
+    Ok(m.version.clone())
 }
 
 fn find_binary(dir: &Path) -> Option<PathBuf> {
@@ -171,35 +180,86 @@ struct Stamp {
     latest: String,
 }
 
+const DAY: i64 = 86400;
+
 fn stamp_path() -> PathBuf {
     state_dir().join("update-check.json")
 }
 
-fn record_check(latest: &str) -> Result<()> {
+fn read_stamp() -> Stamp {
+    std::fs::read(stamp_path()).ok().and_then(|d| serde_json::from_slice(&d).ok()).unwrap_or_default()
+}
+
+fn write_stamp(st: &Stamp) -> Result<()> {
     let p = stamp_path();
     std::fs::create_dir_all(p.parent().unwrap())?;
-    std::fs::write(p, serde_json::to_vec(&Stamp { checked_at: now(), latest: latest.into() })?)?;
+    let tmp = p.with_extension(format!("tmp{}", std::process::id()));
+    std::fs::write(&tmp, serde_json::to_vec(st)?)?;
+    std::fs::rename(tmp, p)?;
     Ok(())
 }
 
-/// A one-line notice at most once a day for interactive use. Never blocks for long.
-pub fn notice() -> Option<String> {
-    let stamp: Stamp = std::fs::read(stamp_path()).ok().and_then(|d| serde_json::from_slice(&d).ok()).unwrap_or_default();
-    if now() - stamp.checked_at > 86400 {
-        // Refresh in the background for next time.
-        if let Ok(exe) = std::env::current_exe() {
-            let _ = std::process::Command::new(exe)
-                .args(["update", "--check", "--quiet"])
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn();
+fn record_check(latest: &str) -> Result<()> {
+    write_stamp(&Stamp { checked_at: now(), latest: latest.into() })
+}
+
+/// Whether this run may look for updates on its own: a person at a terminal, not CI,
+/// not a test, not the copy inside Poo.app (Sparkle owns that one).
+pub fn background_allowed(stdin_tty: bool, stderr_tty: bool) -> bool {
+    if !(stdin_tty || stderr_tty) {
+        return false;
+    }
+    if ["CI", "POO_NO_UPDATE_CHECK"].iter().any(|k| std::env::var_os(k).is_some_and(|v| !v.is_empty())) {
+        return false;
+    }
+    !current_exe().to_string_lossy().contains(".app/Contents/")
+}
+
+/// Called at the start of a command. Costs one small file read: when the last check is
+/// a day old it spawns `poo update --background` detached and returns at once. Returns a
+/// one-line hint when a newer version is known and will not be installed on its own.
+pub fn background(auto: bool) -> Option<String> {
+    let mut st = read_stamp();
+    if now() - st.checked_at > DAY {
+        // Claim today's check first so parallel commands do not all spawn one.
+        st.checked_at = now();
+        if write_stamp(&st).is_ok() {
+            spawn_background();
         }
     }
-    if !stamp.latest.is_empty() && newer(&stamp.latest, VERSION) {
-        return Some(format!("poo {} is available (you have {}). Run `poo update`.", stamp.latest, VERSION));
+    if st.latest.is_empty() || !newer(&st.latest, VERSION) {
+        return None;
     }
-    None
+    match managed_by(&current_exe()) {
+        Some(mgr) => Some(format!("poo {} is available (you have {}). Update with {}.", st.latest, VERSION, mgr)),
+        None if auto => None, // the background run installs it
+        None => Some(format!("poo {} is available (you have {}). Run `poo update`.", st.latest, VERSION)),
+    }
+}
+
+fn spawn_background() {
+    use std::os::unix::process::CommandExt;
+    let Ok(exe) = std::env::current_exe() else { return };
+    let _ = std::process::Command::new(exe)
+        .args(["update", "--background"])
+        .env("POO_NO_UPDATE_CHECK", "1")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        // Its own process group: Ctrl-C in the terminal does not reach it.
+        .process_group(0)
+        .spawn();
+}
+
+/// What `poo update --background` does: record the latest version and, when allowed,
+/// install it. Never prints; failures wait for tomorrow's check.
+pub fn background_run(auto: bool) -> Result<Option<String>> {
+    let m = fetch_manifest()?;
+    record_check(&m.version)?;
+    if !auto || !newer(&m.version, VERSION) || managed_by(&current_exe()).is_some() {
+        return Ok(None);
+    }
+    install(&m, false).map(Some)
 }
 
 #[cfg(test)]
@@ -211,5 +271,13 @@ mod tests {
         assert!(newer("v1.0.0", "0.9.9"));
         assert!(!newer("0.1.0", "0.1.0"));
         assert!(!newer("0.1.0", "0.2.0"));
+        assert!(newer("0.1.10", "0.1.9"));
+    }
+
+    #[test]
+    fn managed() {
+        assert!(managed_by(Path::new("/Applications/Poo.app/Contents/Resources/bin/poo")).unwrap().contains("Sparkle"));
+        assert!(managed_by(Path::new("/opt/homebrew/Cellar/poo/0.1.3/bin/poo")).unwrap().contains("brew"));
+        assert!(managed_by(Path::new("/Users/me/.local/bin/poo")).is_none());
     }
 }

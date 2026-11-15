@@ -223,12 +223,17 @@ enum Cmd {
     },
     /// Update poo to the latest release.
     Update {
+        /// Only report whether a newer version exists.
         #[arg(long)]
         check: bool,
         #[arg(long)]
         quiet: bool,
+        /// Reinstall even when already on the latest version.
         #[arg(long)]
         force: bool,
+        /// The daily background check (spawned by poo itself).
+        #[arg(long, hide = true)]
+        background: bool,
     },
     /// Routine cleanups that run on their own (launchd).
     Schedule {
@@ -875,15 +880,23 @@ fn real_main(cli: Cli) -> R {
         if !is_tty(0) || !is_tty(1) {
             return Err(CliError::new("usage", 2, "poo ui needs an interactive terminal").hint("use `poo --text` or `poo --json` when piping"));
         }
+        // The daily update check still runs; its hint would be wiped by the full-screen UI.
+        if let Ok(cfg) = poo::config::Config::load() {
+            if cfg.updates.check && poo::update::background_allowed(true, true) {
+                let _ = poo::update::background(cfg.updates.auto);
+            }
+        }
         return poo::tui::run(poo::tui::UiOptions::detect(cli.no_animation)).map_err(Into::into);
     }
     if matches!(cmd, Cmd::Mcp) {
         return poo::mcp::serve().map_err(Into::into);
     }
     let mut ctx = Ctx::load().map_err(config_error)?;
-    if !out.json && !matches!(cmd, Cmd::Update { .. }) {
-        if let Some(n) = poo::config::Config::load().ok().filter(|c| c.updates.check).and_then(|_| poo::update::notice()) {
-            eprintln!("{}", n);
+    if ctx.cfg.updates.check && !matches!(cmd, Cmd::Update { .. } | Cmd::Watch { .. }) && poo::update::background_allowed(is_tty(0), is_tty(2)) {
+        if let Some(n) = poo::update::background(ctx.cfg.updates.auto) {
+            if !out.json && is_tty(2) {
+                eprintln!("{}", n);
+            }
         }
     }
     match cmd {
@@ -1384,7 +1397,10 @@ fn real_main(cli: Cli) -> R {
                 }
             }
         },
-        Cmd::Update { check, quiet, force } => {
+        Cmd::Update { background: true, .. } => {
+            let _ = poo::update::background_run(ctx.cfg.updates.auto);
+        }
+        Cmd::Update { check, quiet, force, .. } => {
             if check {
                 let c = poo::update::check()?;
                 if quiet {

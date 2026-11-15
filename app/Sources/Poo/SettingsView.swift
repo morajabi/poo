@@ -46,16 +46,18 @@ struct GeneralSettings: View {
                 Button("Add folder…") { pickFolder() }
             }
             Section("Updates") {
+                @Bindable var updater = updater
                 HStack {
-                    Text("Poo \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev")")
+                    Text("Poo \(updater.currentVersion)")
                     Spacer()
-                    if let v = updater.available {
-                        Button("Install \(v)") { Task { await updater.install() } }
-                    } else {
-                        Button(updater.checking ? "Checking…" : "Check for updates") { Task { await updater.check(userInitiated: true) } }
-                            .disabled(updater.checking)
-                    }
+                    Button(updater.available.map { "Install \($0)…" } ?? "Check for Updates…") { updater.checkForUpdates() }
+                        .disabled(!updater.enabled || !updater.canCheck)
                 }
+                Toggle("Check for updates automatically", isOn: $updater.automaticallyChecks)
+                    .disabled(!updater.enabled)
+                Toggle("Download and install updates automatically", isOn: $updater.automaticallyDownloads)
+                    .disabled(!updater.enabled || !updater.automaticallyChecks)
+                Text("Updates the app and its bundled poo CLI together.").font(.caption).foregroundStyle(.secondary)
                 if let s = updater.status { Text(s).font(.caption).foregroundStyle(.secondary) }
             }
             Section("App") {

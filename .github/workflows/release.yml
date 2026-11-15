@@ -1,22 +1,56 @@
 name: release
 
+# Every push to main whose `ci` run passed becomes a release: v<major>.<minor>.<n>,
+# with major.minor from Cargo.toml and n counted up from the last tag. Put
+# `[skip release]` in the head commit message to skip one. Manual runs release main.
 on:
-  push:
-    tags: ["v*"]
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: write
 
+# One release at a time, in order; a newer push waits instead of cancelling.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
+  version:
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository &&
+       !contains(github.event.workflow_run.head_commit.message, '[skip release]'))
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      sha: ${{ steps.v.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+      - id: v
+        run: |
+          set -eu
+          sha="$(git rev-parse HEAD)"
+          version="$(scripts/release-version.sh "$sha")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Releasing $sha as v$version" >> "$GITHUB_STEP_SUMMARY"
+
+  # Linux CLI builds. The macOS ones come from the app job, which signs and notarizes them.
   cli:
+    needs: version
     strategy:
       matrix:
         include:
-          - target: aarch64-apple-darwin
-            os: macos-15
-          - target: x86_64-apple-darwin
-            os: macos-15
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-24.04
           - target: aarch64-unknown-linux-gnu
@@ -24,83 +58,194 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.sha }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-      - run: cargo test --release --target ${{ matrix.target }}
-        if: matrix.target != 'x86_64-apple-darwin'
+      - run: scripts/stamp-version.sh "${{ needs.version.outputs.version }}"
       - run: cargo build --release --target ${{ matrix.target }}
       - name: package
         run: |
+          set -eu
+          bin="target/${{ matrix.target }}/release/poo"
+          "$bin" --version | grep -qx "poo ${{ needs.version.outputs.version }}"
           mkdir -p out/poo
-          cp target/${{ matrix.target }}/release/poo out/poo/
-          cp README.md LICENSE out/poo/
+          cp "$bin" README.md LICENSE out/poo/
           tar -C out -czf poo-${{ matrix.target }}.tar.gz poo
       - uses: actions/upload-artifact@v4
         with:
           name: cli-${{ matrix.target }}
           path: poo-${{ matrix.target }}.tar.gz
 
+  # Poo.app (universal) and the macOS CLI tarballs: Developer ID signed, notarized and
+  # stapled when the secrets exist, ad-hoc signed otherwise.
   app:
-    runs-on: macos-15
+    needs: version
+    runs-on: macos-26  # Xcode 26+: build-app.sh refuses an older SDK; actool needs it for the .icon
+    outputs:
+      signing: ${{ steps.verify.outputs.signing }}
     env:
+      VERSION: ${{ needs.version.outputs.version }}
+      SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
       MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
       MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+      MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
       APPLE_ID: ${{ secrets.APPLE_ID }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+      APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+      - name: newest Xcode (actool compiles the Icon Composer icon)
+        run: |
+          x="$(ls -d /Applications/Xcode_*.app | grep -v -i beta | sort -V | tail -n1)"
+          sudo xcode-select -s "$x"
+          xcodebuild -version
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
-      - name: import signing certificate
-        if: env.MACOS_CERT_P12 != ''
+      - run: scripts/stamp-version.sh "$VERSION"
+      - name: sparkle public key
         run: |
-          echo "$MACOS_CERT_P12" | base64 --decode > cert.p12
-          security create-keychain -p ci build.keychain
-          security default-keychain -s build.keychain
-          security unlock-keychain -p ci build.keychain
-          security import cert.p12 -k build.keychain -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple: -s -k ci build.keychain
+          set -eu
+          if [ -z "$SPARKLE_PRIVATE_KEY" ]; then
+            echo "::warning::SPARKLE_PRIVATE_KEY is not set: this release has no appcast and its app will not update itself."
+            exit 0
+          fi
+          echo "SPARKLE_PUBLIC_KEY=$(scripts/sparkle.sh pubkey)" >> "$GITHUB_ENV"
+      - name: import signing certificate
+        run: |
+          set -eu
+          if [ -z "$MACOS_CERT_P12" ] || [ -z "$MACOS_SIGN_IDENTITY" ]; then
+            echo "::warning::MACOS_CERT_P12 / MACOS_SIGN_IDENTITY not set: ad-hoc signed, not notarized."
+            exit 0
+          fi
+          kc="$RUNNER_TEMP/build.keychain"
+          printf '%s' "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p ci "$kc"
+          security set-keychain-settings -lut 21600 "$kc"
+          security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
+          security unlock-keychain -p ci "$kc"
+          security import "$RUNNER_TEMP/cert.p12" -k "$kc" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci "$kc"
+          rm "$RUNNER_TEMP/cert.p12"
+          security find-identity -v -p codesigning "$kc"
+          echo "SIGN_IDENTITY=$MACOS_SIGN_IDENTITY" >> "$GITHUB_ENV"
       - name: build universal app
         env:
           ARCHS: "arm64 x86_64"
-          SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY || '-' }}
         run: ./scripts/build-app.sh
-      - name: notarize
-        if: env.APPLE_ID != ''
+      - name: sign the macOS CLI binaries
         run: |
-          xcrun notarytool submit dist/Poo.app.zip --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+          set -eu
+          mkdir -p dist/cli
+          for t in aarch64-apple-darwin x86_64-apple-darwin; do
+            cp "target/$t/release/poo" "dist/cli/poo-$t"
+            if [ -n "${SIGN_IDENTITY:-}" ]; then
+              codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "dist/cli/poo-$t"
+            else
+              codesign --force --sign - "dist/cli/poo-$t"
+            fi
+            codesign --verify --strict "dist/cli/poo-$t"
+          done
+          dist/cli/poo-aarch64-apple-darwin --version | grep -qx "poo $VERSION"
+      - name: notarize and staple
+        if: env.SIGN_IDENTITY != ''
+        run: |
+          set -eu
+          rc=0; scripts/notarize.sh dist/Poo.app.zip || rc=$?
+          if [ "$rc" = 3 ]; then
+            echo "::warning::no notarization credentials: signed with Developer ID but not notarized."
+            exit 0
+          fi
+          [ "$rc" = 0 ] || exit "$rc"
           xcrun stapler staple dist/Poo.app
           rm dist/Poo.app.zip && (cd dist && ditto -c -k --keepParent Poo.app Poo.app.zip)
+          # Bare binaries cannot be stapled; Gatekeeper finds their ticket online.
+          (cd dist/cli && ditto -c -k . ../cli.zip)
+          scripts/notarize.sh dist/cli.zip
+          spctl -a -vv dist/Poo.app
+          echo "NOTARIZED=1" >> "$GITHUB_ENV"
+      - name: verify
+        id: verify
+        run: |
+          set -eu
+          codesign --verify --deep --strict --verbose=2 dist/Poo.app
+          codesign -dv dist/Poo.app 2>&1 | grep -E "Authority|TeamIdentifier|Signature" || true
+          signed="ad-hoc"; [ -n "${SIGN_IDENTITY:-}" ] && signed="Developer ID"
+          note="ad-hoc signed, not notarized (first launch: right-click > Open)"
+          [ -n "${SIGN_IDENTITY:-}" ] && note="Developer ID signed, not notarized"
+          [ -n "${NOTARIZED:-}" ] && note="Developer ID signed and notarized by Apple"
+          echo "### Poo.app and macOS CLI: $note" >> "$GITHUB_STEP_SUMMARY"
+          echo "signing=$note" >> "$GITHUB_OUTPUT"
+      - name: package macOS CLI
+        run: |
+          set -eu
+          for t in aarch64-apple-darwin x86_64-apple-darwin; do
+            rm -rf out && mkdir -p out/poo
+            cp "dist/cli/poo-$t" out/poo/poo
+            cp README.md LICENSE out/poo/
+            tar -C out -czf "dist/poo-$t.tar.gz" poo
+          done
+      - name: appcast
+        if: env.SPARKLE_PRIVATE_KEY != ''
+        run: |
+          set -eu
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/Poo.app.zip"
+          scripts/sparkle.sh appcast "$VERSION" "$url" dist/Poo.app.zip > dist/appcast.xml
+          cat dist/appcast.xml
       - uses: actions/upload-artifact@v4
         with:
           name: app
-          path: dist/Poo.app.zip
+          path: |
+            dist/Poo.app.zip
+            dist/appcast.xml
+            dist/poo-*-apple-darwin.tar.gz
+          if-no-files-found: error
 
   publish:
-    needs: [cli, app]
+    needs: [version, cli, app]
     runs-on: ubuntu-24.04
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      SIGNING: ${{ needs.app.outputs.signing }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.sha }}
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
-      - name: manifest
-        env:
-          TAG: ${{ github.ref_name }}
+      - name: manifest and checksums
         run: |
           set -eu
-          version="${TAG#v}"
-          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
-          python3 scripts/release-manifest.py "$version" "$base" artifacts > artifacts/latest.json
-          cat artifacts/latest.json
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}"
+          cat > notes.md <<NOTES
+          **Poo.app** (macOS 15+, universal, CLI included): [Poo.app.zip](${base}/Poo.app.zip). ${SIGNING}.
+
+          **CLI**: \`curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/install.sh | sh\`, or a tarball below. Checksums in \`SHA256SUMS\`.
+          NOTES
+          python3 scripts/release-manifest.py "$VERSION" "$base" artifacts > artifacts/latest.json
+          (cd artifacts && sha256sum *.tar.gz Poo.app.zip latest.json $(ls appcast.xml 2>/dev/null) > SHA256SUMS)
+          cat artifacts/latest.json artifacts/SHA256SUMS
+          [ -f artifacts/appcast.xml ] || echo "::warning::no appcast.xml in this release (SPARKLE_PRIVATE_KEY missing)"
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ needs.version.outputs.version }}
+          target_commitish: ${{ needs.version.outputs.sha }}
+          name: poo ${{ needs.version.outputs.version }}
+          body_path: notes.md
+          generate_release_notes: true
+          make_latest: true
           files: |
             artifacts/*.tar.gz
             artifacts/Poo.app.zip
             artifacts/latest.json
-          generate_release_notes: true
+            artifacts/appcast.xml
+            artifacts/SHA256SUMS

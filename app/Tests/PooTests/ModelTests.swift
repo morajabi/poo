@@ -1,11 +1,20 @@
+import Sparkle
 import XCTest
 @testable import Poo
 
 final class ModelTests: XCTestCase {
-    func testVersionCompare() {
-        XCTAssertTrue(Updater.isNewer("0.2.0", than: "0.1.9"))
-        XCTAssertFalse(Updater.isNewer("0.1.0", than: "0.1.0"))
-        XCTAssertTrue(Updater.isNewer("v1.0.0", than: "0.9"))
+    /// Releases are numbered 0.1.<n> and Sparkle compares CFBundleVersion with its own
+    /// comparator, so the patch must order numerically, not as text.
+    func testSparkleOrdersReleaseVersions() {
+        let c = SUStandardVersionComparator.default
+        XCTAssertEqual(c.compareVersion("0.1.9", toVersion: "0.1.10"), .orderedAscending)
+        XCTAssertEqual(c.compareVersion("0.1.10", toVersion: "0.2.0"), .orderedAscending)
+        XCTAssertEqual(c.compareVersion("0.1.3", toVersion: "0.1.3"), .orderedSame)
+    }
+
+    /// Outside a bundled release build (tests, `swift run`) Sparkle must stay off.
+    @MainActor func testUpdaterOffWhenUnbundled() {
+        XCTAssertFalse(Updater().enabled)
     }
 
     func testDecodesCachedReport() throws {
