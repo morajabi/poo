@@ -34,4 +34,30 @@ jobs:
       - run: swift build --package-path app
       - run: swift test --package-path app
       - name: release scripts parse
-        run: bash -n scripts/build-app.sh scripts/sparkle.sh scripts/release-version.sh scripts/stamp-version.sh && sh -n install.sh
+        run: for f in scripts/*.sh; do bash -n "$f"; done && sh -n install.sh
+
+  # The release build path, ad-hoc and one arch: icon, Sparkle embedding, signing order.
+  bundle:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: newest Xcode (actool compiles the Icon Composer icon)
+        run: |
+          x="$(ls -d /Applications/Xcode_*.app | grep -v -i beta | sort -V | tail -n1)"
+          sudo xcode-select -s "$x"
+          xcodebuild -version
+      - uses: dtolnay/rust-toolchain@stable
+      - run: ./scripts/build-app.sh
+      - name: bundle is complete and launches
+        run: |
+          set -eu
+          A=dist/Poo.app
+          codesign --verify --deep --strict "$A"
+          test -f "$A/Contents/Frameworks/Sparkle.framework/Versions/B/Sparkle"
+          test -f "$A/Contents/Resources/AppIcon.icns"
+          "$A/Contents/Resources/bin/poo" --version
+          # dyld must find Sparkle; give it a few seconds, then stop it.
+          POO_NO_WATCH=1 "$A/Contents/MacOS/Poo" > launch.log 2>&1 & pid=$!
+          sleep 8
+          if ! kill -0 "$pid" 2>/dev/null; then cat launch.log; exit 1; fi
+          kill "$pid"
