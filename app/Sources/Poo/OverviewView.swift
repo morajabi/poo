@@ -5,6 +5,9 @@ struct OverviewView: View {
     @Environment(Store.self) private var store
     @Environment(Navigation.self) private var nav
     @AppStorage("overviewItems") private var itemScope = "notInUse"
+    /// "grouped" (sections by what a clean costs), "ranked" (bars scaled to the biggest area)
+    /// or "classic" (part of each area's total).
+    @AppStorage("overviewAreaStyle") private var areaStyle = "grouped"
 
     struct Area: Identifiable {
         var bucket: BucketSummary
@@ -35,7 +38,7 @@ struct OverviewView: View {
         .navigationTitle("Overview")
         .toolbar { ToolbarItem { AskAgentButton(target: "overview", title: "Ask") } }
         .task { await store.loadHistory() }
-        .navigationSubtitle(store.report.map { "Scanned \(Fmt.ago($0.scannedAt)) · \($0.items.count) items" } ?? "")
+        .navigationSubtitle(store.report.map { "\($0.items.count) items" } ?? "")
     }
 
     // MARK: Summary
@@ -137,8 +140,27 @@ struct OverviewView: View {
 
     @ViewBuilder
     private func areas(_ r: Report) -> some View {
-        let areas = Self.areas(r)
-        if !areas.isEmpty {
+        if areaStyle == "grouped" {
+            let grouped = AreaSummary.notInUse(r)
+            if !grouped.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    header("Not in use · \(Fmt.bytes(grouped.reduce(0) { $0 + $1.reclaim }))", action: "Browse all") { nav.browse(statuses: [.notInUse]) }
+                    AreaGroupedList(areas: grouped, onOpen: { a in
+                        nav.browse(bucket: a.bucket.id, group: a.group, statuses: [.notInUse])
+                    }, onReview: { nav.review(items: $0) })
+                }
+            }
+        } else if areaStyle == "ranked" {
+            let ranked = AreaSummary.notInUse(r)
+            if !ranked.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    header("Not in use, by area", action: "Browse all") { nav.browse(statuses: [.notInUse]) }
+                    AreaRankList(areas: ranked, onOpen: { a in
+                        nav.browse(bucket: a.bucket.id, group: a.group, statuses: [.notInUse])
+                    }, onMore: { nav.browse(statuses: [.notInUse]) })
+                }
+            }
+        } else if case let areas = Self.areas(r), !areas.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
                 header("Not in use, by area", action: "Browse all") { nav.browse(statuses: [.notInUse]) }
                 DenseList(areas) { a in

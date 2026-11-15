@@ -58,18 +58,24 @@ struct MainWindow: View {
             }
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
-                    if store.scanning {
-                        HStack(spacing: 6) {
-                            ProgressView().controlSize(.small)
-                            if let p = store.progress {
-                                Text("\(p.phase) · \(Fmt.bytes(p.bytes))").font(.caption).monospacedDigit()
-                            }
-                        }
-                    } else {
-                        Button { Task { await store.scan() } } label: { Label("Rescan", systemImage: "arrow.clockwise") }
-                            .keyboardShortcut("r")
-                            .help("Rescan (⌘R)")
+                    FreshnessLabel()
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize()
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        Button("Refresh") { Task { await store.scan() } }
+                        Button("Rescan Everything") { Task { await store.scan(full: true) } }
+                            .keyboardShortcut("r", modifiers: [.command, .shift])
+                    } label: {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    } primaryAction: {
+                        Task { await store.scan() }
                     }
+                    .keyboardShortcut("r")
+                    .disabled(store.scanning)
+                    .help("Refresh what changed (⌘R). Hold for Rescan Everything (⇧⌘R).")
                 }
             }
         }

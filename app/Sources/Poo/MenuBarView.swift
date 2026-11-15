@@ -9,11 +9,14 @@ struct MenuBarView: View {
     @Environment(\.openWindow) private var openWindow
     @Environment(\.openSettings) private var openSettings
     @AppStorage("menuBreakdownExpanded") private var expanded = false
+    /// "picker" (tick areas, clean once) or "buckets" (a row and a Clean button per bucket).
+    @AppStorage("menuAreaStyle") private var areaStyle = "picker"
     @State private var review: PanelReview?
 
     struct PanelReview: Identifiable {
         var bucket: String?
-        var id: String { bucket ?? "all" }
+        var areas: Set<String>?
+        var id: String { (bucket ?? "all") + (areas?.sorted().joined(separator: ",") ?? "") }
     }
 
     var body: some View {
@@ -25,8 +28,18 @@ struct MenuBarView: View {
                 .zIndex(2)
             Divider()
             if let r = store.report {
-                action(r)
-                buckets(r)
+                let areas = areaStyle == "picker" ? AreaSummary.notInUse(r) : []
+                if !areas.isEmpty, store.menuSession == nil {
+                    AreaPicker(areas: areas, disabled: store.busy,
+                               onReview: { review = PanelReview(bucket: nil, areas: $0) },
+                               onOpen: { a in
+                                   nav.browse(bucket: a.bucket.id, group: a.group, statuses: [.notInUse])
+                                   open(.browse)
+                               })
+                } else {
+                    action(r)
+                    buckets(r)
+                }
             } else if store.scanning {
                 scanningView
             } else {
@@ -50,6 +63,7 @@ struct MenuBarView: View {
                 .padding(.vertical, 8)
         }
         .frame(width: 340)
+        .onAppear { store.live?.panelOpened() }
         .task {
             await store.loadSchedules()
             await store.loadHistory()
@@ -60,7 +74,7 @@ struct MenuBarView: View {
             }
         }
         .sheet(item: $review) { rv in
-            CleanConfirmView(planID: "stale", free: nil, bucket: rv.bucket, onStart: { store.menuSession = $0 })
+            CleanConfirmView(planID: "stale", free: nil, bucket: rv.bucket, areas: rv.areas, onStart: { store.menuSession = $0 })
                 .environment(store)
         }
     }
@@ -80,20 +94,19 @@ struct MenuBarView: View {
                     Text("Poo").font(.title3.weight(.semibold))
                 }
                 Spacer(minLength: 8)
-                if store.scanning {
-                    HStack(spacing: 6) {
-                        if let p = store.progress {
-                            Text(Fmt.bytes(p.bytes)).font(.caption).monospacedDigit().foregroundStyle(.secondary)
-                        }
-                        ProgressView().controlSize(.small)
+                Button {
+                    // ⌥-click walks everything instead of only what changed.
+                    let full = NSEvent.modifierFlags.contains(.option)
+                    Task { await store.scan(full: full) }
+                } label: { Image(systemName: "arrow.clockwise") }
+                    .buttonStyle(.borderless)
+                    .keyboardShortcut("r")
+                    .disabled(store.scanning)
+                    .help("Refresh (⌘R). ⌥-click to rescan everything.")
+                    .contextMenu {
+                        Button("Refresh") { Task { await store.scan() } }
+                        Button("Rescan Everything") { Task { await store.scan(full: true) } }
                     }
-                    .help("Scanning…")
-                } else {
-                    Button { Task { await store.scan() } } label: { Image(systemName: "arrow.clockwise") }
-                        .buttonStyle(.borderless)
-                        .keyboardShortcut("r")
-                        .help("Rescan (⌘R)")
-                }
             }
             if let r = store.report {
                 let d = DiskBreakdown(report: r)
@@ -106,7 +119,7 @@ struct MenuBarView: View {
                             Text("Nothing to clean right now")
                         }
                         Text("·").foregroundStyle(.tertiary)
-                        Text("scanned \(Fmt.ago(r.scannedAt))").foregroundStyle(.tertiary)
+                        FreshnessLabel(prefix: "updated").foregroundStyle(.tertiary)
                         Spacer(minLength: 4)
                         Image(systemName: "chevron.right")
                             .font(.caption2.weight(.semibold))

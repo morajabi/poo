@@ -10,6 +10,8 @@ struct CleanConfirmView: View {
     var items: [Item]? = nil
     /// Limits a plan to one bucket (menu bar "Clean" on a bucket row).
     var bucket: String? = nil
+    /// Limits a plan to these areas (bucket/group keys), from the menu bar picker.
+    var areas: Set<String>? = nil
     /// When set, the caller shows the progress (menu bar panel) and the sheet closes on start.
     var onStart: ((CleanSession) -> Void)? = nil
     @State private var plan: PlanResult?
@@ -19,12 +21,25 @@ struct CleanConfirmView: View {
     @State private var session: CleanSession?
     var onShowBackups: (() -> Void)? = nil
 
-    private var list: [Item] { items ?? plan?.items ?? [] }
+    private var list: [Item] {
+        let all = items ?? plan?.items ?? []
+        guard let areas else { return all }
+        return all.filter { areas.contains(AreaSummary.key($0)) }
+    }
     private var needed: CleanMode { CleanMode.needed(for: list) }
     private var allowed: [Item] {
         list.filter { i in (i.risks ?? []).allSatisfy { r in (r.mode ?? .safe).rank <= mode.rank } }
     }
     private var total: UInt64 { allowed.reduce(0) { $0 + $1.total_bytes } }
+
+    private var title: String {
+        if let areas {
+            let names = Set((plan?.items ?? []).filter { areas.contains(AreaSummary.key($0)) }.map(\.group)).sorted()
+            let what = names.count == 1 ? names[0] : names.count == 2 ? "\(names[0]) and \(names[1])" : "\(areas.count) areas"
+            return "\(plan?.name ?? "Not in use") · \(what)"
+        }
+        return bucket.flatMap { b in store.report?.buckets.first { $0.id == b }?.name }.map { "\(plan?.name ?? "Not in use") · \($0)" } ?? plan?.name ?? "Clean selected items"
+    }
 
     var body: some View {
         if let session {
@@ -37,7 +52,7 @@ struct CleanConfirmView: View {
 
     private var review: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(bucket.flatMap { b in store.report?.buckets.first { $0.id == b }?.name }.map { "\(plan?.name ?? "Not in use") · \($0)" } ?? plan?.name ?? "Clean selected items").font(.title3.weight(.semibold))
+            Text(title).font(.title3.weight(.semibold))
             if let d = plan?.description { Text(d).foregroundStyle(.secondary) }
             if loading && items == nil {
                 ProgressView().frame(maxWidth: .infinity, minHeight: 200)

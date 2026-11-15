@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Observation
+import SwiftUI
 
 @MainActor
 @Observable
@@ -37,14 +38,91 @@ final class Store {
     /// Item ids the user ticked in the window.
     var selection: Set<String> = []
 
+    // MARK: Live sync state
+    /// `poo watch` is running and watching the dev roots.
+    var watching = false
+    /// `poo watch` saw changes and is scanning them.
+    var pendingChanges = false
+    /// The last `poo watch` error, shown quietly.
+    var watchNote: String?
+    /// Areas left out of the menu bar panel's clean (bucket/group keys).
+    var menuExcludedAreas: Set<String> = []
+    @ObservationIgnored private(set) var live: LiveSync?
+    /// Identifies the report on screen, so reloading the same file is a no-op.
+    @ObservationIgnored private var reportKey: String?
+
+    /// A scan or a watched change is being picked up.
+    var refreshing: Bool { scanning || pendingChanges }
+
     init() {
         // First frame from the cached report; rescan in the background when stale.
         report = PooCLI.cachedReport()
+        reportKey = report.map(Self.key)
+        if let f = FreeSpace.read() { applyFree(f.free, total: f.total, animated: false) }
         // No scan before setup: the first scan waits for dev folders and permissions.
         if Onboarding.isDone {
             Task { await refreshIfStale() }
             diskGuard = LowDiskGuard(store: self)
             diskGuard?.start()
+            startLive()
+        }
+    }
+
+    func startLive() {
+        guard live == nil else { return }
+        live = LiveSync(store: self)
+        // After the first frame, so window/panel lookups see real windows.
+        DispatchQueue.main.async { self.live?.start() }
+    }
+
+    private static func key(_ r: Report) -> String {
+        "\(r.scanned_at)/\(r.duration_ms)/\(r.total_bytes)/\(r.items.count)"
+    }
+
+    /// Shows a newer report without blanking: numbers animate from the old values.
+    private func show(_ new: Report) {
+        let k = Self.key(new)
+        guard k != reportKey else { return }
+        reportKey = k
+        var new = new
+        // Keep the live free-space reading; the report's is from scan time.
+        if let old = report, Self.sameVolume(old, new) {
+            new.disk = old.disk
+        }
+        withAnimation(.smooth(duration: 0.45)) { report = new }
+        selection = selection.filter { id in new.items.contains { $0.id == id } }
+        updateFreeSpace()
+    }
+
+    private static func sameVolume(_ a: Report, _ b: Report) -> Bool { a.disk.total == b.disk.total }
+
+    /// Reloads `report.json` after the CLI rewrote it. Decodes off the main thread.
+    func reloadCachedReport() async {
+        let url = PooCLI.reportURL
+        let r = await Task.detached(priority: .userInitiated) { () -> Report? in
+            guard let d = try? Data(contentsOf: url) else { return nil }
+            return try? JSONDecoder().decode(Report.self, from: d)
+        }.value
+        if let r { show(r) }
+    }
+
+    /// Reads free space with `statfs` (a cheap syscall) and updates the numbers if they moved.
+    func updateFreeSpace() {
+        guard let f = FreeSpace.read() else { return }
+        applyFree(f.free, total: f.total, animated: true)
+    }
+
+    private func applyFree(_ free: UInt64, total: UInt64, animated: Bool) {
+        guard var r = report, r.disk.total == total || r.disk.total == 0 else { return }
+        // Ignore wobble below what the UI shows, so views don't redraw for nothing.
+        let delta = free > r.disk.free ? free - r.disk.free : r.disk.free - free
+        guard delta >= 5_000_000 else { return }
+        r.disk.free = free
+        r.disk.used = total > free ? total - free : 0
+        if animated {
+            withAnimation(.smooth) { report = r }
+        } else {
+            report = r
         }
     }
 
@@ -60,14 +138,32 @@ final class Store {
         }
     }
 
-    func scan() async {
+    /// Incremental by default (the CLI replays FSEvents since the last scan); `full` walks everything.
+    func scan(full: Bool = false) async {
         guard !scanning else { return }
         scanning = true
         error = nil
         progress = nil
         defer { scanning = false; progress = nil }
         do {
-            let data = try await PooCLI.run(["scan", "--progress"]) { line in
+            let data: Data
+            do {
+                data = try await runScan(full ? ["scan", "--progress", "--full"] : ["scan", "--progress"])
+            } catch let f as PooCLI.Failure where full && f.kind == "usage" {
+                // A CLI from before incremental scans always walks everything.
+                data = try await runScan(["scan", "--progress"])
+            }
+            let r = try await Task.detached(priority: .userInitiated) {
+                try JSONDecoder().decode(Report.self, from: data)
+            }.value
+            show(r)
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func runScan(_ args: [String]) async throws -> Data {
+        try await PooCLI.run(args) { line in
                 guard let d = line.data(using: .utf8),
                       let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
                       obj["event"] as? String == "progress",
@@ -76,11 +172,6 @@ final class Store {
                       let prog = try? JSONDecoder().decode(ScanProgress.self, from: pd) else { return }
                 Task { @MainActor in self.progress = prog }
             }
-            report = try JSONDecoder().decode(Report.self, from: data)
-            selection = selection.filter { id in report?.items.contains { $0.id == id } ?? false }
-        } catch {
-            self.error = error.localizedDescription
-        }
     }
 
     func items(in bucket: String) -> [Item] {
@@ -137,7 +228,7 @@ final class Store {
             }
             busy = false
             if !dryRun {
-                report = PooCLI.cachedReport() ?? report
+                await reloadCachedReport()
                 selection.subtract(items.map(\.id))
                 await loadHistory()
                 await scan()
@@ -176,8 +267,10 @@ final class Store {
             self.error = error.localizedDescription
         }
         // The CLI already removed cleaned items from the cached report.
-        report = PooCLI.cachedReport() ?? report
+        await reloadCachedReport()
         selection.removeAll()
+        updateFreeSpace()
+        await scan()
     }
 
     /// Below the low-disk guard's threshold, or under 10% free.
@@ -254,6 +347,7 @@ final class Store {
         guard diskGuard == nil else { return }
         diskGuard = LowDiskGuard(store: self)
         diskGuard?.start()
+        startLive()
     }
 
     // MARK: Ask your agent

@@ -69,7 +69,7 @@ final class LowDiskGuard {
             return
         }
         await store.loadSchedules()
-        store.report = PooCLI.cachedReport() ?? store.report
+        await store.reloadCachedReport()
         await store.loadHistory()
         await store.scan()
         let freedBytes = store.schedules.first { $0.id == "guard" }?.last_run?.freed_bytes ?? 0
