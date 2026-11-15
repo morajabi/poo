@@ -32,6 +32,8 @@ struct PooApp: App {
         .defaultSize(width: 1120, height: 740)
         .commands {
             CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") { updater.checkForUpdates() }
+                    .disabled(!updater.enabled || !updater.canCheck)
                 Button("Set Up Poo…") { delegate.show("onboarding", title: "Set Up Poo") }
             }
             CommandGroup(after: .textEditing) {
