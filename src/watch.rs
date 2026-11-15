@@ -32,6 +32,14 @@ pub fn run(ctx: &mut Ctx, o: &WatchOptions) -> Result<()> {
     let w = watched.clone();
     std::thread::spawn(move || crate::fsevents::watch(&w, 0.5, tx));
     let parent = unsafe { libc::getppid() };
+    // Started with a pipe on stdin (the app): leave when it closes, even if the app crashed.
+    let mut st: libc::stat = unsafe { std::mem::zeroed() };
+    if unsafe { libc::fstat(0, &mut st) } == 0 && (st.st_mode & libc::S_IFMT) == libc::S_IFIFO {
+        std::thread::spawn(|| {
+            let _ = std::io::copy(&mut std::io::stdin(), &mut std::io::sink());
+            std::process::exit(0);
+        });
+    }
     let state = crate::config::state_dir();
     let config_file = crate::config::config_dir().join("config.toml");
     let mut config_mtime = crate::fsutil::mtime(&config_file);

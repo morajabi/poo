@@ -1656,8 +1656,10 @@ pub fn scan_incremental(cfg: &Config, cat: &Catalog, opts: &ScanOptions) -> Opti
         let proj = proj_sorted.iter().find(|p| d.starts_with(p)).cloned();
         if let Some(p) = &proj {
             let in_git = d.strip_prefix(p).map_or(false, |rel| rel.components().next().map_or(false, |c| c.as_os_str() == ".git"));
+            // Edits count as activity, deletions do not: newest file here, not the folder's mtime.
+            let newest_file = read_entries(&d).iter().filter(|e| !e.is_dir && e.name != ".DS_Store").map(|e| e.mtime).max().unwrap_or(0);
             let e = touched_projects.entry(p.clone()).or_insert((0, false));
-            e.0 = e.0.max(crate::fsutil::mtime(&d).unwrap_or(0));
+            e.0 = e.0.max(newest_file);
             e.1 |= in_git;
             if in_git {
                 continue;
