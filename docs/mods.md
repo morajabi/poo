@@ -110,6 +110,31 @@ Matching extras for any kind:
 - `running_apps = ["Google Chrome"]` makes items hot while one of those processes runs.
 - `tier = "review"` forces a tier (for example archives you should look at first).
 - `recommend` is advice shown to people and agents.
+- `tags = ["needs-permission"]` marks locations macOS protects (browser profiles,
+  Safari, Mail, Messages, device backups, other apps' containers). poo only reads them
+  when it has Full Disk Access, so a scan never triggers a permission prompt or a
+  "Data Access Blocked" notice; `poo rules enable <id>` turns one on anyway.
+
+### Writing safe rules
+
+Core follows these conventions, and mods should too:
+
+- **Generic names need proof.** `build`, `dist`, `out`, `lib`, `site`, `vendor`,
+  `release`, `ios`, `android` match only with a marker in the parent (`parent_any`), a
+  telltale child (`children_any`) and `ignored = true`, so a committed folder never
+  matches.
+- **Exclude the source tree.** A rule that matches any folder by its contents (`names =
+  ["*"]`) adds `children_none` for the files only sources have: `cmake.build` refuses a
+  folder with `CMakeLists.txt` (an in-source build), `python.conda-env` refuses a whole
+  conda install.
+- **Split by permission.** If some paths of a rule are protected and others are not,
+  make two rules so the open part still works without Full Disk Access
+  (`browser.chrome-cache` and `browser.chrome-profile-caches`).
+- **Toolchains and model weights get `tier = "review"`.** Language versions, SDKs,
+  board cores and models are large, slow to fetch again and often pinned by projects.
+- **`cost = "data"` for anything a person made or cannot fetch again** (transcripts,
+  local databases, VM disks, notebooks' checkpoints). It is shown, never planned.
+- **Guard apps that hold their caches open** with `running_apps`.
 
 ### Cost and tiers
 
@@ -209,7 +234,29 @@ Override a built-in plan from config with `[plan_overrides.stale]`.
 ## Stacks
 
 `[[stack]] id = "rust" markers = ["Cargo.toml"]` tells poo what a project is built with.
-Stacks show up in `poo projects` and help agents reason about rebuild costs.
+Stacks show up in `poo projects`, help agents reason about rebuild costs, and decide
+which rule packs the app offers: a rule whose `stacks` you never use stays out of the way.
+Core ships about 96 stacks, from Rust, Swift and Node to Lean, PlatformIO and Electron;
+`poo catalog` lists them.
+
+## Launchers
+
+`[[launcher]]` entries tell "Ask your agent" how to hand a prompt to a coding agent.
+`kind = "terminal"` runs `command` in the item's folder (`{prompt}` is replaced),
+`kind = "url"` opens `url`. `detect` lists commands and `detect_app` app bundles that
+must exist for the launcher to show. Core ships Claude Code, Codex, Cursor (app and
+CLI), Gemini, OpenCode, Copilot CLI, Qwen Code, Factory Droid, Goose, Kiro CLI and the
+Claude app.
+
+```toml
+[[launcher]]
+id = "my-agent"
+name = "My agent"
+kind = "terminal"
+command = ["my-agent", "--prompt", "{prompt}"]
+detect = ["my-agent"]
+order = 200
+```
 
 ## Schedules
 

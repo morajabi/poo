@@ -152,10 +152,30 @@ everything poo knows, and the questions worth asking you.
 
 ## Mods
 
-Everything poo knows (hundreds of rules across Xcode, Swift, Rust, Node, Python, JVM,
-Go, Ruby, PHP, Elixir, Haskell, .NET, Flutter, game engines, Docker, AI agents and
-editors, browsers and macOS) is a built-in mod written in the same TOML format you can
-use. Buckets, plans, stacks, worktree homes and guards are mod data too. Add rules,
+Everything poo knows is a built-in mod written in the same TOML format you can use:
+about 635 rules, 96 project stacks and 12 agent worktree homes. It covers
+
+- **Apple:** DerivedData (also custom `-derivedDataPath` folders), simulators and
+  runtimes, device support, previews, SwiftPM, Swift SDKs, CocoaPods, Carthage, Tuist.
+- **JS:** npm, pnpm, Yarn, Bun, Deno, Next, Nuxt, SvelteKit, Astro, Vite, Turbo, Nx,
+  Expo and React Native, Electron and CDK output, Playwright, Cypress, Selenium, Prisma.
+- **Python:** pip, uv, Poetry, PDM, Hatch, pipx, conda, pixi, pyenv, tox, nox, mypy,
+  ruff, pytest, Jupyter, MkDocs and Sphinx output, Hugging Face and torch models.
+- **Systems and JVM:** Rust, Go, Zig, C/C++ (CMake, Meson, vcpkg, Conan, ccache),
+  Bazel, Buck2, Pants, Nix, Gradle, Maven, sbt, Kotlin, Android SDK and emulators.
+- **More languages:** Ruby and Rails, PHP and Laravel, Elixir, Erlang, Gleam, Haskell,
+  OCaml, Lean, D, Racket, Nim, Crystal, Julia, R, Perl, Lua, .NET, Flutter and Dart,
+  Solidity, embedded (PlatformIO, Arduino, ESP-IDF) and Emscripten.
+- **Infra:** Docker, OrbStack, Colima, Podman, Lima, UTM, Terraform, Terragrunt, Helm,
+  Pulumi and cloud CLIs.
+- **AI:** Claude Code, Codex, Cursor, Windsurf, Zed, Copilot, Gemini, OpenCode, Aider,
+  Cline and friends, Ollama, LM Studio and other local model stores.
+- **macOS:** app, browser and Electron caches, logs, crash reports, installers, app
+  leftovers and the Trash. Locations macOS protects (browser profiles, Safari, Mail,
+  device backups) are read only when poo has Full Disk Access.
+
+Generic folder names (`dist`, `build`, `out`, `vendor`, `site`) only count when git
+ignores them. Buckets, plans, stacks, worktree homes and guards are mod data too. Add rules,
 override any field, disable rules, add buckets, write providers or guards in any
 language: see [docs/mods.md](docs/mods.md) or `poo mods docs`.
 
