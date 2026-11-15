@@ -113,6 +113,11 @@ struct MenuBarView: View {
     @ViewBuilder
     private func section(_ sec: MenubarSettings.Section, _ r: Report) -> some View {
         switch sec {
+        case .health:
+            HealthLine(report: r)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 8)
+                .padding(.top, -4)
         case .disk:
             Divider()
             disk(r)
@@ -373,6 +378,47 @@ struct MenuRowStyle: ButtonStyle {
                         .fill(Color.primary.opacity(configuration.isPressed ? 0.12 : hovering ? 0.07 : 0))
                 )
                 .onHover { hovering = $0 }
+        }
+    }
+}
+
+/// One calm line under the free space: what can go safely, and how fast the disk is filling.
+struct HealthLine: View {
+    @Environment(Store.self) private var store
+    var report: Report
+
+    var body: some View {
+        // The same total the area picker offers, so the numbers agree.
+        let safe = AreaSummary.notInUse(report).reduce(0) { $0 + $1.reclaim }
+        HStack(spacing: 5) {
+            switch store.spaceLevel {
+            case .critical: Label("Very low", systemImage: "circle.fill").foregroundStyle(.red)
+            case .low: Label("Low", systemImage: "circle.fill").foregroundStyle(.orange)
+            case .ok: EmptyView()
+            }
+            if store.spaceLevel != .ok { Text("·").foregroundStyle(.tertiary) }
+            Text(safe > 0 ? "\(Fmt.bytes(safe)) safe to free" : "Nothing to clean")
+            if let g = report.growth?.day_bytes, abs(g) >= 1_000_000_000 {
+                Text("·").foregroundStyle(.tertiary)
+                Text(g > 0 ? "+\(Fmt.bytes(UInt64(g))) today" : "−\(Fmt.bytes(UInt64(-g))) today")
+                    .help(g > 0 ? "Used space grew this much in the last day" : "Used space shrank this much in the last day")
+            }
+            Spacer(minLength: 0)
+        }
+        .labelStyle(HealthDotLabel())
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .monospacedDigit()
+        .lineLimit(1)
+    }
+}
+
+/// A small dot before a short status word.
+private struct HealthDotLabel: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 4) {
+            configuration.icon.font(.system(size: 6))
+            configuration.title
         }
     }
 }

@@ -93,6 +93,15 @@ final class Store {
         }
     }
 
+    enum SpaceLevel { case ok, low, critical }
+
+    /// Low below the menu bar threshold; critical below half of it. Never tinted when warnings are off.
+    var spaceLevel: SpaceLevel {
+        guard menubar.warn, let d = report?.disk, let t = menubar.threshold(total: d.total) else { return .ok }
+        if d.free < t / 2 { return .critical }
+        return d.free < t ? .low : .ok
+    }
+
     /// Free space is below the menu bar's warning threshold.
     var menubarWarns: Bool {
         guard menubar.warn, let d = report?.disk, let t = menubar.threshold(total: d.total) else { return false }
@@ -136,6 +145,21 @@ final class Store {
             return try? JSONDecoder().decode(Report.self, from: d)
         }.value
         if let r { show(r) }
+    }
+
+    /// Space macOS can reclaim on its own (purgeable caches, local snapshots): what it offers
+    /// "for important use" beyond what `statfs` counts as free.
+    var purgeable: UInt64 = 0
+
+    func loadPurgeable() async {
+        let p = await Task.detached(priority: .utility) { () -> UInt64 in
+            guard let f = FreeSpace.read(),
+                  let v = try? URL(fileURLWithPath: NSHomeDirectory()).resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]),
+                  let important = v.volumeAvailableCapacityForImportantUsage, important > 0 else { return 0 }
+            let i = UInt64(important)
+            return i > f.free ? i - f.free : 0
+        }.value
+        if p != purgeable { purgeable = p }
     }
 
     /// Reads free space with `statfs` (a cheap syscall) and updates the numbers if they moved.

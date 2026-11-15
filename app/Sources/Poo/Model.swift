@@ -216,20 +216,53 @@ struct Item: Codable, Hashable, Identifiable {
     var children: [Child]?
     /// What poo does before or while cleaning this item (backups, stashes, Trash).
     var safeguards: [String]?
+    /// Bytes a clean actually returns (APFS private size); clones and hard links share the rest.
+    var frees: UInt64?
+    /// Shown for awareness only (iOS backups, snapshots, Messages): poo never cleans it.
+    var report_only: Bool?
+    /// Where the owner manages it, e.g. an x-apple.systempreferences: URL.
+    var manage_url: String?
 
     var status: ItemStatus { tier.status }
-    var isCleanable: Bool { action.kind != "none" }
+    /// Report-only items are never cleanable, whatever action a CLI attaches.
+    var isCleanable: Bool { action.kind != "none" && report_only != true }
     var isVirtual: Bool { path.contains("://") }
     var lastUsedDate: Date? { last_used.map { Date(timeIntervalSince1970: TimeInterval($0)) } }
     var isWorktree: Bool { action.kind == "worktree-remove" }
+    var isReportOnly: Bool { report_only == true }
+    /// What cleaning gives back: the APFS private size when the CLI knows it.
+    var freeable: UInt64 { frees ?? bytes }
+    /// "frees 3.1 GB" is worth showing when sharing makes it differ by 10% and 50 MB.
+    var freesDiffers: Bool {
+        guard let f = frees else { return false }
+        let d = f > total_bytes ? f - total_bytes : total_bytes - f
+        return d >= 50_000_000 && Double(d) >= Double(total_bytes) * 0.1
+    }
+
+    /// How a clean comes back, the top question about cleaners: answered from cost, tier and rebuild.
+    var comesBack: String {
+        if isReportOnly { return "Managed by its app" }
+        if isWorktree { return "Branch and commits stay" }
+        if group.localizedCaseInsensitiveContains("device support") { return "Until you reconnect a device" }
+        switch cost {
+        case "none": return "Nothing to rebuild"
+        case "data": return "Holds data, can't come back"
+        case "redownload":
+            if bucket == "deps" { return "Until the next install" }
+            // Caches you use regrow on their own; cold ones wait until you need them.
+            return tier == .warm || tier == .hot || tier == .idle ? "Regrows within days" : "Until you need it again"
+        default:
+            return tier == .junk ? "Nothing to rebuild" : "Until you rebuild"
+        }
+    }
 
     /// The most useful one-liner for a row. The age has its own column, so a reason that only
     /// says "last used 3h ago" gives way to what cleaning costs ("Rebuild: cargo build").
     var why: String {
         let r = reasons.first { !$0.hasPrefix("last used") && !$0.hasPrefix("used in the last") }
         if let r { return r }
-        if let rebuild { return "Rebuild: \(rebuild)" }
-        return Fmt.tilde(path)
+        if let rebuild { return "\(comesBack) · \(rebuild)" }
+        return comesBack
     }
 }
 
@@ -268,6 +301,10 @@ struct Report: Codable {
     var warnings: [String]
     var detected: [String]?
     var rule_hits: [String: [UInt64]]?
+    /// How much more the disk holds than before (C18), when the CLI tracks it.
+    var growth: Growth?
+    /// Local Time Machine snapshots (C3), when the CLI reports them.
+    var snapshots: Snapshots?
 
     var scannedAt: Date { Date(timeIntervalSince1970: TimeInterval(scanned_at)) }
     var visibleBuckets: [BucketSummary] { buckets.filter { !$0.hidden && $0.count > 0 } }
@@ -275,6 +312,18 @@ struct Report: Codable {
     var notInUseBytes: UInt64 { visibleBuckets.reduce(0) { $0 + $1.notInUseBytes } }
     func bytes(for status: ItemStatus) -> UInt64 { visibleBuckets.reduce(0) { $0 + $1.bytes(for: status) } }
     func plan(_ id: String) -> PlanSummary? { plans.first { $0.id == id } }
+}
+
+struct Growth: Codable, Hashable {
+    /// Change in used bytes over the last day and week (negative after cleanups).
+    var day_bytes: Int64?
+    var week_bytes: Int64?
+}
+
+struct Snapshots: Codable, Hashable {
+    var count: Int
+    var bytes: UInt64?
+    var names: [String]?
 }
 
 struct ScanProgress: Codable {

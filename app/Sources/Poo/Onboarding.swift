@@ -188,11 +188,34 @@ struct OnboardingView: View {
         }
     }
 
+    @ViewBuilder
+    private var firstLook: some View {
+        HStack(spacing: 10) {
+            if let r = store.report, !store.scanning {
+                let safe = r.plan("stale")?.bytes ?? r.notInUseBytes
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.title3)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(safe > 0 ? "\(Fmt.bytes(safe)) you can free safely" : "Nothing needs cleaning yet")
+                        .font(.callout.weight(.medium))
+                    Text("Found in \(r.projects.count) projects and your tool caches, without Full Disk Access.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            } else {
+                ProgressView().controlSize(.small)
+                Text("Taking a first look at your dev folders…").font(.callout).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .card()
+    }
+
     private var permissions: some View {
         VStack(alignment: .leading, spacing: 14) {
+            firstLook
             permissionRow(
-                title: "Full Disk Access",
-                detail: "Lets Poo include browser, Mail, Messages and app-container caches without macOS blocking or prompting. Without it Poo skips those folders.",
+                title: "Full Disk Access (optional)",
+                detail: "Also covers caches inside Safari, Mail, Messages and other apps' containers.",
                 granted: fullDiskAccess,
                 button: "Open Privacy Settings"
             ) {
@@ -334,7 +357,12 @@ struct OnboardingView: View {
     private func load() async {
         switch step {
         case .folders: store.roots = try? await PooCLI.json(RootsInfo.self, ["roots"])
-        case .permissions: await checkPermissions()
+        case .permissions:
+            // Show value before asking: take a first look with what Poo can read already.
+            if !store.scanning, (store.report.map { Date().timeIntervalSince($0.scannedAt) > 3600 } ?? true) {
+                Task { await store.scan() }
+            }
+            await checkPermissions()
         case .routines: await store.loadSchedules()
         case .agents:
             store.integrations = (try? await PooCLI.json(IntegrationStatus.self, ["integration", "status"]))?.targets ?? []

@@ -100,6 +100,10 @@ struct ItemInspector: View {
                 Divider()
                 Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 4) {
                     row("Size", Fmt.bytes(item.total_bytes) + (item.total_bytes > item.bytes ? " (incl. nested)" : ""))
+                    if item.freesDiffers, let f = item.frees {
+                        row("Frees", Fmt.bytes(f) + " (the rest is shared with clones or hard links)")
+                    }
+                    row("Comes back", item.comesBack)
                     row("Files", item.files.formatted())
                     row("Used", Fmt.ago(item.lastUsedDate))
                     row("Cost", item.cost)

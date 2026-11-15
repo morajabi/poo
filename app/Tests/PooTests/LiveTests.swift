@@ -137,3 +137,32 @@ final class MenubarTests: XCTestCase {
         XCTAssertEqual(m.threshold(total: 1_000), 20_000_000_000)
     }
 }
+
+final class ItemTruthTests: XCTestCase {
+    private func item(_ extra: String, cost: String = "rebuild", tier: String = "cold", bucket: String = "build", kind: String = "delete") throws -> Item {
+        let json = """
+        {"id":"x","path":"/tmp/x","name":"x","rule":"r","bucket":"\(bucket)","group":"g","bytes":1000000000,
+         "total_bytes":1000000000,"files":1,"tier":"\(tier)","cost":"\(cost)","reasons":[],"action":{"kind":"\(kind)"}\(extra)}
+        """
+        return try JSONDecoder().decode(Item.self, from: Data(json.utf8))
+    }
+
+    func testComesBack() throws {
+        XCTAssertEqual(try item("").comesBack, "Until you rebuild")
+        XCTAssertEqual(try item("", cost: "redownload", tier: "warm", bucket: "caches").comesBack, "Regrows within days")
+        XCTAssertEqual(try item("", cost: "redownload", bucket: "deps").comesBack, "Until the next install")
+        XCTAssertEqual(try item("", cost: "none", tier: "junk").comesBack, "Nothing to rebuild")
+    }
+
+    func testFreesOnlyShownWhenItMatters() throws {
+        XCTAssertFalse(try item(#","frees":980000000"#).freesDiffers)
+        let shared = try item(#","frees":300000000"#)
+        XCTAssertTrue(shared.freesDiffers)
+        XCTAssertEqual(shared.freeable, 300_000_000)
+    }
+
+    func testReportOnlyIsNeverCleanable() throws {
+        XCTAssertFalse(try item(#","report_only":true"#).isCleanable)
+        XCTAssertTrue(try item("").isCleanable)
+    }
+}

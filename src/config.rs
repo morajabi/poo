@@ -180,7 +180,9 @@ pub struct MenubarConfig {
     pub warn: bool,
     /// Low-space threshold for the tint: "10%" of the disk or a size like "20G".
     pub warn_below: String,
-    /// Panel sections, top to bottom: disk (free space and bar), areas (pick and clean),
+    /// Post a calm notification when free space falls below `warn_below` (off by default).
+    pub notify: bool,
+    /// Panel sections, top to bottom: health (what you can free, growth), disk (bar), areas (pick and clean),
     /// buckets (one row and Clean button per bucket), freed (this week), schedules.
     pub sections: Vec<String>,
     /// How the areas are ordered: size (biggest first), bucket (bucket order) or name.
@@ -195,7 +197,8 @@ impl Default for MenubarConfig {
             title: "icon+free".into(),
             warn: true,
             warn_below: "10%".into(),
-            sections: ["disk", "areas", "freed", "schedules"].map(String::from).to_vec(),
+            notify: false,
+            sections: ["health", "disk", "areas", "freed", "schedules"].map(String::from).to_vec(),
             area_order: "size".into(),
             max_areas: 6,
         }
@@ -310,7 +313,8 @@ pub const KEYS: &[(&str, &str)] = &[
     ("schedule", "Routine cleanups; manage with `poo schedule` (presets nightly, quick, guard, weekly)."),
     ("menubar.title", "What the menu bar shows: icon | free | not_in_use | percent_free, or a mix joined with + (default icon+free)."),
     ("menubar.warn / menubar.warn_below", "Tint the menu bar number when free space is below this, \"10%\" or \"20G\" (default on, 10%)."),
-    ("menubar.sections", "Panel sections in order: disk, areas, buckets, freed, schedules (default [disk, areas, freed, schedules])."),
+    ("menubar.notify", "Notify once when free space falls below menubar.warn_below (default off)."),
+    ("menubar.sections", "Panel sections in order: health, disk, areas, buckets, freed, schedules (default [health, disk, areas, freed, schedules])."),
     ("menubar.area_order / menubar.max_areas", "Areas in the panel by size | bucket | name, and how many before the rest fold (default size, 6)."),
     ("updates.check", "Check for new versions once a day (default on)."),
 ];

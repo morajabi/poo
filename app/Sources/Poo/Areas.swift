@@ -51,7 +51,7 @@ struct AreaSummary: Identifiable, Hashable {
         var unused: [String: [Item]] = [:]
         var buckets: [String: BucketSummary] = [:]
         for i in r.items {
-            guard let b = visible[i.bucket] else { continue }
+            guard let b = visible[i.bucket], !i.isReportOnly else { continue }
             let k = key(i)
             buckets[k] = b
             totals[k, default: 0] += i.bytes
@@ -59,7 +59,7 @@ struct AreaSummary: Identifiable, Hashable {
         }
         return unused.compactMap { k, items -> AreaSummary? in
             guard let b = buckets[k], let first = items.first else { return nil }
-            let reclaim = items.reduce(0) { $0 + $1.bytes }
+            let reclaim = items.reduce(0) { $0 + $1.freeable }
             guard reclaim > 0 else { return nil }
             return AreaSummary(bucket: b, group: first.group, reclaim: reclaim, total: totals[k] ?? reclaim,
                                count: items.count, note: note(for: items),

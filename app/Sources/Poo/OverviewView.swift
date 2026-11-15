@@ -26,6 +26,7 @@ struct OverviewView: View {
                         .zIndex(1)
                     areas(r)
                     topItems(r)
+                    ElsewhereCard(report: r)
                     footnotes(r)
                 }
                 .padding(.horizontal, 20)
@@ -37,7 +38,10 @@ struct OverviewView: View {
         }
         .navigationTitle("Overview")
         .toolbar { ToolbarItem { AskAgentButton(target: "overview", title: "Ask") } }
-        .task { await store.loadHistory() }
+        .task {
+            await store.loadHistory()
+            await store.loadPurgeable()
+        }
         .freshSubtitle(store.report.map { "\($0.items.count) items" } ?? "")
     }
 
@@ -181,7 +185,7 @@ struct OverviewView: View {
 
     @ViewBuilder
     private func topItems(_ r: Report) -> some View {
-        let pool = itemScope == "all" ? r.items : r.items.filter { $0.status == .notInUse }
+        let pool = (itemScope == "all" ? r.items : r.items.filter { $0.status == .notInUse }).filter { !$0.isReportOnly }
         let items = pool.sorted { $0.total_bytes > $1.total_bytes }.prefix(12).map { $0 }
         VStack(alignment: .leading, spacing: 6) {
             HStack {
@@ -331,8 +335,7 @@ struct DenseItemRow: View {
             Text(Fmt.ago(item.lastUsedDate))
                 .foregroundStyle(.secondary)
                 .frame(width: 64, alignment: .trailing)
-            Text(Fmt.bytes(item.total_bytes))
-                .monospacedDigit()
+            SizeLabel(item: item)
                 .frame(width: 72, alignment: .trailing)
         }
         .font(.callout)
@@ -358,5 +361,73 @@ struct ItemContextMenu: View {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(item.path, forType: .string)
         }
+    }
+}
+
+/// "Elsewhere on this Mac": space Poo explains but leaves to its owner (C15, U6).
+/// Shown only when there is something to say.
+struct ElsewhereCard: View {
+    @Environment(Store.self) private var store
+    var report: Report
+
+    var body: some View {
+        let items = report.items.filter(\.isReportOnly).sorted { $0.total_bytes > $1.total_bytes }
+        let snaps = report.snapshots.flatMap { $0.count > 0 ? $0 : nil }
+        let purgeable = store.purgeable >= 1_000_000_000 ? store.purgeable : 0
+        if !items.isEmpty || snaps != nil || purgeable > 0 {
+            VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Elsewhere on this Mac").font(.headline)
+                    Text("Not Poo's to clean. Shown so the numbers add up.").font(.caption).foregroundStyle(.secondary)
+                }
+                VStack(spacing: 0) {
+                    if purgeable > 0 {
+                        row(symbol: "arrow.3.trianglepath", title: "Purgeable",
+                            detail: "macOS frees this on its own when it needs room", bytes: purgeable) { EmptyView() }
+                    }
+                    if let snaps {
+                        if purgeable > 0 { Divider().padding(.leading, 34) }
+                        row(symbol: "clock.arrow.circlepath",
+                            title: "\(snaps.count) local Time Machine snapshot\(snaps.count == 1 ? "" : "s")",
+                            detail: "Kept until the next backup or until space runs low", bytes: snaps.bytes) {
+                            Button("Open Settings") { open("x-apple.systempreferences:com.apple.Time-Machine-Settings.extension") }
+                        }
+                    }
+                    ForEach(Array(items.enumerated()), id: \.element.id) { idx, i in
+                        if idx > 0 || purgeable > 0 || snaps != nil { Divider().padding(.leading, 34) }
+                        row(symbol: report.buckets.first { $0.id == i.bucket }?.symbol ?? "folder",
+                            title: i.name, detail: i.reasons.first ?? Fmt.tilde(i.path), bytes: i.total_bytes) {
+                            if let url = i.manage_url {
+                                Button("Open Settings") { open(url) }
+                            } else if !i.isVirtual {
+                                Button("Reveal") { store.reveal(i) }
+                            }
+                        }
+                    }
+                }
+                .padding(.vertical, 2)
+                .card()
+            }
+        }
+    }
+
+    private func row<B: View>(symbol: String, title: String, detail: String, bytes: UInt64?, @ViewBuilder button: () -> B) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: symbol).foregroundStyle(.secondary).frame(width: 18)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).lineLimit(1)
+                Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+            }
+            Spacer(minLength: 8)
+            if let bytes { Text(Fmt.bytes(bytes)).monospacedDigit().foregroundStyle(.secondary) }
+            button().controlSize(.small)
+        }
+        .font(.callout)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+    }
+
+    private func open(_ s: String) {
+        if let u = URL(string: s) { NSWorkspace.shared.open(u) }
     }
 }

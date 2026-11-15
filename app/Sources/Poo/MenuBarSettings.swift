@@ -46,6 +46,10 @@ struct MenuBarSettingsView: View {
                     }
                 }
                 .disabled(!cfg.warn)
+                Toggle("Notify me when space runs low", isOn: Binding(
+                    get: { cfg.notify },
+                    set: { on in Task { await store.setMenubar("notify", on ? "true" : "false") { $0.notify = on } } }
+                ))
             }
             Section {
                 List {
