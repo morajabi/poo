@@ -116,6 +116,12 @@ enum Cmd {
         /// Stream progress as JSON lines on stderr.
         #[arg(long)]
         progress: bool,
+        /// With --plan: only these buckets (repeatable).
+        #[arg(long)]
+        bucket: Vec<String>,
+        /// With --plan: only items with these tags (repeatable).
+        #[arg(long)]
+        tag: Vec<String>,
     },
     /// Free a target amount with the least regret (emergency plan).
     Free {
@@ -815,14 +821,15 @@ fn real_main(cli: Cli) -> R {
                 render::plan(&p);
             }
         }
-        Cmd::Clean { ids, plan, free, dry_run, yes, trash, force, danger, max_tier, progress } => {
+        Cmd::Clean { ids, plan, free, dry_run, yes, trash, force, danger, max_tier, progress, bucket, tag } => {
             let r = ops::report(&ctx, false, scan_opts(&out, false))?;
             clear_progress(&out);
             let target = free.as_ref().and_then(|s| parse_bytes(s));
             let items = if !ids.is_empty() {
                 ops::resolve_ids(&r, &ids).map_err(|e| CliError::new("not_found", 3, e.to_string()))?
             } else if let Some(p) = plan {
-                ops::make_plan(&ctx, &r, &p, target, &Filter::default()).map_err(|e| CliError::new("not_found", 3, e.to_string()))?.items
+                let f = Filter { buckets: bucket, tags: tag, ..Default::default() };
+                ops::make_plan(&ctx, &r, &p, target, &f).map_err(|e| CliError::new("not_found", 3, e.to_string()))?.items
             } else {
                 return Err(CliError::new("usage", 2, "pass item ids or --plan").hint("poo plan stale shows what --plan stale would clean"));
             };
