@@ -169,6 +169,39 @@ impl Default for BackupConfig {
     }
 }
 
+/// What the menu bar item and its panel show (Poo.app reads this and follows changes live).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct MenubarConfig {
+    /// The status item: icon, free, not_in_use, percent_free, or several joined with `+`
+    /// ("free+not_in_use"). The icon always shows when there is no text.
+    pub title: String,
+    /// Tint the free space orange when it falls below `warn_below`.
+    pub warn: bool,
+    /// Low-space threshold for the tint: "10%" of the disk or a size like "20G".
+    pub warn_below: String,
+    /// Panel sections, top to bottom: disk (free space and bar), areas (pick and clean),
+    /// buckets (one row and Clean button per bucket), freed (this week), schedules.
+    pub sections: Vec<String>,
+    /// How the areas are ordered: size (biggest first), bucket (bucket order) or name.
+    pub area_order: String,
+    /// Most areas listed before the rest fold into one row.
+    pub max_areas: u32,
+}
+
+impl Default for MenubarConfig {
+    fn default() -> Self {
+        Self {
+            title: "icon+free".into(),
+            warn: true,
+            warn_below: "10%".into(),
+            sections: ["disk", "areas", "freed", "schedules"].map(String::from).to_vec(),
+            area_order: "size".into(),
+            max_areas: 6,
+        }
+    }
+}
+
 /// What happens when a coding agent finishes in a worktree (only once `poo hooks install` ran).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default)]
@@ -244,6 +277,7 @@ pub struct Config {
     pub setup: SetupState,
     pub backup: BackupConfig,
     pub hooks: HooksConfig,
+    pub menubar: MenubarConfig,
     pub schedule: Vec<Schedule>,
 }
 
@@ -274,6 +308,10 @@ pub const KEYS: &[(&str, &str)] = &[
     ("hooks.remove_landed_worktrees", "Also remove a landed, clean worktree from the hook (default off)."),
     ("hooks.notify", "Show a notification after a hook cleans something (default on)."),
     ("schedule", "Routine cleanups; manage with `poo schedule` (presets nightly, quick, guard, weekly)."),
+    ("menubar.title", "What the menu bar shows: icon | free | not_in_use | percent_free, or a mix joined with + (default icon+free)."),
+    ("menubar.warn / menubar.warn_below", "Tint the menu bar number when free space is below this, \"10%\" or \"20G\" (default on, 10%)."),
+    ("menubar.sections", "Panel sections in order: disk, areas, buckets, freed, schedules (default [disk, areas, freed, schedules])."),
+    ("menubar.area_order / menubar.max_areas", "Areas in the panel by size | bucket | name, and how many before the rest fold (default size, 6)."),
     ("updates.check", "Check for new versions once a day (default on)."),
 ];
 
