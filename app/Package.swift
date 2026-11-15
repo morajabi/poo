@@ -1,9 +1,9 @@
-// swift-tools-version:5.10
+// swift-tools-version:6.0
 import PackageDescription
 
 let package = Package(
     name: "Poo",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v15)],
     targets: [
         .executableTarget(
             name: "Poo",
@@ -15,5 +15,6 @@ let package = Package(
             dependencies: ["Poo"],
             path: "Tests/PooTests"
         ),
-    ]
+    ],
+    swiftLanguageModes: [.v5]
 )

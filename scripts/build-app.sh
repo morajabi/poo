@@ -32,10 +32,22 @@ lipo -create "${bins[@]}" -output "$OUT/poo"
 chmod +x "$OUT/poo"
 
 echo "==> Poo.app"
-arch_flags=()
-for a in $ARCHS; do arch_flags+=(--arch "$a"); done
-swift build -c release --package-path "$ROOT/app" "${arch_flags[@]}"
-BIN_DIR="$(swift build -c release --package-path "$ROOT/app" "${arch_flags[@]}" --show-bin-path)"
+# The native build system on purpose: SwiftPM's default engine stamps the binary with the
+# deployment target as its SDK version, and macOS then draws the app with legacy window
+# chrome (old traffic lights, corner radius, toolbars). One build per arch, then lipo.
+app_bins=()
+for a in $ARCHS; do
+  swift build -c release --build-system native --package-path "$ROOT/app" --arch "$a"
+  app_bins+=("$(swift build -c release --build-system native --package-path "$ROOT/app" --arch "$a" --show-bin-path)/Poo")
+done
+BIN_DIR="$OUT/app-bin"
+mkdir -p "$BIN_DIR"
+lipo -create "${app_bins[@]}" -output "$BIN_DIR/Poo"
+sdk="$(vtool -show-build "$BIN_DIR/Poo" | awk '/ sdk /{print $2; exit}')"
+if [ "${sdk%%.*}" -lt 26 ]; then
+  echo "error: Poo was linked against SDK $sdk; macOS would show legacy UI. Build with Xcode 26 or later." >&2
+  exit 1
+fi
 
 APP="$OUT/Poo.app"
 rm -rf "$APP"
@@ -57,7 +69,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleVersion</key><string>$VERSION</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundleIconName</key><string>AppIcon</string>
-  <key>LSMinimumSystemVersion</key><string>14.0</string>
+  <key>LSMinimumSystemVersion</key><string>15.0</string>
   <key>LSUIElement</key><true/>
   <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
   <key>NSHumanReadableCopyright</key><string>MIT License</string>
