@@ -27,7 +27,7 @@ struct MainWindow: View {
                     }
                 }
             }
-            .navigationSplitViewColumnWidth(min: 220, ideal: 250)
+            .navigationSplitViewColumnWidth(min: 240, ideal: 270)
         } detail: {
             Group {
                 switch nav.section ?? .overview {
@@ -67,26 +67,7 @@ struct MainWindow: View {
                 await store.loadLaunchers()
             }
             .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    FreshnessLabel()
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize()
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    Menu {
-                        Button("Refresh") { Task { await store.scan() } }
-                        Button("Rescan Everything") { Task { await store.scan(full: true) } }
-                            .keyboardShortcut("r", modifiers: [.command, .shift])
-                    } label: {
-                        Label("Refresh", systemImage: "arrow.clockwise")
-                    } primaryAction: {
-                        Task { await store.scan() }
-                    }
-                    .keyboardShortcut("r")
-                    .disabled(store.scanning)
-                    .help("Refresh what changed (⌘R). Hold for Rescan Everything (⇧⌘R).")
-                }
+                ToolbarItem(placement: .primaryAction) { RefreshToolbarButton() }
             }
         }
     }
@@ -209,7 +190,7 @@ struct ProjectsView: View {
         }
         .navigationTitle("Projects")
         .toolbar { ToolbarItem { AskAgentButton(target: "projects", title: "Ask") } }
-        .navigationSubtitle("\(projects.count) projects")
+        .freshSubtitle("\(projects.count) projects")
     }
 }
 

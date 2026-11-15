@@ -123,7 +123,7 @@ struct CleaningView: View {
                 }
                 .frame(maxHeight: 220)
                 .fixedSize(horizontal: false, vertical: true)
-                .background(.background.secondary, in: RoundedRectangle(cornerRadius: 8))
+                .card()
             }
             HStack {
                 if !notes.isEmpty, let onShowBackups {

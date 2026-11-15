@@ -195,7 +195,7 @@ struct AreaGroupedList: View {
                             AreaListRow(area: a, share: Double(a.reclaim) / Double(all)) { onOpen(a) }
                         }
                     }
-                    .background(.background.secondary, in: RoundedRectangle(cornerRadius: 8))
+                    .card()
                 }
             }
         }
@@ -304,7 +304,7 @@ struct AreaRankList: View {
             }
         }
         .padding(.vertical, 2)
-        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 8))
+        .card()
     }
 }
 

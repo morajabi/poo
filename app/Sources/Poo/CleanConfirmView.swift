@@ -179,7 +179,7 @@ struct WhatHappensView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 8))
+        .card()
     }
 }
 

@@ -429,8 +429,7 @@ struct AppTile: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
-        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 7))
-        .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(.separator))
+        .card()
         .draggable(url)
         .help("Drag into System Settings › Privacy & Security › Full Disk Access")
     }

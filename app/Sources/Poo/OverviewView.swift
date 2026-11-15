@@ -38,7 +38,7 @@ struct OverviewView: View {
         .navigationTitle("Overview")
         .toolbar { ToolbarItem { AskAgentButton(target: "overview", title: "Ask") } }
         .task { await store.loadHistory() }
-        .navigationSubtitle(store.report.map { "\($0.items.count) items" } ?? "")
+        .freshSubtitle(store.report.map { "\($0.items.count) items" } ?? "")
     }
 
     // MARK: Summary
@@ -77,7 +77,7 @@ struct OverviewView: View {
             }
         }
         .padding(12)
-        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 8))
+        .card()
     }
 
     private func legend(_ s: DiskBreakdown.Segment) -> some View {
@@ -270,7 +270,7 @@ struct DenseList<Data: RandomAccessCollection, Row: View>: View where Data.Eleme
             }
         }
         .padding(.vertical, 2)
-        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 8))
+        .card()
     }
 }
 
