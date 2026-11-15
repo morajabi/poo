@@ -1,0 +1,321 @@
+# Coding agents, AI editors and local models.
+
+[[rule]]
+id = "claude.cli-versions"
+name = "Old Claude Code versions"
+bucket = "ai"
+group = "Agent CLIs"
+kind = "provider"
+provider = "versions"
+params.path = "~/.local/share/claude/versions"
+params.active = ["~/.local/bin/claude"]
+params.keep = 1
+cost = "none"
+action = "delete"
+description = "Claude Code keeps every downloaded version. poo keeps the one ~/.local/bin/claude points to and the newest other one."
+
+[[rule]]
+id = "cursor.agent-versions"
+name = "Old Cursor Agent versions"
+bucket = "ai"
+group = "Agent CLIs"
+kind = "provider"
+provider = "versions"
+params.path = "~/.local/share/cursor-agent/versions"
+params.active = ["~/.local/bin/cursor-agent"]
+params.keep = 1
+cost = "none"
+action = "delete"
+description = "Superseded cursor-agent builds."
+
+[[rule]]
+id = "copilot.cli-versions"
+name = "Old Copilot CLI versions"
+bucket = "ai"
+group = "Agent CLIs"
+kind = "provider"
+provider = "versions"
+params.path = "~/.copilot/pkg/universal"
+params.active = ["~/.local/bin/copilot"]
+params.keep = 1
+cost = "none"
+action = "delete"
+description = "Superseded GitHub Copilot CLI packages."
+
+[[rule]]
+id = "claude.desktop-code-versions"
+name = "Claude app's bundled Claude Code"
+bucket = "ai"
+group = "Agent CLIs"
+kind = "provider"
+provider = "versions"
+params.path = "~/Library/Application Support/Claude/claude-code"
+params.keep = 2
+cost = "none"
+action = "delete"
+running_apps = ["Claude"]
+description = "Older Claude Code builds the Claude desktop app downloaded."
+
+[[rule]]
+id = "codex.daemon-releases"
+name = "Old Codex app-server releases"
+bucket = "ai"
+group = "Agent CLIs"
+kind = "provider"
+provider = "versions"
+params.path = "~/.codex/packages/app-server-daemon/releases"
+params.active = ["~/.codex/packages/app-server-daemon/current"]
+params.keep = 1
+cost = "none"
+action = "delete"
+running_apps = ["Codex", "codex"]
+description = "Superseded Codex app-server daemon releases."
+
+[[rule]]
+id = "claude.transcripts"
+name = "Claude Code transcripts"
+bucket = "ai"
+group = "Agent history"
+kind = "path"
+paths = ["~/.claude/projects"]
+each = true
+cost = "data"
+tier = "review"
+description = "Conversation history per project. Agents use it for resume and memory. Old projects you no longer work on can go."
+
+[[rule]]
+id = "claude.file-history"
+name = "Claude Code file history"
+bucket = "ai"
+group = "Agent history"
+kind = "path"
+paths = ["~/.claude/file-history"]
+cost = "data"
+tier = "review"
+description = "Snapshots Claude Code keeps so it can rewind edits."
+
+[[rule]]
+id = "claude.scratch"
+name = "Claude Code scratch state"
+bucket = "ai"
+group = "Agent caches"
+kind = "path"
+paths = ["~/.claude/shell-snapshots", "~/.claude/debug", "~/.claude/statsig", "~/.claude/todos", "~/.claude/paste-cache"]
+cost = "none"
+contents = true
+min_age_days = 7
+description = "Shell snapshots, debug logs and todo files from old sessions."
+
+[[rule]]
+id = "codex.sessions"
+name = "Codex sessions"
+bucket = "ai"
+group = "Agent history"
+kind = "path"
+paths = ["~/.codex/sessions", "~/.codex/archived_sessions"]
+cost = "data"
+tier = "review"
+description = "Codex rollout transcripts."
+
+[[rule]]
+id = "codex.logs"
+name = "Codex logs"
+bucket = "junk"
+group = "Logs"
+kind = "path"
+paths = ["~/.codex/log"]
+cost = "none"
+contents = true
+min_age_days = 7
+description = "Codex CLI logs."
+
+[[rule]]
+id = "codex.runtimes"
+name = "Codex runtimes"
+bucket = "ai"
+group = "Agent caches"
+kind = "path"
+paths = ["~/.cache/codex-runtimes"]
+each = true
+cost = "redownload"
+running_apps = ["Codex", "codex"]
+warm_days = 14
+description = "Sandboxed runtimes Codex downloads."
+
+[[rule]]
+id = "gemini.tmp"
+name = "Gemini CLI checkpoints"
+bucket = "ai"
+group = "Agent history"
+kind = "path"
+paths = ["~/.gemini/tmp"]
+cost = "data"
+tier = "review"
+description = "Gemini CLI chat checkpoints."
+
+[[rule]]
+id = "opencode.cache"
+name = "OpenCode cache"
+bucket = "ai"
+group = "Agent caches"
+kind = "path"
+paths = ["~/.cache/opencode"]
+cost = "redownload"
+warm_days = 14
+description = "OpenCode's package and model cache."
+
+[[rule]]
+id = "agent.browsers"
+name = "Agent browser profiles"
+bucket = "ai"
+group = "Agent caches"
+kind = "path"
+paths = ["~/.cache/chrome-devtools-mcp", "~/.cache/ms-playwright-mcp", "~/.agent-browser/browsers", "~/.gemini/antigravity-browser-profile"]
+cost = "rebuild"
+warm_days = 14
+description = "Browsers and profiles that MCP servers and agents drive."
+
+[[rule]]
+id = "editor.vscode-caches"
+name = "VS Code caches"
+bucket = "ai"
+group = "Editors"
+kind = "path"
+paths = ["~/Library/Application Support/Code/Cache", "~/Library/Application Support/Code/CachedData", "~/Library/Application Support/Code/CachedExtensionVSIXs", "~/Library/Application Support/Code/Code Cache", "~/Library/Application Support/Code/GPUCache", "~/Library/Application Support/Code/CachedProfilesData", "~/Library/Application Support/Code/logs"]
+cost = "rebuild"
+running_apps = ["Code", "Electron"]
+warm_days = 7
+description = "VS Code's Chromium caches, old update payloads and logs."
+
+[[rule]]
+id = "editor.cursor-caches"
+name = "Cursor caches"
+bucket = "ai"
+group = "Editors"
+kind = "path"
+paths = ["~/Library/Application Support/Cursor/Cache", "~/Library/Application Support/Cursor/CachedData", "~/Library/Application Support/Cursor/CachedExtensionVSIXs", "~/Library/Application Support/Cursor/Code Cache", "~/Library/Application Support/Cursor/GPUCache", "~/Library/Application Support/Cursor/CachedProfilesData", "~/Library/Application Support/Cursor/logs"]
+cost = "rebuild"
+running_apps = ["Cursor"]
+warm_days = 7
+description = "Cursor's Chromium caches, old update payloads and logs."
+
+[[rule]]
+id = "editor.windsurf-caches"
+name = "Windsurf and other VS Code forks"
+bucket = "ai"
+group = "Editors"
+kind = "path"
+paths = ["~/Library/Application Support/Windsurf/Cache", "~/Library/Application Support/Windsurf/CachedData", "~/Library/Application Support/Windsurf/Code Cache", "~/Library/Application Support/Windsurf/logs", "~/Library/Application Support/Kiro/Cache", "~/Library/Application Support/Kiro/CachedData", "~/Library/Application Support/Trae/Cache", "~/Library/Application Support/Trae/CachedData", "~/Library/Application Support/VSCodium/Cache", "~/Library/Application Support/VSCodium/CachedData"]
+cost = "rebuild"
+running_apps = ["Windsurf", "Kiro", "Trae", "VSCodium"]
+warm_days = 7
+description = "Caches of VS Code forks."
+
+[[rule]]
+id = "editor.workspace-storage"
+name = "Editor workspace storage"
+bucket = "ai"
+group = "Editors"
+kind = "path"
+paths = ["~/Library/Application Support/Code/User/workspaceStorage", "~/Library/Application Support/Cursor/User/workspaceStorage", "~/Library/Application Support/Windsurf/User/workspaceStorage"]
+each = true
+cost = "data"
+tier = "review"
+description = "Per-workspace state, including AI chat history in Cursor. Entries for deleted projects are safe to drop."
+
+[[rule]]
+id = "editor.extensions"
+name = "Editor extensions"
+bucket = "ai"
+group = "Editors"
+kind = "path"
+paths = ["~/.vscode/extensions", "~/.cursor/extensions", "~/.windsurf/extensions", "~/.vscode-insiders/extensions"]
+each = true
+exclude = ["extensions.json", ".obsolete"]
+cost = "redownload"
+tier = "review"
+description = "Installed extensions, one per version. Old versions listed in .obsolete linger."
+
+[[rule]]
+id = "editor.zed"
+name = "Zed caches"
+bucket = "ai"
+group = "Editors"
+kind = "path"
+paths = ["~/Library/Caches/Zed", "~/Library/Logs/Zed", "~/Library/Application Support/Zed/node/cache"]
+cost = "rebuild"
+running_apps = ["zed", "Zed"]
+warm_days = 7
+description = "Zed caches and logs. Its db folder is left alone."
+
+[[rule]]
+id = "desktop.claude"
+name = "Claude app caches"
+bucket = "ai"
+group = "AI apps"
+kind = "path"
+paths = ["~/Library/Application Support/Claude/Cache", "~/Library/Application Support/Claude/Code Cache", "~/Library/Application Support/Claude/GPUCache", "~/Library/Application Support/Claude/DawnGraphiteCache", "~/Library/Application Support/Claude/DawnWebGPUCache", "~/Library/Application Support/Claude/sentry", "~/Library/Caches/com.anthropic.claudefordesktop", "~/Library/Logs/Claude"]
+cost = "rebuild"
+running_apps = ["Claude"]
+warm_days = 7
+description = "Chromium caches and logs of the Claude desktop app."
+
+[[rule]]
+id = "desktop.claude-vm"
+name = "Claude app VM bundles"
+bucket = "ai"
+group = "AI apps"
+kind = "path"
+paths = ["~/Library/Application Support/Claude/vm_bundles"]
+each = true
+cost = "redownload"
+running_apps = ["Claude"]
+warm_days = 14
+description = "Sandbox VM images the Claude app downloads for code execution."
+
+[[rule]]
+id = "desktop.ai-apps"
+name = "ChatGPT, Codex and LM Studio app caches"
+bucket = "ai"
+group = "AI apps"
+kind = "path"
+paths = ["~/Library/Caches/com.openai.chat", "~/Library/Caches/com.openai.codex", "~/Library/Caches/Codex", "~/Library/Caches/com.lmstudio.lmstudio", "~/Library/Application Support/Codex/Crashpad/completed"]
+cost = "rebuild"
+running_apps = ["ChatGPT", "Codex", "LM Studio"]
+warm_days = 7
+description = "Desktop AI app caches."
+
+[[rule]]
+id = "models.ollama"
+name = "Ollama models"
+bucket = "ai"
+group = "Model weights"
+kind = "path"
+paths = ["~/.ollama/models"]
+cost = "redownload"
+tier = "review"
+action = "none"
+description = "Pulled Ollama models. Remove specific ones with `ollama rm <model>`."
+
+[[rule]]
+id = "models.lmstudio"
+name = "LM Studio models"
+bucket = "ai"
+group = "Model weights"
+kind = "path"
+paths = ["~/.lmstudio/models", "~/.cache/lm-studio/models"]
+each = true
+cost = "redownload"
+tier = "review"
+description = "Models downloaded by LM Studio, one item per publisher."
+
+[[rule]]
+id = "models.misc"
+name = "Other local AI apps"
+bucket = "ai"
+group = "Model weights"
+kind = "path"
+paths = ["~/Library/Application Support/DiffusionBee", "~/jan/models", "~/Library/Application Support/Jan/data/models", "~/.cache/gpt4all", "~/Library/Application Support/nomic.ai/GPT4All"]
+cost = "redownload"
+tier = "review"
+description = "Model folders of DiffusionBee, Jan and GPT4All."

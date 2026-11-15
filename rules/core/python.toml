@@ -1,0 +1,201 @@
+# Python, data science and ML tooling.
+
+[[rule]]
+id = "python.venv"
+name = "Python virtualenvs"
+bucket = "deps"
+group = "Python"
+kind = "artifact"
+names = [".venv", "venv", ".virtualenv", "env", "virtualenv", ".venv-*", "venv-*"]
+children_all = ["pyvenv.cfg"]
+cost = "redownload"
+rebuild = "uv sync / pip install -r requirements.txt"
+warm_days = 30
+description = "Virtual environments (identified by pyvenv.cfg)."
+
+[[rule]]
+id = "python.conda-env"
+name = "Conda environments in projects"
+bucket = "deps"
+group = "Python"
+kind = "artifact"
+names = ["*"]
+children_all = ["conda-meta"]
+cost = "redownload"
+rebuild = "conda env create"
+warm_days = 30
+description = "Conda environments created inside a project folder."
+
+[[rule]]
+id = "python.pycache"
+name = "__pycache__"
+bucket = "build"
+group = "Python"
+kind = "artifact"
+names = ["__pycache__"]
+cost = "none"
+description = "Compiled bytecode, regenerated on import."
+
+[[rule]]
+id = "python.tool-caches"
+name = "Python tool caches"
+bucket = "build"
+group = "Python"
+kind = "artifact"
+names = [".pytest_cache", ".mypy_cache", ".ruff_cache", ".hypothesis", ".pytype", ".pyre"]
+cost = "none"
+description = "pytest, mypy, ruff and hypothesis caches."
+
+[[rule]]
+id = "python.tox"
+name = "tox and nox environments"
+bucket = "deps"
+group = "Python"
+kind = "artifact"
+names = [".tox", ".nox"]
+cost = "redownload"
+rebuild = "tox / nox"
+description = "Test environments created by tox and nox."
+
+[[rule]]
+id = "python.build"
+name = "Python build output"
+bucket = "build"
+group = "Python"
+kind = "artifact"
+names = ["build", "dist", "*.egg-info", "wheelhouse", "htmlcov"]
+parent_any = ["setup.py", "pyproject.toml", "setup.cfg"]
+ignored = true
+cost = "rebuild"
+rebuild = "python -m build"
+description = "Wheels, sdists and build folders. Only when git ignores them."
+
+[[rule]]
+id = "pip.cache"
+name = "pip cache"
+bucket = "caches"
+group = "Python"
+kind = "path"
+paths = ["~/Library/Caches/pip", "~/.cache/pip"]
+cost = "redownload"
+warm_days = 30
+description = "pip's wheel and HTTP cache."
+
+[[rule]]
+id = "uv.cache"
+name = "uv cache"
+bucket = "caches"
+group = "Python"
+kind = "path"
+paths = ["~/.cache/uv", "~/Library/Caches/uv"]
+cost = "redownload"
+action = "command"
+command = ["uv", "cache", "prune"]
+warm_days = 30
+description = "uv's package cache. `uv cache prune` drops unused entries and keeps hardlinked venvs working."
+
+[[rule]]
+id = "uv.python"
+name = "uv-managed Pythons"
+bucket = "caches"
+group = "Python versions"
+kind = "path"
+paths = ["~/.local/share/uv/python"]
+each = true
+cost = "redownload"
+tier = "review"
+description = "Python interpreters installed by uv."
+
+[[rule]]
+id = "poetry.cache"
+name = "Poetry cache"
+bucket = "caches"
+group = "Python"
+kind = "path"
+paths = ["~/Library/Caches/pypoetry/artifacts", "~/Library/Caches/pypoetry/cache"]
+cost = "redownload"
+warm_days = 30
+description = "Poetry downloads. Its virtualenvs folder is left alone: projects run from it."
+
+[[rule]]
+id = "pipenv.cache"
+name = "Pipenv and pipx caches"
+bucket = "caches"
+group = "Python"
+kind = "path"
+paths = ["~/Library/Caches/pipenv", "~/.cache/pipenv", "~/.local/pipx/.cache"]
+cost = "redownload"
+warm_days = 30
+description = "Pipenv and pipx caches."
+
+[[rule]]
+id = "conda.pkgs"
+name = "Conda package cache"
+bucket = "caches"
+group = "Python"
+kind = "path"
+paths = ["~/miniconda3/pkgs", "~/anaconda3/pkgs", "~/miniforge3/pkgs", "~/mambaforge/pkgs", "~/.conda/pkgs", "~/opt/anaconda3/pkgs", "~/opt/miniconda3/pkgs"]
+cost = "redownload"
+action = "command"
+command = ["conda", "clean", "--all", "--yes"]
+warm_days = 30
+description = "Downloaded conda packages and tarballs."
+
+[[rule]]
+id = "python.pyenv"
+name = "pyenv versions"
+bucket = "caches"
+group = "Python versions"
+kind = "path"
+paths = ["~/.pyenv/versions", "~/.asdf/installs/python", "~/.local/share/mise/installs/python"]
+each = true
+cost = "redownload"
+tier = "review"
+description = "Python versions installed by pyenv, asdf or mise."
+
+[[rule]]
+id = "precommit.cache"
+name = "pre-commit environments"
+bucket = "caches"
+group = "Python"
+kind = "path"
+paths = ["~/.cache/pre-commit"]
+cost = "redownload"
+warm_days = 30
+description = "Hook environments pre-commit builds per repo version."
+
+[[rule]]
+id = "jupyter.runtime"
+name = "Jupyter runtime files"
+bucket = "junk"
+group = "Temp"
+kind = "path"
+paths = ["~/Library/Jupyter/runtime"]
+cost = "none"
+contents = true
+min_age_days = 7
+description = "Old kernel connection files."
+
+[[rule]]
+id = "ml.huggingface"
+name = "Hugging Face cache"
+bucket = "ai"
+group = "Model weights"
+kind = "path"
+paths = ["~/.cache/huggingface/hub", "~/.cache/huggingface/datasets", "~/.cache/huggingface/xet"]
+each = true
+cost = "redownload"
+warm_days = 30
+description = "Downloaded models and datasets, one item per repo."
+recommend = "Models you have not loaded in a month are good candidates; they redownload on next use."
+
+[[rule]]
+id = "ml.torch"
+name = "PyTorch and Keras caches"
+bucket = "ai"
+group = "Model weights"
+kind = "path"
+paths = ["~/.cache/torch", "~/.keras", "~/.cache/whisper", "~/.cache/clip", "~/.cache/lm-evaluation-harness", "~/.cache/modelscope"]
+cost = "redownload"
+warm_days = 30
+description = "Hub checkpoints for torch, keras, whisper and friends."

@@ -1,0 +1,336 @@
+# Xcode, Swift, simulators and Apple platform tooling.
+
+[[rule]]
+id = "xcode.derived-data"
+name = "Xcode DerivedData"
+bucket = "xcode"
+group = "DerivedData"
+kind = "provider"
+provider = "xcode-derived-data"
+params.path = "~/Library/Developer/Xcode/DerivedData"
+params.skip = ["ModuleCache.noindex", "CompilationCache.noindex", "SDKExplicitPrecompiledModules", "SymbolCache.noindex", "SDKStatCaches.noindex", "PrecompiledHeaders"]
+cost = "rebuild"
+rebuild = "Build in Xcode or xcodebuild"
+warm_days = 14
+action = "delete"
+description = "Per-project build products, indexes and logs. Each worktree or checkout gets its own copy."
+recommend = "Orphaned entries (project folder gone) are always safe. Agents that pass -derivedDataPath create more copies inside projects; see xcode.custom-derived-data."
+
+[[rule]]
+id = "xcode.custom-derived-data"
+name = "Custom DerivedData folders"
+bucket = "xcode"
+group = "DerivedData in projects"
+kind = "artifact"
+names = ["*"]
+children_all = ["Build", "Logs"]
+children_any = ["Index.noindex", "ModuleCache.noindex", "SourcePackages", "info.plist", "SDKStatCaches.noindex"]
+cost = "rebuild"
+rebuild = "xcodebuild -derivedDataPath <path>"
+warm_days = 14
+description = "DerivedData created with -derivedDataPath inside a project or worktree (build/DerivedData, .dd, build/dd...)."
+recommend = "Ask agents to keep every -derivedDataPath under one build/ folder per worktree so cleanup is one path."
+
+[[rule]]
+id = "xcode.module-cache"
+name = "Xcode module cache"
+bucket = "xcode"
+group = "Shared compiler caches"
+kind = "path"
+paths = ["~/Library/Developer/Xcode/DerivedData/ModuleCache.noindex", "~/Library/Developer/Xcode/DerivedData/SDKExplicitPrecompiledModules", "~/Library/Developer/Xcode/DerivedData/PrecompiledHeaders"]
+cost = "rebuild"
+rebuild = "Rebuilt by the next Xcode build (first build is slower)"
+warm_days = 7
+description = "Clang and Swift module caches shared by every project."
+
+[[rule]]
+id = "xcode.compilation-cache"
+name = "Xcode compilation cache"
+bucket = "xcode"
+group = "Shared compiler caches"
+kind = "path"
+paths = ["~/Library/Developer/Xcode/DerivedData/CompilationCache.noindex"]
+cost = "rebuild"
+rebuild = "Refilled by builds with compilation caching on"
+warm_days = 7
+description = "Content-addressed compilation cache. Grows without bound when caching is enabled."
+
+[[rule]]
+id = "xcode.symbol-cache"
+name = "Xcode symbol and stat caches"
+bucket = "xcode"
+group = "Shared compiler caches"
+kind = "path"
+paths = ["~/Library/Developer/Xcode/DerivedData/SymbolCache.noindex", "~/Library/Developer/Xcode/DerivedData/SDKStatCaches.noindex"]
+cost = "rebuild"
+warm_days = 7
+description = "Small caches Xcode recreates on demand."
+
+[[rule]]
+id = "xcode.legacy-build"
+name = "Xcode build folders"
+bucket = "build"
+group = "Xcode"
+kind = "artifact"
+names = ["build"]
+parent_any = ["*.xcodeproj", "*.xcworkspace"]
+children_any = ["Debug*", "Release*", "*.build", "XCBuildData", "EagerLinkingTBDs", "SharedPrecompiledHeaders"]
+cost = "rebuild"
+rebuild = "Build in Xcode"
+description = "Old-style build/ folders next to an Xcode project."
+
+[[rule]]
+id = "swift.build"
+name = "Swift package .build"
+bucket = "build"
+group = "Swift"
+kind = "artifact"
+names = [".build"]
+parent_any = ["Package.swift"]
+cost = "rebuild"
+rebuild = "swift build / swift test"
+warm_days = 14
+description = "SwiftPM build output. Every package you `swift test` in builds its own copy of shared dependencies."
+recommend = "Large monorepos with many local packages pay this per package and per worktree."
+
+[[rule]]
+id = "swift.swiftpm-cache"
+name = "SwiftPM cache"
+bucket = "caches"
+group = "Swift"
+kind = "path"
+paths = ["~/Library/Caches/org.swift.swiftpm", "~/Library/Caches/org.swift.swift-build"]
+cost = "redownload"
+warm_days = 30
+description = "Downloaded package repositories and manifests."
+
+[[rule]]
+id = "xcode.archives"
+name = "Xcode archives"
+bucket = "xcode"
+group = "Archives"
+kind = "path"
+paths = ["~/Library/Developer/Xcode/Archives"]
+each = true
+cost = "data"
+tier = "review"
+description = "App archives with dSYMs. You need these to symbolicate crashes of shipped builds."
+recommend = "Keep archives of versions still in users' hands. Old betas and dev archives can go."
+
+[[rule]]
+id = "xcode.device-support"
+name = "Device support files"
+bucket = "xcode"
+group = "Device support"
+kind = "path"
+paths = ["~/Library/Developer/Xcode/iOS DeviceSupport", "~/Library/Developer/Xcode/watchOS DeviceSupport", "~/Library/Developer/Xcode/tvOS DeviceSupport", "~/Library/Developer/Xcode/visionOS DeviceSupport", "~/Library/Developer/Xcode/macOS DeviceSupport", "~/Library/Developer/Xcode/xrOS DeviceSupport"]
+each = true
+cost = "redownload"
+rebuild = "Copied again (slowly) when that OS version's device connects"
+warm_days = 60
+description = "Symbols copied from each device OS version you connected. Old OS versions are rarely needed."
+
+[[rule]]
+id = "xcode.device-logs"
+name = "iOS device logs"
+bucket = "junk"
+group = "Logs"
+kind = "path"
+paths = ["~/Library/Developer/Xcode/iOS Device Logs", "~/Library/Developer/Xcode/watchOS Device Logs"]
+cost = "none"
+contents = true
+description = "Device logs Xcode pulled from connected devices."
+
+[[rule]]
+id = "xcode.previews"
+name = "SwiftUI preview simulators"
+bucket = "xcode"
+group = "Previews"
+kind = "path"
+paths = ["~/Library/Developer/Xcode/UserData/Previews"]
+cost = "rebuild"
+warm_days = 14
+description = "Simulator devices and build products for SwiftUI previews."
+
+[[rule]]
+id = "xcode.playground-devices"
+name = "Playground simulators"
+bucket = "xcode"
+group = "Previews"
+kind = "path"
+paths = ["~/Library/Developer/XCPGDevices"]
+cost = "rebuild"
+warm_days = 30
+description = "Simulators created for Swift playgrounds."
+
+[[rule]]
+id = "xcode.documentation"
+name = "Xcode documentation cache"
+bucket = "xcode"
+group = "Documentation"
+kind = "path"
+paths = ["~/Library/Developer/Xcode/DocumentationCache", "~/Library/Developer/Xcode/DocumentationIndex"]
+cost = "redownload"
+warm_days = 30
+description = "Downloaded documentation and its search index."
+
+[[rule]]
+id = "xcode.app-caches"
+name = "Xcode app caches"
+bucket = "xcode"
+group = "Xcode caches"
+kind = "path"
+paths = ["~/Library/Caches/com.apple.dt.Xcode", "~/Library/Caches/com.apple.dt.xcodebuild", "~/Library/Caches/com.apple.dt.instruments", "~/Library/Caches/com.apple.dt.Xcode.sourcecontrol.Git"]
+cost = "rebuild"
+warm_days = 14
+description = "Xcode's own caches."
+
+[[rule]]
+id = "xcode.downloads"
+name = "Xcode component downloads"
+bucket = "xcode"
+group = "Xcode caches"
+kind = "path"
+paths = ["~/Library/Developer/DVTDownloads", "~/Library/Developer/Xcode/Downloads"]
+cost = "none"
+contents = true
+description = "Installers for platforms and components Xcode already installed."
+
+[[rule]]
+id = "xcode.products"
+name = "Xcode Organizer products"
+bucket = "xcode"
+group = "Archives"
+kind = "path"
+paths = ["~/Library/Developer/Xcode/Products"]
+cost = "data"
+tier = "review"
+description = "Exported products from the Organizer."
+
+[[rule]]
+id = "simulator.devices"
+name = "Simulator devices"
+bucket = "xcode"
+group = "Simulators"
+kind = "provider"
+provider = "simulator-devices"
+cost = "rebuild"
+rebuild = "Create a new simulator; app data and installs in it are lost"
+warm_days = 30
+description = "Each simulator device with its installed apps and data. Unavailable ones (runtime removed) are junk."
+recommend = "Delete simulators for runtimes you no longer target and devices never booted."
+
+[[rule]]
+id = "simulator.runtimes"
+name = "Simulator runtimes"
+bucket = "xcode"
+group = "Simulator runtimes"
+kind = "provider"
+provider = "simulator-runtimes"
+cost = "redownload"
+rebuild = "xcodebuild -downloadPlatform iOS"
+warm_days = 60
+description = "Installed simulator OS images (5-10 GB each)."
+recommend = "Keep the runtime you test on; old betas and duplicate builds can go."
+
+[[rule]]
+id = "simulator.caches"
+name = "CoreSimulator caches"
+bucket = "xcode"
+group = "Simulators"
+kind = "path"
+paths = ["~/Library/Developer/CoreSimulator/Caches"]
+cost = "rebuild"
+warm_days = 14
+description = "dyld shared caches CoreSimulator builds for each runtime."
+
+[[rule]]
+id = "simulator.logs"
+name = "Simulator logs"
+bucket = "junk"
+group = "Logs"
+kind = "path"
+paths = ["~/Library/Logs/CoreSimulator"]
+cost = "none"
+contents = true
+description = "Logs written by simulators."
+
+[[rule]]
+id = "cocoapods.pods"
+name = "CocoaPods Pods"
+bucket = "deps"
+group = "CocoaPods"
+kind = "artifact"
+names = ["Pods"]
+parent_any = ["Podfile", "Podfile.lock"]
+cost = "redownload"
+rebuild = "pod install"
+description = "Installed pods in an iOS project."
+
+[[rule]]
+id = "cocoapods.cache"
+name = "CocoaPods cache"
+bucket = "caches"
+group = "CocoaPods"
+kind = "path"
+paths = ["~/Library/Caches/CocoaPods", "~/.cocoapods/repos"]
+cost = "redownload"
+warm_days = 30
+description = "Pod downloads and spec repos."
+
+[[rule]]
+id = "carthage.checkouts"
+name = "Carthage build and checkouts"
+bucket = "deps"
+group = "Carthage"
+kind = "artifact"
+names = ["Carthage"]
+parent_any = ["Cartfile", "Cartfile.resolved"]
+children_any = ["Build", "Checkouts"]
+cost = "redownload"
+rebuild = "carthage bootstrap"
+description = "Carthage dependencies and built frameworks."
+
+[[rule]]
+id = "carthage.cache"
+name = "Carthage cache"
+bucket = "caches"
+group = "Carthage"
+kind = "path"
+paths = ["~/Library/Caches/org.carthage.CarthageKit"]
+cost = "redownload"
+warm_days = 30
+description = "Carthage downloads."
+
+[[rule]]
+id = "tuist.cache"
+name = "Tuist cache"
+bucket = "caches"
+group = "Swift"
+kind = "path"
+paths = ["~/.cache/tuist", "~/Library/Caches/tuist"]
+cost = "rebuild"
+warm_days = 30
+description = "Tuist binary and manifest caches."
+
+[[rule]]
+id = "xcode.ios-updates"
+name = "iOS firmware downloads"
+bucket = "junk"
+group = "Installers"
+kind = "path"
+paths = ["~/Library/iTunes/iPhone Software Updates", "~/Library/iTunes/iPad Software Updates", "~/Library/iTunes/iPod Software Updates"]
+cost = "redownload"
+warm_days = 7
+description = "IPSW firmware files downloaded by Finder or iTunes."
+
+[[rule]]
+id = "xcode.ios-backups"
+name = "iOS device backups"
+bucket = "system"
+group = "Device backups"
+kind = "path"
+paths = ["~/Library/Application Support/MobileSync/Backup"]
+each = true
+cost = "data"
+description = "Local iPhone and iPad backups. Shown for awareness; poo never deletes them."

@@ -1,0 +1,55 @@
+# Docker, OrbStack, VMs and cloud CLIs.
+
+[[rule]]
+id = "docker.engine"
+name = "Docker"
+bucket = "containers"
+group = "Docker"
+kind = "provider"
+provider = "docker"
+cost = "rebuild"
+description = "Build cache, unused images and stopped containers reported by `docker system df`. Volumes are shown but never removed."
+recommend = "Build cache is the safe win. Unused images redownload on next pull. Volumes hold databases: remove them yourself."
+
+[[rule]]
+id = "docker.buildx-cache"
+name = "Buildx local cache"
+bucket = "containers"
+group = "Docker"
+kind = "path"
+paths = ["~/.docker/buildx/cache"]
+cost = "rebuild"
+warm_days = 14
+description = "Local buildx cache exports."
+
+[[rule]]
+id = "vm.caches"
+name = "VM tool caches"
+bucket = "containers"
+group = "VMs"
+kind = "path"
+paths = ["~/Library/Caches/lima", "~/.vagrant.d/tmp", "~/.vagrant.d/boxes", "~/Library/Caches/com.utmapp.UTM", "~/.tart/cache", "~/.minikube/cache", "~/Library/Caches/colima"]
+cost = "redownload"
+warm_days = 30
+description = "Downloaded images and boxes of Lima, Vagrant, UTM, Tart and minikube. VM disks themselves are not touched."
+
+[[rule]]
+id = "vm.disks"
+name = "VM disks"
+bucket = "containers"
+group = "VMs"
+kind = "path"
+paths = ["~/.orbstack/data", "~/.colima/_lima", "~/.lima", "~/VirtualBox VMs", "~/Parallels"]
+cost = "data"
+description = "Virtual machine disks and OrbStack data. Shown so you know the size; manage them in their apps."
+
+[[rule]]
+id = "cloud.cli-caches"
+name = "Cloud CLI caches"
+bucket = "caches"
+group = "Cloud CLIs"
+kind = "path"
+paths = ["~/.config/gcloud/logs", "~/.azure/logs", "~/.cache/gh", "~/.cache/terraform", "~/.pulumi/plugins", "~/.cache/helm", "~/Library/Caches/helm"]
+cost = "redownload"
+warm_days = 30
+description = "gcloud/azure logs, gh, Helm and Pulumi plugin caches."

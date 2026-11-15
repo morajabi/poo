@@ -1,0 +1,315 @@
+id = "core"
+name = "poo core"
+description = "Built-in knowledge: buckets, plans, stacks, worktree homes, guards and rules for dev tools, AI agents, containers and macOS."
+priority = 0
+
+# ---------------------------------------------------------------------------
+# Buckets: top-level sections. Rename, reorder, recolor or hide them from
+# config.toml, `poo buckets`, MCP or the app.
+# ---------------------------------------------------------------------------
+
+[[bucket]]
+id = "build"
+name = "Build output"
+order = 10
+color = "#F28C28"
+symbol = "hammer"
+description = "Compiled output inside your projects and worktrees: target, .build, dist, .next and friends."
+
+[[bucket]]
+id = "xcode"
+name = "Xcode & simulators"
+order = 20
+color = "#2F7CF6"
+symbol = "iphone"
+description = "DerivedData, simulators, runtimes, device support and other Apple developer data."
+
+[[bucket]]
+id = "worktrees"
+name = "Worktrees"
+order = 30
+color = "#8E5CF7"
+symbol = "arrow.triangle.branch"
+description = "Linked git worktrees from Claude, Codex, Conductor and friends, beyond the build output inside them."
+
+[[bucket]]
+id = "deps"
+name = "Dependencies"
+order = 40
+color = "#34C759"
+symbol = "shippingbox"
+description = "Installed packages inside projects: node_modules, virtualenvs, Pods, vendor."
+
+[[bucket]]
+id = "caches"
+name = "Package & tool caches"
+order = 50
+color = "#14B8A6"
+symbol = "archivebox"
+description = "Global caches of package managers, compilers and toolchains."
+
+[[bucket]]
+id = "ai"
+name = "AI tools & models"
+order = 60
+color = "#EC4899"
+symbol = "sparkles"
+description = "Coding agents, editors and local model weights."
+
+[[bucket]]
+id = "containers"
+name = "Containers & VMs"
+order = 70
+color = "#06B6D4"
+symbol = "cube"
+description = "Docker build cache, images and containers."
+
+[[bucket]]
+id = "system"
+name = "Apps & system caches"
+order = 80
+color = "#8E8E93"
+symbol = "internaldrive"
+description = "App caches, browser caches and other things macOS and apps regenerate."
+
+[[bucket]]
+id = "junk"
+name = "Logs, temp & trash"
+order = 90
+color = "#EAB308"
+symbol = "trash"
+description = "Logs, crash reports, temp files, old installers and the Trash."
+
+[[bucket]]
+id = "other"
+name = "Unclassified"
+order = 100
+color = "#A1A1AA"
+symbol = "questionmark.folder"
+description = "Large git-ignored folders no rule explains yet. Teach poo about them with a mod."
+
+# ---------------------------------------------------------------------------
+# Recommended plans.
+# ---------------------------------------------------------------------------
+
+[[plan]]
+id = "quick"
+name = "Quick sweep"
+order = 10
+description = "Logs, temp files, crash reports and broken simulators. Nothing to rebuild."
+tiers = ["junk"]
+max_cost = "none"
+
+[[plan]]
+id = "stale"
+name = "Stale stuff"
+order = 20
+description = "Adds build output, worktrees and caches nobody touched for weeks, or whose project is gone."
+tiers = ["junk", "cold"]
+max_cost = "redownload"
+
+[[plan]]
+id = "deep"
+name = "Deep clean"
+order = 30
+description = "Adds recent builds and caches. Expect rebuilds and redownloads."
+tiers = ["junk", "cold", "warm"]
+max_cost = "redownload"
+
+[[plan]]
+id = "emergency"
+name = "Emergency"
+order = 40
+description = "Out of space: frees the least regrettable items first until 15% of the disk is free."
+tiers = ["junk", "cold", "warm"]
+max_cost = "redownload"
+greedy = true
+target_free_percent = 15
+
+# ---------------------------------------------------------------------------
+# Where agents and tools put worktrees. Each one is walked like a dev root.
+# ---------------------------------------------------------------------------
+
+[[worktree_home]]
+path = "~/.codex/worktrees"
+agent = "codex"
+
+[[worktree_home]]
+path = "~/.claude/worktrees"
+agent = "claude"
+
+[[worktree_home]]
+path = "~/conductor/workspaces"
+agent = "conductor"
+
+[[worktree_home]]
+path = "~/.cursor/worktrees"
+agent = "cursor"
+
+[[worktree_home]]
+path = "~/.t3/worktrees"
+agent = "t3code"
+
+[[worktree_home]]
+path = "~/.superset/worktrees"
+agent = "superset"
+
+[[worktree_home]]
+path = "~/.crystal/worktrees"
+agent = "crystal"
+
+[[worktree_home]]
+path = "~/.vibe-kanban/worktrees"
+agent = "vibe-kanban"
+
+[[worktree_home]]
+path = "~/.opencode/worktrees"
+agent = "opencode"
+
+[[worktree_home]]
+path = "~/.sculptor/worktrees"
+agent = "sculptor"
+
+# ---------------------------------------------------------------------------
+# Guards veto cleaning right before anything is deleted.
+# ---------------------------------------------------------------------------
+
+[[guard]]
+id = "core.build-processes"
+kind = "process"
+description = "Skip items whose project has a running build tool or coding agent (xcodebuild, cargo, node, claude, codex...)."
+names = []
+
+# ---------------------------------------------------------------------------
+# Stacks: marker files that tell poo what a project is built with.
+# ---------------------------------------------------------------------------
+
+[[stack]]
+id = "rust"
+name = "Rust"
+markers = ["Cargo.toml"]
+
+[[stack]]
+id = "swift"
+name = "Swift package"
+markers = ["Package.swift"]
+
+[[stack]]
+id = "xcode"
+name = "Xcode"
+markers = ["*.xcodeproj", "*.xcworkspace", "project.yml", "Project.swift"]
+
+[[stack]]
+id = "node"
+name = "Node.js"
+markers = ["package.json"]
+
+[[stack]]
+id = "bun"
+name = "Bun"
+markers = ["bun.lockb", "bun.lock", "bunfig.toml"]
+
+[[stack]]
+id = "deno"
+name = "Deno"
+markers = ["deno.json", "deno.jsonc"]
+
+[[stack]]
+id = "python"
+name = "Python"
+markers = ["pyproject.toml", "requirements.txt", "setup.py", "Pipfile", "uv.lock", "poetry.lock"]
+
+[[stack]]
+id = "go"
+name = "Go"
+markers = ["go.mod"]
+
+[[stack]]
+id = "gradle"
+name = "Gradle / Android"
+markers = ["build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts"]
+
+[[stack]]
+id = "maven"
+name = "Maven"
+markers = ["pom.xml"]
+
+[[stack]]
+id = "scala"
+name = "Scala"
+markers = ["build.sbt"]
+
+[[stack]]
+id = "ruby"
+name = "Ruby"
+markers = ["Gemfile"]
+
+[[stack]]
+id = "php"
+name = "PHP"
+markers = ["composer.json"]
+
+[[stack]]
+id = "elixir"
+name = "Elixir"
+markers = ["mix.exs"]
+
+[[stack]]
+id = "haskell"
+name = "Haskell"
+markers = ["stack.yaml", "cabal.project", "*.cabal"]
+
+[[stack]]
+id = "dotnet"
+name = ".NET"
+markers = ["*.csproj", "*.fsproj", "*.sln", "global.json"]
+
+[[stack]]
+id = "flutter"
+name = "Dart / Flutter"
+markers = ["pubspec.yaml"]
+
+[[stack]]
+id = "zig"
+name = "Zig"
+markers = ["build.zig"]
+
+[[stack]]
+id = "cmake"
+name = "C / C++"
+markers = ["CMakeLists.txt", "meson.build", "configure.ac"]
+
+[[stack]]
+id = "bazel"
+name = "Bazel"
+markers = ["WORKSPACE", "WORKSPACE.bazel", "MODULE.bazel"]
+
+[[stack]]
+id = "terraform"
+name = "Terraform"
+markers = ["*.tf"]
+
+[[stack]]
+id = "docker"
+name = "Docker"
+markers = ["Dockerfile", "docker-compose.yml", "compose.yaml", "docker-compose.yaml"]
+
+[[stack]]
+id = "unity"
+name = "Unity"
+markers = ["ProjectSettings"]
+
+[[stack]]
+id = "unreal"
+name = "Unreal"
+markers = ["*.uproject"]
+
+[[stack]]
+id = "godot"
+name = "Godot"
+markers = ["project.godot"]
+
+[[stack]]
+id = "elm"
+name = "Elm"
+markers = ["elm.json"]

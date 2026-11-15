@@ -1,0 +1,27 @@
+# Git worktrees and unexplained ignored folders.
+
+[[rule]]
+id = "git.worktrees"
+name = "Linked git worktrees"
+bucket = "worktrees"
+group = "Worktrees"
+kind = "provider"
+provider = "git-worktrees"
+cost = "rebuild"
+rebuild = "git worktree add <path> <branch> (the branch and its commits stay)"
+warm_days = 7
+description = "Whole linked worktrees. Removal goes through `git worktree remove`, which refuses uncommitted changes; branches and commits are kept."
+recommend = "Agent worktrees outlive their task. Remove them once the branch is merged or abandoned; build output inside goes with them."
+
+[[rule]]
+id = "git.ignored"
+name = "Other git-ignored folders"
+bucket = "other"
+group = "Unclassified ignored"
+kind = "provider"
+provider = "git-ignored"
+params.min_bytes = 100000000
+cost = "rebuild"
+tier = "review"
+description = "Large folders git ignores that no rule recognizes. Never cleaned automatically."
+recommend = "Look at what produces them and add a rule in a mod (`poo mods new`) so poo can tier them."

@@ -1,0 +1,194 @@
+# Rust, Go, Zig and native toolchains.
+
+[[rule]]
+id = "rust.target"
+name = "Rust target directories"
+bucket = "build"
+group = "Rust"
+kind = "artifact"
+names = ["target"]
+parent_any = ["Cargo.toml"]
+children_any = ["debug", "release", "CACHEDIR.TAG", ".rustc_info.json", "doc", "package", "*-apple-darwin", "*-linux-*", "wasm32-*"]
+cost = "rebuild"
+rebuild = "cargo build"
+warm_days = 14
+description = "Compiled Rust output. target/debug/deps keeps every old artifact hash and never shrinks on its own."
+recommend = "Set [profile.dev] debug = \"line-tables-only\" and [profile.dev.package.\"*\"] debug = false to roughly halve it. Never share one target dir across worktrees."
+
+[[rule]]
+id = "rust.target-custom"
+name = "Rust target (custom CARGO_TARGET_DIR)"
+bucket = "build"
+group = "Rust"
+kind = "artifact"
+names = ["*"]
+children_all = [".rustc_info.json"]
+children_any = ["debug", "release", "CACHEDIR.TAG"]
+cost = "rebuild"
+rebuild = "cargo build"
+warm_days = 14
+description = "A cargo target directory under another name (CARGO_TARGET_DIR, build/cargo...)."
+
+[[rule]]
+id = "rust.cargo-registry"
+name = "Cargo registry"
+bucket = "caches"
+group = "Rust"
+kind = "path"
+paths = ["~/.cargo/registry/cache", "~/.cargo/registry/src", "~/.cargo/registry/index"]
+cost = "redownload"
+rebuild = "cargo fetch"
+warm_days = 30
+description = "Downloaded crates and their unpacked sources."
+
+[[rule]]
+id = "rust.cargo-git"
+name = "Cargo git checkouts"
+bucket = "caches"
+group = "Rust"
+kind = "path"
+paths = ["~/.cargo/git/checkouts", "~/.cargo/git/db"]
+cost = "redownload"
+warm_days = 30
+description = "Git dependencies fetched by cargo."
+
+[[rule]]
+id = "rust.toolchains"
+name = "Rust toolchains"
+bucket = "caches"
+group = "Rust toolchains"
+kind = "path"
+paths = ["~/.rustup/toolchains"]
+each = true
+cost = "redownload"
+tier = "review"
+action = "command"
+command = ["rustup", "toolchain", "uninstall", "{name}"]
+description = "Installed toolchains. Old nightlies and pinned versions pile up."
+recommend = "Keep the toolchains your projects pin in rust-toolchain.toml."
+
+[[rule]]
+id = "rust.rustup-downloads"
+name = "rustup downloads"
+bucket = "junk"
+group = "Installers"
+kind = "path"
+paths = ["~/.rustup/downloads", "~/.rustup/tmp"]
+cost = "none"
+contents = true
+description = "Leftover rustup downloads."
+
+[[rule]]
+id = "rust.sccache"
+name = "sccache"
+bucket = "caches"
+group = "Rust"
+kind = "path"
+paths = ["~/Library/Caches/Mozilla.sccache", "~/.cache/sccache"]
+cost = "rebuild"
+warm_days = 14
+description = "Shared compilation cache."
+
+[[rule]]
+id = "go.build-cache"
+name = "Go build cache"
+bucket = "caches"
+group = "Go"
+kind = "path"
+paths = ["~/Library/Caches/go-build"]
+cost = "rebuild"
+warm_days = 14
+description = "Go compiler cache."
+
+[[rule]]
+id = "go.mod-cache"
+name = "Go module cache"
+bucket = "caches"
+group = "Go"
+kind = "path"
+paths = ["~/go/pkg/mod"]
+cost = "redownload"
+action = "command"
+command = ["go", "clean", "-modcache"]
+warm_days = 30
+description = "Downloaded Go modules (read-only files; cleaned through go clean)."
+
+[[rule]]
+id = "go.lint-cache"
+name = "golangci-lint cache"
+bucket = "caches"
+group = "Go"
+kind = "path"
+paths = ["~/Library/Caches/golangci-lint", "~/Library/Caches/gopls", "~/Library/Caches/staticcheck"]
+cost = "rebuild"
+warm_days = 14
+description = "Go linter and language server caches."
+
+[[rule]]
+id = "zig.cache"
+name = "Zig caches"
+bucket = "build"
+group = "Zig"
+kind = "artifact"
+names = ["zig-cache", ".zig-cache", "zig-out"]
+parent_any = ["build.zig"]
+cost = "rebuild"
+rebuild = "zig build"
+description = "Zig build caches and outputs."
+
+[[rule]]
+id = "zig.global-cache"
+name = "Zig global cache"
+bucket = "caches"
+group = "Zig"
+kind = "path"
+paths = ["~/.cache/zig", "~/Library/Caches/zig"]
+cost = "rebuild"
+warm_days = 14
+description = "Zig's global compilation cache."
+
+[[rule]]
+id = "cmake.build"
+name = "CMake build trees"
+bucket = "build"
+group = "C / C++"
+kind = "artifact"
+names = ["*"]
+children_all = ["CMakeCache.txt"]
+cost = "rebuild"
+rebuild = "cmake --build"
+description = "Any folder holding a CMakeCache.txt is a CMake build tree."
+
+[[rule]]
+id = "meson.build"
+name = "Meson build trees"
+bucket = "build"
+group = "C / C++"
+kind = "artifact"
+names = ["*"]
+children_all = ["build.ninja", "meson-private"]
+cost = "rebuild"
+rebuild = "meson setup && ninja"
+description = "Meson build directories."
+
+[[rule]]
+id = "ccache.cache"
+name = "ccache"
+bucket = "caches"
+group = "C / C++"
+kind = "path"
+paths = ["~/Library/Caches/ccache", "~/.ccache", "~/.cache/ccache"]
+cost = "rebuild"
+warm_days = 14
+description = "C/C++ compiler cache."
+
+[[rule]]
+id = "bazel.disk-cache"
+name = "Bazel caches"
+bucket = "caches"
+group = "Bazel"
+kind = "path"
+paths = ["~/.cache/bazel", "~/Library/Caches/bazelisk", "~/.cache/bazelisk"]
+cost = "rebuild"
+warm_days = 14
+description = "Bazel output base and bazelisk downloads."

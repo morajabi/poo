@@ -1,0 +1,397 @@
+# JavaScript, TypeScript and web frameworks.
+
+[[rule]]
+id = "node.modules"
+name = "node_modules"
+bucket = "deps"
+group = "Node"
+kind = "artifact"
+names = ["node_modules"]
+parent_any = ["package.json"]
+cost = "redownload"
+rebuild = "npm install / pnpm install / bun install / yarn"
+warm_days = 30
+description = "Installed npm packages. Monorepos and every worktree get their own copy."
+recommend = "pnpm and bun hardlink from a global store; poo dedupes hardlinks when sizing."
+
+[[rule]]
+id = "node.next"
+name = "Next.js build"
+bucket = "build"
+group = "Next.js"
+kind = "artifact"
+names = [".next"]
+parent_any = ["next.config.*", "package.json"]
+cost = "rebuild"
+rebuild = "next build / next dev"
+description = "Next.js build output and its webpack/turbopack cache."
+
+[[rule]]
+id = "node.nuxt"
+name = "Nuxt build"
+bucket = "build"
+group = "Nuxt"
+kind = "artifact"
+names = [".nuxt", ".output"]
+parent_any = ["nuxt.config.*"]
+cost = "rebuild"
+rebuild = "nuxt build"
+description = "Nuxt generated files and output."
+
+[[rule]]
+id = "node.sveltekit"
+name = "SvelteKit build"
+bucket = "build"
+group = "Svelte"
+kind = "artifact"
+names = [".svelte-kit"]
+parent_any = ["svelte.config.*", "package.json"]
+cost = "rebuild"
+rebuild = "vite build"
+description = "SvelteKit generated output."
+
+[[rule]]
+id = "node.astro"
+name = "Astro cache"
+bucket = "build"
+group = "Astro"
+kind = "artifact"
+names = [".astro"]
+parent_any = ["astro.config.*"]
+cost = "rebuild"
+description = "Astro generated types and content cache."
+
+[[rule]]
+id = "node.turbo"
+name = "Turborepo cache"
+bucket = "build"
+group = "Monorepo caches"
+kind = "artifact"
+names = [".turbo"]
+parent_any = ["turbo.json", "package.json"]
+cost = "rebuild"
+description = "Local Turborepo task cache."
+
+[[rule]]
+id = "node.nx"
+name = "Nx cache"
+bucket = "build"
+group = "Monorepo caches"
+kind = "artifact"
+names = [".nx"]
+parent_any = ["nx.json"]
+cost = "rebuild"
+description = "Nx task cache and workspace data."
+
+[[rule]]
+id = "node.parcel"
+name = "Parcel cache"
+bucket = "build"
+group = "Bundler caches"
+kind = "artifact"
+names = [".parcel-cache"]
+cost = "rebuild"
+description = "Parcel's build cache."
+
+[[rule]]
+id = "node.angular"
+name = "Angular cache"
+bucket = "build"
+group = "Angular"
+kind = "artifact"
+names = [".angular"]
+parent_any = ["angular.json"]
+cost = "rebuild"
+description = "Angular CLI build cache."
+
+[[rule]]
+id = "node.gatsby"
+name = "Gatsby cache and public"
+bucket = "build"
+group = "Gatsby"
+kind = "artifact"
+names = [".cache", "public"]
+parent_any = ["gatsby-config.*"]
+ignored = true
+cost = "rebuild"
+rebuild = "gatsby build"
+description = "Gatsby build cache and generated site."
+
+[[rule]]
+id = "node.docusaurus"
+name = "Docusaurus build"
+bucket = "build"
+group = "Docs sites"
+kind = "artifact"
+names = [".docusaurus", "build"]
+parent_any = ["docusaurus.config.*"]
+cost = "rebuild"
+description = "Docusaurus generated files."
+
+[[rule]]
+id = "node.storybook"
+name = "Storybook static build"
+bucket = "build"
+group = "Bundler caches"
+kind = "artifact"
+names = ["storybook-static"]
+parent_any = ["package.json"]
+cost = "rebuild"
+description = "Static Storybook export."
+
+[[rule]]
+id = "node.expo"
+name = "Expo state"
+bucket = "build"
+group = "React Native"
+kind = "artifact"
+names = [".expo", ".expo-shared"]
+parent_any = ["app.json", "app.config.*", "package.json"]
+cost = "rebuild"
+description = "Expo dev server state and caches."
+
+[[rule]]
+id = "node.serverless"
+name = "Serverless and SAM builds"
+bucket = "build"
+group = "Cloud deploy"
+kind = "artifact"
+names = [".serverless", ".aws-sam", ".open-next", ".netlify", ".vercel"]
+parent_any = ["serverless.yml", "serverless.ts", "template.yaml", "template.yml", "package.json", "netlify.toml", "vercel.json", "open-next.config.ts"]
+ignored = true
+cost = "rebuild"
+description = "Deploy packaging output from Serverless, SAM, OpenNext, Netlify and Vercel."
+
+[[rule]]
+id = "node.wrangler"
+name = "Wrangler state"
+bucket = "build"
+group = "Cloud deploy"
+kind = "artifact"
+names = [".wrangler"]
+parent_any = ["wrangler.toml", "wrangler.json", "wrangler.jsonc"]
+cost = "data"
+tier = "review"
+description = "Cloudflare Wrangler local state, including local D1, KV and R2 data used in dev."
+
+[[rule]]
+id = "node.dist"
+name = "JS build output (dist, build, out)"
+bucket = "build"
+group = "JS build output"
+kind = "artifact"
+names = ["dist", "build", "out", "lib", "es", "cjs", "esm", ".output"]
+parent_any = ["package.json"]
+children_any = ["*.js", "*.mjs", "*.cjs", "*.css", "*.html", "*.map", "*.d.ts", "*.wasm", "assets", "static", "chunks", "server", "client", "_next", "_app", "types", "browser", "node"]
+ignored = true
+cost = "rebuild"
+rebuild = "npm run build"
+description = "Bundler output. Only matched when git ignores the folder, so committed dist folders stay."
+
+[[rule]]
+id = "node.coverage"
+name = "Test coverage and reports"
+bucket = "build"
+group = "Test output"
+kind = "artifact"
+names = ["coverage", ".nyc_output", "test-results", "playwright-report", "blob-report"]
+parent_any = ["package.json", "playwright.config.*", "cypress.config.*", "vitest.config.*", "jest.config.*"]
+ignored = true
+cost = "none"
+description = "Coverage reports, Playwright and Cypress results."
+
+[[rule]]
+id = "node.cache-dir"
+name = "Project .cache folders"
+bucket = "build"
+group = "Bundler caches"
+kind = "artifact"
+names = [".cache", ".eslintcache", ".vite", ".rollup.cache", ".webpack-cache", ".swc"]
+parent_any = ["package.json"]
+ignored = true
+cost = "rebuild"
+description = "Bundler and linter caches inside a JS project."
+
+[[rule]]
+id = "npm.cache"
+name = "npm cache"
+bucket = "caches"
+group = "Node"
+kind = "path"
+paths = ["~/.npm/_cacache", "~/.npm/_npx", "~/.npm/_prebuilds"]
+cost = "redownload"
+warm_days = 30
+description = "npm's content cache and npx installs."
+
+[[rule]]
+id = "npm.logs"
+name = "npm logs"
+bucket = "junk"
+group = "Logs"
+kind = "path"
+paths = ["~/.npm/_logs"]
+cost = "none"
+contents = true
+description = "Debug logs npm writes on every run."
+
+[[rule]]
+id = "pnpm.store"
+name = "pnpm store"
+bucket = "caches"
+group = "Node"
+kind = "path"
+paths = ["~/Library/pnpm/store", "~/.local/share/pnpm/store", "~/.pnpm-store"]
+running_apps = ["pnpm"]
+cost = "redownload"
+action = "command"
+command = ["pnpm", "store", "prune"]
+warm_days = 30
+description = "Content-addressed store pnpm hardlinks node_modules from. `pnpm store prune` removes unreferenced packages."
+
+[[rule]]
+id = "yarn.cache"
+name = "Yarn cache"
+bucket = "caches"
+group = "Node"
+kind = "path"
+paths = ["~/Library/Caches/Yarn", "~/.cache/yarn"]
+cost = "redownload"
+warm_days = 30
+description = "Yarn classic cache."
+
+[[rule]]
+id = "yarn.berry-cache"
+name = "Yarn Berry global cache"
+bucket = "caches"
+group = "Node"
+kind = "path"
+paths = ["~/.yarn/berry/cache"]
+cost = "redownload"
+tier = "review"
+description = "With Plug'n'Play this cache IS the installed dependencies of your projects. Clean only if no PnP project uses the global cache."
+
+[[rule]]
+id = "bun.cache"
+name = "Bun install cache"
+bucket = "caches"
+group = "Node"
+kind = "path"
+paths = ["~/.bun/install/cache"]
+cost = "redownload"
+warm_days = 30
+description = "Bun's global package cache."
+
+[[rule]]
+id = "deno.cache"
+name = "Deno cache"
+bucket = "caches"
+group = "Node"
+kind = "path"
+paths = ["~/Library/Caches/deno", "~/.cache/deno"]
+cost = "redownload"
+warm_days = 30
+description = "Deno module and compile cache."
+
+[[rule]]
+id = "node.versions"
+name = "Node.js versions"
+bucket = "caches"
+group = "Node versions"
+kind = "path"
+paths = ["~/.nvm/versions/node", "~/.local/share/fnm/node-versions", "~/Library/Application Support/fnm/node-versions", "~/.volta/tools/image/node", "~/.asdf/installs/nodejs", "~/.local/share/mise/installs/node", "~/.n/n/versions/node"]
+each = true
+cost = "redownload"
+tier = "review"
+description = "Node versions installed by nvm, fnm, volta, asdf or mise."
+recommend = "Keep versions your projects pin in .nvmrc, .node-version or package.json engines."
+
+[[rule]]
+id = "node.gyp"
+name = "node-gyp headers"
+bucket = "caches"
+group = "Node"
+kind = "path"
+paths = ["~/Library/Caches/node-gyp", "~/.node-gyp", "~/.cache/node-gyp"]
+cost = "redownload"
+warm_days = 30
+description = "Node headers for native addon builds."
+
+[[rule]]
+id = "node.corepack"
+name = "Corepack package managers"
+bucket = "caches"
+group = "Node"
+kind = "path"
+paths = ["~/.cache/node/corepack", "~/Library/Caches/node/corepack"]
+cost = "redownload"
+warm_days = 30
+description = "Package manager binaries fetched by corepack."
+
+[[rule]]
+id = "browsers.playwright"
+name = "Playwright browsers"
+bucket = "caches"
+group = "Test browsers"
+kind = "path"
+paths = ["~/Library/Caches/ms-playwright"]
+each = true
+cost = "redownload"
+rebuild = "npx playwright install"
+warm_days = 30
+description = "Browser builds downloaded per Playwright version; old ones linger."
+
+[[rule]]
+id = "browsers.puppeteer"
+name = "Puppeteer browsers"
+bucket = "caches"
+group = "Test browsers"
+kind = "path"
+paths = ["~/.cache/puppeteer", "~/Library/Caches/puppeteer"]
+cost = "redownload"
+warm_days = 30
+description = "Chrome builds downloaded by Puppeteer."
+
+[[rule]]
+id = "browsers.cypress"
+name = "Cypress binaries"
+bucket = "caches"
+group = "Test browsers"
+kind = "path"
+paths = ["~/Library/Caches/Cypress"]
+each = true
+cost = "redownload"
+warm_days = 30
+description = "Cypress app versions."
+
+[[rule]]
+id = "electron.cache"
+name = "Electron downloads"
+bucket = "caches"
+group = "Electron"
+kind = "path"
+paths = ["~/Library/Caches/electron", "~/Library/Caches/electron-builder", "~/.cache/electron"]
+cost = "redownload"
+warm_days = 30
+description = "Electron binaries and builder tools."
+
+[[rule]]
+id = "typescript.cache"
+name = "TypeScript types cache"
+bucket = "caches"
+group = "Node"
+kind = "path"
+paths = ["~/Library/Caches/typescript"]
+cost = "redownload"
+warm_days = 30
+description = "Type definitions fetched by tsserver."
+
+[[rule]]
+id = "turbo.global"
+name = "Turborepo global cache"
+bucket = "caches"
+group = "Node"
+kind = "path"
+paths = ["~/Library/Caches/turbo", "~/Library/Application Support/turborepo"]
+cost = "rebuild"
+warm_days = 14
+description = "Turborepo daemon and cache data."

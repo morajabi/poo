@@ -1,0 +1,424 @@
+# JVM, Android, Ruby, PHP, Elixir, Haskell, .NET, Dart, game engines and infra.
+
+[[rule]]
+id = "gradle.build"
+name = "Gradle build folders"
+bucket = "build"
+group = "Gradle / Android"
+kind = "artifact"
+names = ["build"]
+parent_any = ["build.gradle", "build.gradle.kts"]
+cost = "rebuild"
+rebuild = "./gradlew build"
+description = "Gradle build output, per module."
+
+[[rule]]
+id = "gradle.project-cache"
+name = "Gradle project caches"
+bucket = "build"
+group = "Gradle / Android"
+kind = "artifact"
+names = [".gradle", ".kotlin", ".cxx", ".externalNativeBuild"]
+parent_any = ["settings.gradle", "settings.gradle.kts", "build.gradle", "build.gradle.kts", "gradlew"]
+cost = "rebuild"
+description = "Per-project Gradle, Kotlin and native build caches."
+
+[[rule]]
+id = "gradle.caches"
+name = "Gradle caches"
+bucket = "caches"
+group = "Gradle / Android"
+kind = "path"
+paths = ["~/.gradle/caches", "~/.gradle/native", "~/.gradle/build-scan-data", "~/.gradle/.tmp"]
+cost = "redownload"
+warm_days = 30
+description = "Downloaded dependencies and transformed artifacts. Often the largest JVM cache."
+
+[[rule]]
+id = "gradle.wrappers"
+name = "Gradle wrapper distributions"
+bucket = "caches"
+group = "Gradle / Android"
+kind = "path"
+paths = ["~/.gradle/wrapper/dists"]
+each = true
+cost = "redownload"
+warm_days = 60
+description = "One Gradle distribution per version any project used."
+
+[[rule]]
+id = "gradle.daemon-logs"
+name = "Gradle daemon logs"
+bucket = "junk"
+group = "Logs"
+kind = "path"
+paths = ["~/.gradle/daemon"]
+cost = "none"
+description = "Logs and registry of past Gradle daemons."
+
+[[rule]]
+id = "maven.target"
+name = "Maven and sbt target"
+bucket = "build"
+group = "JVM"
+kind = "artifact"
+names = ["target"]
+parent_any = ["pom.xml", "build.sbt", "project.clj", "build.boot"]
+cost = "rebuild"
+rebuild = "mvn package / sbt compile"
+description = "Maven, sbt and Leiningen build output."
+
+[[rule]]
+id = "scala.tooling"
+name = "Scala tooling caches"
+bucket = "build"
+group = "JVM"
+kind = "artifact"
+names = [".bsp", ".metals", ".bloop", ".scala-build"]
+cost = "rebuild"
+description = "Metals, Bloop and scala-cli state."
+
+[[rule]]
+id = "maven.repo"
+name = "Maven repository"
+bucket = "caches"
+group = "JVM"
+kind = "path"
+paths = ["~/.m2/repository"]
+cost = "redownload"
+warm_days = 30
+description = "Local Maven repository."
+
+[[rule]]
+id = "jvm.other-caches"
+name = "Coursier, Ivy, sbt and Konan"
+bucket = "caches"
+group = "JVM"
+kind = "path"
+paths = ["~/Library/Caches/Coursier", "~/.ivy2/cache", "~/.sbt/boot", "~/.konan", "~/.cache/coursier"]
+cost = "redownload"
+warm_days = 30
+description = "Other JVM dependency caches and Kotlin/Native toolchains."
+
+[[rule]]
+id = "android.avd"
+name = "Android emulators"
+bucket = "xcode"
+group = "Android emulators"
+kind = "path"
+paths = ["~/.android/avd"]
+each = true
+exclude = ["*.ini"]
+cost = "rebuild"
+tier = "review"
+description = "Android virtual devices with their data."
+
+[[rule]]
+id = "android.system-images"
+name = "Android system images"
+bucket = "xcode"
+group = "Android SDK"
+kind = "path"
+paths = ["~/Library/Android/sdk/system-images"]
+each = true
+cost = "redownload"
+tier = "review"
+description = "Emulator system images (several GB each)."
+
+[[rule]]
+id = "android.caches"
+name = "Android tool caches"
+bucket = "caches"
+group = "Gradle / Android"
+kind = "path"
+paths = ["~/.android/cache", "~/.android/build-cache", "~/Library/Caches/Google/AndroidStudio*"]
+cost = "rebuild"
+warm_days = 30
+description = "Android SDK and Studio caches."
+
+[[rule]]
+id = "jetbrains.caches"
+name = "JetBrains IDE caches"
+bucket = "system"
+group = "IDEs"
+kind = "path"
+paths = ["~/Library/Caches/JetBrains"]
+each = true
+cost = "rebuild"
+warm_days = 30
+description = "Indexes per IDE version. Versions you upgraded from stay behind."
+
+[[rule]]
+id = "jetbrains.logs"
+name = "JetBrains logs"
+bucket = "junk"
+group = "Logs"
+kind = "path"
+paths = ["~/Library/Logs/JetBrains"]
+cost = "none"
+description = "IDE logs."
+
+[[rule]]
+id = "ruby.vendor-bundle"
+name = "Bundler vendor/bundle"
+bucket = "deps"
+group = "Ruby"
+kind = "artifact"
+names = ["bundle"]
+path_contains = ["/vendor/bundle"]
+cost = "redownload"
+rebuild = "bundle install"
+description = "Gems installed into the project."
+
+[[rule]]
+id = "rails.tmp"
+name = "Rails tmp"
+bucket = "build"
+group = "Ruby"
+kind = "artifact"
+names = ["tmp"]
+parent_any = ["Gemfile"]
+children_any = ["cache", "pids", "sockets", "storage"]
+cost = "rebuild"
+description = "Rails asset and bootsnap caches."
+
+[[rule]]
+id = "rails.log"
+name = "Rails logs"
+bucket = "junk"
+group = "Logs"
+kind = "artifact"
+names = ["log"]
+parent_any = ["Gemfile"]
+children_any = ["development.log", "test.log"]
+cost = "none"
+contents = true
+description = "development.log and test.log grow forever."
+
+[[rule]]
+id = "ruby.gems"
+name = "Ruby gems and versions"
+bucket = "caches"
+group = "Ruby"
+kind = "path"
+paths = ["~/.gem", "~/.rbenv/versions", "~/.rvm/gems", "~/.local/share/mise/installs/ruby", "~/.asdf/installs/ruby"]
+cost = "redownload"
+tier = "review"
+description = "Installed gems and Ruby versions."
+
+[[rule]]
+id = "php.vendor"
+name = "Composer vendor"
+bucket = "deps"
+group = "PHP"
+kind = "artifact"
+names = ["vendor"]
+parent_any = ["composer.json"]
+cost = "redownload"
+rebuild = "composer install"
+description = "Composer dependencies."
+
+[[rule]]
+id = "php.composer-cache"
+name = "Composer cache"
+bucket = "caches"
+group = "PHP"
+kind = "path"
+paths = ["~/Library/Caches/composer", "~/.composer/cache", "~/.cache/composer"]
+cost = "redownload"
+warm_days = 30
+description = "Composer downloads."
+
+[[rule]]
+id = "go.vendor"
+name = "Go vendor"
+bucket = "deps"
+group = "Go"
+kind = "artifact"
+names = ["vendor"]
+parent_any = ["go.mod"]
+ignored = true
+cost = "redownload"
+rebuild = "go mod vendor"
+description = "Vendored Go modules, when git ignores them."
+
+[[rule]]
+id = "elixir.build"
+name = "Elixir _build and deps"
+bucket = "build"
+group = "Elixir"
+kind = "artifact"
+names = ["_build", "deps", ".elixir_ls"]
+parent_any = ["mix.exs"]
+cost = "rebuild"
+rebuild = "mix deps.get && mix compile"
+description = "Compiled Elixir and fetched dependencies."
+
+[[rule]]
+id = "elixir.hex"
+name = "Hex and Mix caches"
+bucket = "caches"
+group = "Elixir"
+kind = "path"
+paths = ["~/.hex/packages", "~/.mix/archives", "~/Library/Caches/mix"]
+cost = "redownload"
+warm_days = 30
+description = "Hex package cache."
+
+[[rule]]
+id = "haskell.build"
+name = "Haskell build output"
+bucket = "build"
+group = "Haskell"
+kind = "artifact"
+names = ["dist-newstyle", ".stack-work", "dist"]
+parent_any = ["*.cabal", "cabal.project", "stack.yaml"]
+cost = "rebuild"
+description = "cabal and stack build directories."
+
+[[rule]]
+id = "haskell.caches"
+name = "Haskell toolchains and packages"
+bucket = "caches"
+group = "Haskell"
+kind = "path"
+paths = ["~/.stack", "~/.cabal/packages", "~/.cabal/store", "~/.ghcup/cache"]
+cost = "redownload"
+warm_days = 30
+description = "Stack snapshots, cabal store and ghcup downloads."
+
+[[rule]]
+id = "dotnet.bin-obj"
+name = ".NET bin and obj"
+bucket = "build"
+group = ".NET"
+kind = "artifact"
+names = ["bin", "obj"]
+parent_any = ["*.csproj", "*.fsproj", "*.vbproj"]
+cost = "rebuild"
+rebuild = "dotnet build"
+description = "MSBuild output."
+
+[[rule]]
+id = "dotnet.nuget"
+name = "NuGet packages"
+bucket = "caches"
+group = ".NET"
+kind = "path"
+paths = ["~/.nuget/packages", "~/.local/share/NuGet"]
+cost = "redownload"
+warm_days = 30
+description = "Global NuGet packages."
+
+[[rule]]
+id = "dart.tool"
+name = "Dart and Flutter build"
+bucket = "build"
+group = "Flutter"
+kind = "artifact"
+names = [".dart_tool", "build", ".flutter-plugins-dependencies"]
+parent_any = ["pubspec.yaml"]
+cost = "rebuild"
+rebuild = "flutter pub get && flutter build"
+description = "Dart tool state and Flutter build output."
+
+[[rule]]
+id = "dart.pub-cache"
+name = "Pub cache"
+bucket = "caches"
+group = "Flutter"
+kind = "path"
+paths = ["~/.pub-cache/hosted", "~/.pub-cache/git", "~/Library/Caches/flutter_engine"]
+cost = "redownload"
+warm_days = 30
+description = "Dart packages and Flutter engine artifacts."
+
+[[rule]]
+id = "elm.stuff"
+name = "elm-stuff"
+bucket = "build"
+group = "Elm"
+kind = "artifact"
+names = ["elm-stuff"]
+parent_any = ["elm.json"]
+cost = "rebuild"
+description = "Elm compiler output."
+
+[[rule]]
+id = "terraform.dir"
+name = "Terraform providers"
+bucket = "deps"
+group = "Terraform"
+kind = "artifact"
+names = [".terraform"]
+cost = "redownload"
+rebuild = "terraform init"
+description = "Downloaded providers and modules. State files live elsewhere and are untouched."
+
+[[rule]]
+id = "terraform.plugin-cache"
+name = "Terraform plugin cache"
+bucket = "caches"
+group = "Terraform"
+kind = "path"
+paths = ["~/.terraform.d/plugin-cache"]
+cost = "redownload"
+warm_days = 30
+description = "Shared provider cache."
+
+[[rule]]
+id = "jekyll.site"
+name = "Static site output"
+bucket = "build"
+group = "Docs sites"
+kind = "artifact"
+names = ["_site", ".jekyll-cache", ".sass-cache", "resources"]
+parent_any = ["_config.yml", "hugo.toml", "hugo.yaml", "config.toml"]
+ignored = true
+cost = "rebuild"
+description = "Jekyll and Hugo generated sites."
+
+[[rule]]
+id = "unity.library"
+name = "Unity Library and Temp"
+bucket = "build"
+group = "Game engines"
+kind = "artifact"
+names = ["Library", "Temp", "obj", "Logs"]
+parent_all = ["Assets", "ProjectSettings"]
+cost = "rebuild"
+rebuild = "Reopen the project in Unity (reimport can take a while)"
+description = "Unity's import cache and temp folders."
+
+[[rule]]
+id = "unreal.intermediate"
+name = "Unreal intermediates"
+bucket = "build"
+group = "Game engines"
+kind = "artifact"
+names = ["Intermediate", "DerivedDataCache", "Saved", "Binaries"]
+parent_any = ["*.uproject", "*.uplugin"]
+cost = "rebuild"
+description = "Unreal build intermediates and DDC."
+
+[[rule]]
+id = "godot.cache"
+name = "Godot import cache"
+bucket = "build"
+group = "Game engines"
+kind = "artifact"
+names = [".godot", ".import"]
+parent_any = ["project.godot"]
+cost = "rebuild"
+description = "Godot's imported assets cache."
+
+[[rule]]
+id = "asdf.mise-downloads"
+name = "asdf and mise downloads"
+bucket = "junk"
+group = "Installers"
+kind = "path"
+paths = ["~/.asdf/downloads", "~/Library/Caches/mise", "~/.cache/mise"]
+cost = "none"
+contents = true
+description = "Leftover archives from tool installs."
