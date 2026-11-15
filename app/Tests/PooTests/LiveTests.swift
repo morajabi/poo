@@ -68,7 +68,7 @@ final class LiveTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: dir) }
         let url = dir.appendingPathComponent("report.json")
         try Data("{}".utf8).write(to: url)
-        let w = ReportFileWatcher(url: url)
+        let w = FileWatcher(url: url)
         let fired = expectation(description: "fired")
         fired.expectedFulfillmentCount = 2
         fired.assertForOverFulfill = false
@@ -112,5 +112,28 @@ extension LiveTests {
         XCTAssertEqual(AreaListRow.percent(0.384), "38%")
         XCTAssertEqual(AreaListRow.percent(0.022), "2.2%")
         XCTAssertEqual(AreaListRow.percent(0.0001), "<0.1%")
+    }
+}
+
+final class MenubarTests: XCTestCase {
+    func testDecodesPartialConfigWithDefaults() throws {
+        let m = try JSONDecoder().decode(MenubarSettings.self, from: Data(#"{"title":"free+percent_free","sections":["areas"]}"#.utf8))
+        XCTAssertEqual(m.parts, [.free, .percent_free])
+        XCTAssertEqual(m.sections, ["areas"])
+        XCTAssertTrue(m.warn)
+        XCTAssertEqual(m.max_areas, 6)
+        XCTAssertFalse(m.shows(.disk))
+    }
+
+    func testTitleRoundTripsInStableOrder() {
+        XCTAssertEqual(MenubarSettings.title([.percent_free, .icon]), "icon+percent_free")
+        XCTAssertEqual(MenubarSettings.title([]), "icon")
+    }
+
+    func testThreshold() {
+        var m = MenubarSettings()
+        XCTAssertEqual(m.threshold(total: 1_000), 100)
+        m.warn_below = "20G"
+        XCTAssertEqual(m.threshold(total: 1_000), 20_000_000_000)
     }
 }

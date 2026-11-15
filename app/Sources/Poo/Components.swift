@@ -124,7 +124,7 @@ struct ItemRow: View {
                         Text(a).font(.caption2).padding(.horizontal, 4).background(.quaternary, in: Capsule())
                     }
                 }
-                Text(subtitle ?? item.reasons.first ?? Fmt.tilde(item.path))
+                Text(subtitle ?? item.why)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)

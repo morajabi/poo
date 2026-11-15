@@ -100,8 +100,8 @@ struct BackupsView: View {
             ContentUnavailableView("Backups need a newer poo", systemImage: "archivebox",
                                    description: Text("Update the poo command-line tool to see what Poo saved before cleaning."))
         } else if store.backups != nil && backups.isEmpty {
-            ContentUnavailableView("No backups", systemImage: "archivebox",
-                                   description: Text("Before removing a worktree, Poo copies small ignored files like .env, stashes uncommitted work and saves detached commits to a poo/ branch. They show up here."))
+            ContentUnavailableView("No backups yet", systemImage: "archivebox",
+                                   description: Text("Before removing a worktree, Poo saves its .env files, uncommitted work and detached commits here."))
         }
     }
 

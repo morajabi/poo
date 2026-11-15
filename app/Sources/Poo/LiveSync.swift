@@ -10,7 +10,8 @@ import Foundation
 @MainActor
 final class LiveSync {
     private unowned let store: Store
-    private let reportWatcher: ReportFileWatcher
+    private let reportWatcher: FileWatcher
+    private let configWatcher: FileWatcher
     private var watch: WatchProcess?
     private var freeTimer: Timer?
     private var periodic: Task<Void, Never>?
@@ -29,14 +30,20 @@ final class LiveSync {
 
     init(store: Store) {
         self.store = store
-        reportWatcher = ReportFileWatcher(url: PooCLI.reportURL)
+        reportWatcher = FileWatcher(url: PooCLI.reportURL)
         reportWatcher.onChange = { [weak store] in
             Task { @MainActor in await store?.reloadCachedReport() }
+        }
+        configWatcher = FileWatcher(url: ConfigFile.url)
+        configWatcher.onChange = { [weak store] in
+            // `poo config set`, an agent or an editor changed config.toml.
+            Task { @MainActor in await store?.loadMenubar() }
         }
     }
 
     func start() {
         reportWatcher.start()
+        configWatcher.start()
         let nc = NotificationCenter.default
         let ws = NSWorkspace.shared.notificationCenter
         let recheck: (Notification) -> Void = { [weak self] _ in
@@ -83,6 +90,7 @@ final class LiveSync {
         }
         observers.removeAll()
         reportWatcher.stop()
+        configWatcher.stop()
     }
 
     /// The menu bar panel appeared (also detected through window occlusion).
@@ -204,10 +212,10 @@ final class LiveSync {
     }
 }
 
-/// Watches `report.json`. The CLI writes a temp file and renames it over the report, so
+/// Watches one file (`report.json`, `config.toml`). The CLI writes a temp file and renames it over the report, so
 /// a vnode source on the file alone would go deaf after the first write; the directory
 /// source notices the rename and re-arms the file source.
-final class ReportFileWatcher: @unchecked Sendable {
+final class FileWatcher: @unchecked Sendable {
     let url: URL
     var onChange: (@Sendable () -> Void)?
     private let queue = DispatchQueue(label: "poo.report-watch", qos: .utility)

@@ -4,7 +4,7 @@ import SwiftUI
 struct OverviewView: View {
     @Environment(Store.self) private var store
     @Environment(Navigation.self) private var nav
-    @AppStorage("overviewItems") private var itemScope = "notInUse"
+    @AppStorage("overviewItems") private var itemScope = "all"
     /// "grouped" (sections by what a clean costs), "ranked" (bars scaled to the biggest area)
     /// or "classic" (part of each area's total).
     @AppStorage("overviewAreaStyle") private var areaStyle = "grouped"
@@ -47,14 +47,16 @@ struct OverviewView: View {
         let stale = r.plan("stale")
         let d = DiskBreakdown(report: r)
         return VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(d.caption)
-                    .font(.callout)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("\(Fmt.bytes(d.free)) free")
+                    .font(.title2.weight(.semibold))
                     .monospacedDigit()
                     .contentTransition(.numericText())
-                    .animation(.default, value: r.scanned_at)
+                    .foregroundStyle(store.menubarWarns ? Color.orange : Color.primary)
+                Text("of \(Fmt.bytes(d.total))")
+                    .font(.callout)
                     .foregroundStyle(.secondary)
-                    .help(d.trackedExceedsUsed ? "Poo tracks some data on other volumes (simulator runtimes), so it can exceed what this disk reports as used." : "")
+                    .help(d.caption + (d.trackedExceedsUsed ? ". Poo tracks some data on other volumes (simulator runtimes), so it can exceed what this disk reports as used." : ""))
                 Spacer(minLength: 8)
                 plansMenu(r)
                 if (stale?.count ?? 0) > 0 {
@@ -216,7 +218,22 @@ struct OverviewView: View {
 
     @ViewBuilder
     private func footnotes(_ r: Report) -> some View {
-        let lines = (r.warnings + [store.lastClean?.snapshot_note].compactMap { $0 })
+        let fda = r.warnings.first { $0.contains("Full Disk Access") }
+        let lines = (r.warnings.filter { $0 != fda } + [store.lastClean?.snapshot_note].compactMap { $0 })
+        if let fda {
+            // "31 rules (…) are off until poo has Full Disk Access: …" → one line and a button.
+            let n = fda.prefix { $0.isNumber }
+            HStack(spacing: 8) {
+                Label(n.isEmpty ? "Some rules need Full Disk Access" : "\(n) rules need Full Disk Access to look inside app data", systemImage: "lock.shield")
+                    .foregroundStyle(.secondary)
+                    .help(fda)
+                Button("Open Privacy Settings") {
+                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!)
+                }
+                .buttonStyle(.link)
+            }
+            .font(.caption)
+        }
         if !lines.isEmpty || store.lastClean != nil || store.freedThisWeek > 0 {
             VStack(alignment: .leading, spacing: 3) {
                 if store.freedThisWeek > 0 {

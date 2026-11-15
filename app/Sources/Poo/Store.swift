@@ -45,6 +45,8 @@ final class Store {
     var pendingChanges = false
     /// The last `poo watch` error, shown quietly.
     var watchNote: String?
+    /// `[menubar]` from config.toml.
+    var menubar = MenubarSettings.cached()
     /// Areas left out of the menu bar panel's clean (bucket/group keys).
     var menuExcludedAreas: Set<String> = []
     @ObservationIgnored private(set) var live: LiveSync?
@@ -68,9 +70,39 @@ final class Store {
         }
     }
 
+    func loadMenubar() async {
+        do {
+            let m = try await PooCLI.json(MenubarSettings.self, ["config", "get", "menubar"])
+            if m != menubar { withAnimation(.snappy) { menubar = m } }
+            m.cache()
+        } catch {
+            // A CLI without `[menubar]`: keep what's cached.
+        }
+    }
+
+    /// Changes one `menubar.*` key through the CLI, showing it right away.
+    func setMenubar(_ key: String, _ value: String, local: (inout MenubarSettings) -> Void) async {
+        var m = menubar
+        local(&m)
+        withAnimation(.snappy) { menubar = m }
+        m.cache()
+        do {
+            _ = try await PooCLI.run(["config", "set", "menubar.\(key)", value])
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    /// Free space is below the menu bar's warning threshold.
+    var menubarWarns: Bool {
+        guard menubar.warn, let d = report?.disk, let t = menubar.threshold(total: d.total) else { return false }
+        return d.free < t
+    }
+
     func startLive() {
         guard live == nil else { return }
         live = LiveSync(store: self)
+        Task { await loadMenubar() }
         // After the first frame, so window/panel lookups see real windows.
         DispatchQueue.main.async { self.live?.start() }
     }

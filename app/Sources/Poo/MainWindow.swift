@@ -54,6 +54,16 @@ struct MainWindow: View {
             }
             .task {
                 LaunchFlow.run(openWindow)
+                if let p = AppDelegate.shared?.previewSection {
+                    AppDelegate.shared?.previewSection = nil
+                    switch p {
+                    case "browse": nav.section = .browse
+                    case "projects": nav.section = .projects
+                    case "worktrees": nav.section = .worktrees
+                    case "backups": nav.section = .backups
+                    default: if p.hasPrefix("bucket:") { nav.section = .bucket(String(p.dropFirst(7))) }
+                    }
+                }
                 await store.loadLaunchers()
             }
             .toolbar {
@@ -184,7 +194,7 @@ struct ProjectsView: View {
                 } else {
                     DisclosureGroup {
                         ForEach(items) { i in
-                            ItemRow(item: i, subtitle: "\(i.group) · \(i.reasons.first ?? Fmt.tilde(i.path))")
+                            ItemRow(item: i, subtitle: "\(i.group) · \(i.why)")
                                 .contextMenu { ItemContextMenu(item: i) }
                         }
                     } label: {
@@ -232,27 +242,42 @@ struct ProjectRow: View {
                 .foregroundStyle(.secondary)
                 .frame(width: 92, alignment: .trailing)
                 .help("Last activity \(Fmt.ago(p.last_activity.map { Date(timeIntervalSince1970: TimeInterval($0)) }))")
-            Button { store.select(notInUse, true) } label: { Image(systemName: "checklist") }
-                .buttonStyle(.borderless)
-                .help("Select the \(notInUse.count) items not in use (\(Fmt.bytes(notInUse.reduce(0) { $0 + $1.total_bytes })))")
-                .opacity(notInUse.isEmpty ? 0 : 1)
-                .disabled(notInUse.isEmpty)
-            Picker("", selection: Binding(get: { p.policy }, set: { new in Task { await store.setPolicy(p.path, new) } })) {
-                Text("Auto").tag("auto")
-                Text("Active").tag("active")
-                Text("Stale").tag("stale")
-                Text("Protected").tag("protected")
+            // Only a policy someone chose is worth a column; Auto is the quiet default.
+            Group {
+                if p.policy != "auto" {
+                    Label(Self.policyLabel(p.policy), systemImage: p.policy == "protected" ? "lock.fill" : p.policy == "active" ? "pin.fill" : "moon.zzz")
+                        .labelStyle(.titleAndIcon)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
-            .labelsHidden()
-            .controlSize(.small)
-            .frame(width: 100)
-            .help("Auto lets Poo decide from activity; Protected keeps everything here")
+            .frame(width: 92, alignment: .trailing)
             Text(Fmt.bytes(p.artifact_bytes))
                 .monospacedDigit()
                 .frame(width: 72, alignment: .trailing)
         }
         .padding(.vertical, 2)
-        .contextMenu { ProjectRow.menu(p.path) }
+        .contextMenu {
+            if !notInUse.isEmpty {
+                Button("Select \(notInUse.count) Not in Use (\(Fmt.bytes(notInUse.reduce(0) { $0 + $1.total_bytes })))") { store.select(notInUse, true) }
+                Divider()
+            }
+            Picker("Policy", selection: Binding(get: { p.policy }, set: { new in Task { await store.setPolicy(p.path, new) } })) {
+                ForEach(["auto", "active", "stale", "protected"], id: \.self) { Text(Self.policyLabel($0)).tag($0) }
+            }
+            Divider()
+            ProjectRow.menu(p.path)
+        }
+    }
+
+    static func policyLabel(_ p: String) -> String {
+        switch p {
+        case "auto": return "Auto"
+        case "active": return "Keep warm"
+        case "stale": return "Treat as unused"
+        case "protected": return "Protected"
+        default: return p.capitalized
+        }
     }
 
     @ViewBuilder
@@ -334,6 +359,10 @@ struct WorktreeRow: View {
 
     var body: some View {
         HStack {
+            Group {
+                if let item { SelectBox(item: item) } else { Color.clear }
+            }
+            .frame(width: 18)
             Image(systemName: project.kind == "repo" ? "house" : "arrow.triangle.branch").foregroundStyle(.secondary)
             VStack(alignment: .leading) {
                 HStack {
@@ -350,10 +379,6 @@ struct WorktreeRow: View {
             }
             .frame(width: 92, height: 16, alignment: .leading)
             Text(Fmt.bytes(item?.total_bytes ?? project.artifact_bytes)).monospacedDigit().frame(width: 80, alignment: .trailing)
-            Group {
-                if let item { SelectBox(item: item) } else { Color.clear }
-            }
-            .frame(width: 18)
         }
         .contextMenu {
             if let item { ItemContextMenu(item: item) } else { ProjectRow.menu(project.path) }

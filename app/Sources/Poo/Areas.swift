@@ -241,6 +241,10 @@ struct AreaListRow: View {
         .onTapGesture(perform: onOpen)
         .onHover { hovering = $0 }
         .help(area.note)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(area.title), \(Fmt.bytes(area.reclaim)), \(area.detail)")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction(.default, onOpen)
     }
 
     static func percent(_ f: Double) -> String {
@@ -398,7 +402,8 @@ struct AreaPicker: View {
         let total = selected.reduce(0) { $0 + $1.reclaim }
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("Not in use").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                Text("\(Fmt.bytes(areas.reduce(0) { $0 + $1.reclaim })) not in use")
+                    .font(.caption.weight(.semibold)).foregroundStyle(.secondary).monospacedDigit()
                 Spacer()
                 Button(store.menuExcludedAreas.isEmpty ? "Select none" : "Select all") {
                     store.menuExcludedAreas = store.menuExcludedAreas.isEmpty

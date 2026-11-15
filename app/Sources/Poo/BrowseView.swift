@@ -110,9 +110,9 @@ struct BrowseView: View {
 
     private func subtitle(_ i: Item, _ g: BrowseFilter.Grouping) -> String {
         switch g {
-        case .project: return "\(i.group) · \(i.reasons.first ?? Fmt.tilde(i.path))"
+        case .project: return "\(i.group) · \(i.why)"
         default:
-            let why = i.reasons.first ?? Fmt.tilde(i.path)
+            let why = i.why
             if let p = i.project {
                 let name = URL(fileURLWithPath: p).lastPathComponent
                 if !i.name.hasPrefix(name) { return "\(name) · \(why)" }

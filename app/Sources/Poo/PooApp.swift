@@ -165,6 +165,8 @@ struct BrowseFilter: Equatable {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Set by the first SwiftUI view that appears; opens a window scene by id.
     var open: ((String) -> Void)?
+    /// `--preview-section=…`, applied by the main window when it appears.
+    var previewSection: String?
     static weak var shared: AppDelegate?
 
     override init() {
@@ -237,6 +239,14 @@ enum LaunchFlow {
         guard !ran else { return }
         ran = true
         let args = CommandLine.arguments
+        // Screenshot helpers: --dark, --preview-section=browse, --preview-settings=menubar.
+        if args.contains("--dark") { NSApp.appearance = NSAppearance(named: .darkAqua) }
+        if let tab = args.first(where: { $0.hasPrefix("--preview-settings=") })?.split(separator: "=").last {
+            UserDefaults.standard.set(String(tab), forKey: "settingsTab")
+        }
+        if let sec = args.first(where: { $0.hasPrefix("--preview-section=") })?.split(separator: "=").last {
+            AppDelegate.shared?.previewSection = String(sec)
+        }
         if args.contains("--preview-menu") { openWindow(id: "menu-preview") }
         if args.contains("--preview-confirm") { openWindow(id: "confirm-preview") }
         if args.contains(where: { $0.hasPrefix("--preview-cleaning") }) { openWindow(id: "cleaning-preview") }
@@ -251,24 +261,34 @@ enum LaunchFlow {
 
 struct MenuBarLabel: View {
     var store: Store
+    /// In Settings: draw only, don't run the launch flow.
+    var preview = false
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
+        let cfg = store.menubar
+        let warn = store.menubarWarns
+        let text = store.report.map { cfg.text(for: $0) } ?? ""
         HStack(spacing: 3) {
-            Image(systemName: store.busy ? "wind" : store.scanning ? "arrow.triangle.2.circlepath" : store.isLowOnSpace ? "exclamationmark.triangle.fill" : "internaldrive")
-            if let r = store.report {
-                Text(Fmt.bytes(r.disk.free))
+            if cfg.shows(.icon) || text.isEmpty {
+                Image(systemName: store.busy ? "wind" : warn ? "exclamationmark.triangle.fill" : "internaldrive")
+            }
+            if !text.isEmpty {
+                Text(text)
                     .monospacedDigit()
-                    .foregroundStyle(store.isLowOnSpace ? Color.orange : Color.primary)
-                if r.notInUseBytes > 20_000_000_000 && !store.isLowOnSpace {
-                    // A quiet hint that a clean is worth it.
-                    Image(systemName: "circle.fill").font(.system(size: 4)).baselineOffset(6)
-                }
+                    .foregroundStyle(warn ? Color.orange : Color.primary)
             }
         }
-        .help(store.isLowOnSpace ? "Low on space" : "")
+        .accessibilityLabel(store.report.map { "Poo, \(Fmt.bytes($0.disk.free)) free" } ?? "Poo")
+        .help(warn ? "Low on space" : "")
         .task {
+            guard !preview else { return }
             LaunchFlow.run(openWindow)
+            if CommandLine.arguments.contains(where: { $0.hasPrefix("--preview-settings=") }) {
+                try? await Task.sleep(for: .milliseconds(300))
+                openSettings()
+            }
         }
     }
 }

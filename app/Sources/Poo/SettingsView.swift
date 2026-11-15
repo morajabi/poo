@@ -9,6 +9,7 @@ struct SettingsView: View {
     var body: some View {
         TabView(selection: $tab) {
             GeneralSettings().tabItem { Label("General", systemImage: "gearshape") }.tag("general")
+            MenuBarSettingsView().tabItem { Label("Menu Bar", systemImage: "menubar.rectangle") }.tag("menubar")
             SafetySettings().tabItem { Label("Safety & backups", systemImage: "checkmark.shield") }.tag("safety")
             AutomationSettings().tabItem { Label("Automation", systemImage: "clock.arrow.2.circlepath") }.tag("automation")
             BucketSettings().tabItem { Label("Buckets", systemImage: "square.stack.3d.up") }.tag("buckets")
@@ -58,8 +59,6 @@ struct GeneralSettings: View {
                 if let s = updater.status { Text(s).font(.caption).foregroundStyle(.secondary) }
             }
             Section("App") {
-                Toggle("Show in menu bar", isOn: $showInMenuBar)
-                    .onChange(of: showInMenuBar) { _, _ in AppDelegate.updateActivationPolicy(windowOpen: true) }
                 Toggle("Open at login", isOn: Binding(
                     get: { SMAppService.mainApp.status == .enabled },
                     set: { on in try? on ? SMAppService.mainApp.register() : SMAppService.mainApp.unregister() }

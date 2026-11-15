@@ -222,6 +222,15 @@ struct Item: Codable, Hashable, Identifiable {
     var isVirtual: Bool { path.contains("://") }
     var lastUsedDate: Date? { last_used.map { Date(timeIntervalSince1970: TimeInterval($0)) } }
     var isWorktree: Bool { action.kind == "worktree-remove" }
+
+    /// The most useful one-liner for a row. The age has its own column, so a reason that only
+    /// says "last used 3h ago" gives way to what cleaning costs ("Rebuild: cargo build").
+    var why: String {
+        let r = reasons.first { !$0.hasPrefix("last used") && !$0.hasPrefix("used in the last") }
+        if let r { return r }
+        if let rebuild { return "Rebuild: \(rebuild)" }
+        return Fmt.tilde(path)
+    }
 }
 
 struct Project: Codable, Hashable, Identifiable {

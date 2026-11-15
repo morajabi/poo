@@ -125,10 +125,25 @@ struct CleanConfirmView: View {
 struct WhatHappensView: View {
     var items: [Item]
 
+    /// "Deleted permanently; comes back with: cargo build" → "Rebuild: cargo build"
+    static func short(_ d: String) -> String {
+        for p in ["Deleted permanently; comes back with: ", "Deleted permanently; rebuild with "] where d.hasPrefix(p) {
+            return "Rebuild: " + d.dropFirst(p.count)
+        }
+        return d == "Deleted permanently" ? "Nothing to rebuild" : d
+    }
+
     var body: some View {
         let lines = SafeguardSummary.lines(for: items)
+        // Say "deleted permanently" once instead of on every line.
+        let allDelete = !lines.isEmpty && lines.allSatisfy { $0.detail.hasPrefix("Deleted permanently") }
         VStack(alignment: .leading, spacing: 6) {
-            Text("What happens").font(.headline)
+            HStack(alignment: .firstTextBaseline) {
+                Text("What happens").font(.headline)
+                if allDelete {
+                    Text("Deleted permanently, not moved to the Trash").font(.caption).foregroundStyle(.secondary)
+                }
+            }
             if lines.isEmpty {
                 Text("Nothing will be cleaned in this mode.").font(.callout).foregroundStyle(.secondary)
             } else {
@@ -145,7 +160,7 @@ struct WhatHappensView: View {
                                         Spacer()
                                         Text(Fmt.bytes(l.bytes)).font(.caption).monospacedDigit().foregroundStyle(.secondary)
                                     }
-                                    Text(l.detail).font(.caption).foregroundStyle(.secondary)
+                                    Text(allDelete ? Self.short(l.detail) : l.detail).font(.caption).foregroundStyle(.secondary)
                                         .fixedSize(horizontal: false, vertical: true)
                                 }
                             }
@@ -153,7 +168,7 @@ struct WhatHappensView: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxHeight: 150)
+                .frame(maxHeight: 190)
                 .fixedSize(horizontal: false, vertical: true)
                 if lines.contains(where: \.keepsBackup) {
                     Label("Backups stay in Poo › Backups until you prune them.", systemImage: "archivebox")
