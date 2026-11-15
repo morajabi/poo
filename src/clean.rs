@@ -26,6 +26,8 @@ pub struct CleanOptions {
     /// Who asked: cli, app, mcp, schedule:<id>.
     pub actor: String,
     pub backup: crate::config::BackupConfig,
+    /// Erase moved folders in a detached `poo gc` so the clean returns quickly.
+    pub background_delete: bool,
 }
 
 impl Default for CleanOptions {
@@ -37,6 +39,7 @@ impl Default for CleanOptions {
             mode: RiskLevel::Standard,
             actor: "cli".into(),
             backup: Default::default(),
+            background_delete: false,
         }
     }
 }
@@ -51,6 +54,7 @@ impl CleanOptions {
             mode,
             actor: actor.into(),
             backup: cfg.backup.clone(),
+            background_delete: true,
         }
     }
 }
@@ -73,8 +77,37 @@ pub struct ItemResult {
     pub notes: Vec<String>,
 }
 
+/// Set by SIGTERM/SIGINT: finish the item in flight, then stop.
+pub static CANCEL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+extern "C" fn on_signal(_: libc::c_int) {
+    CANCEL.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Lets a running clean stop between items when the app presses Cancel or you hit ^C.
+pub fn install_cancel_handler() {
+    unsafe {
+        libc::signal(libc::SIGTERM, on_signal as *const () as libc::sighandler_t);
+        libc::signal(libc::SIGINT, on_signal as *const () as libc::sighandler_t);
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CleanProgress {
+    pub event: &'static str,
+    pub done: usize,
+    pub total: usize,
+    pub freed_bytes: u64,
+    pub total_bytes: u64,
+    pub current: String,
+    pub status: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct CleanResult {
+    pub cancelled: bool,
+    /// Deleted folders were moved aside; a background `poo gc` erases them.
+    pub background_delete: bool,
     pub dry_run: bool,
     pub mode: RiskLevel,
     pub freed_bytes: u64,
@@ -280,11 +313,12 @@ fn graveyard() -> PathBuf {
 }
 
 
-/// Renames into the graveyard (instant, same volume) then deletes.
-fn delete_path(p: &Path, contents_only: bool) -> Result<(), String> {
+/// Renames into the graveyard (instant, same volume); the graveyard is erased right away or,
+/// with `background`, by a detached `poo gc` after the clean returns.
+fn delete_path(p: &Path, contents_only: bool, background: bool) -> Result<(), String> {
     if contents_only {
         for e in read_entries(p) {
-            delete_path(&e.path, false)?;
+            delete_path(&e.path, false, background)?;
         }
         return Ok(());
     }
@@ -296,6 +330,7 @@ fn delete_path(p: &Path, contents_only: bool) -> Result<(), String> {
     let _ = std::fs::create_dir_all(&grave);
     let target = grave.join(format!("{}-{}", now(), crate::util::short_hash(&p.to_string_lossy())));
     match std::fs::rename(p, &target) {
+        Ok(()) if background => Ok(()),
         Ok(()) => remove_tree(&target).map_err(|e| format!("moved to graveyard but delete failed: {}", e)),
         Err(_) => remove_tree(p),
     }
@@ -485,7 +520,7 @@ fn perform(item: &Item, opts: &CleanOptions, notes: &mut Vec<String>) -> Result<
         ActionKind::Trash => trash_path(p),
         ActionKind::Delete => {
             let contents = item.meta.get("contents").and_then(|v| v.as_bool()).unwrap_or(false);
-            delete_path(p, contents)
+            delete_path(p, contents, opts.background_delete)
         }
         ActionKind::Command => {
             let cmd = item.action.command.clone().ok_or("no command")?;
@@ -540,6 +575,13 @@ pub fn admit(item: &Item, cat: &Catalog, opts: &CleanOptions, procs_list: &[Proc
 }
 
 pub fn clean(items: &[Item], cat: &Catalog, opts: &CleanOptions) -> CleanResult {
+    clean_with(items, cat, opts, None)
+}
+
+pub fn clean_with(items: &[Item], cat: &Catalog, opts: &CleanOptions, progress: Option<&dyn Fn(&CleanProgress)>) -> CleanResult {
+    let total_count = items.len();
+    let total_bytes: u64 = items.iter().map(|i| i.total_bytes).sum();
+    let mut cancelled = false;
     if !opts.dry_run {
         crate::backup::enforce(&opts.backup);
     }
@@ -556,6 +598,13 @@ pub fn clean(items: &[Item], cat: &Catalog, opts: &CleanOptions) -> CleanResult 
     let mut ordered: Vec<&Item> = items.iter().collect();
     ordered.sort_by_key(|i| (i.action.kind == ActionKind::WorktreeRemove, std::cmp::Reverse(i.path.len())));
     for item in ordered {
+        if CANCEL.load(std::sync::atomic::Ordering::SeqCst) {
+            cancelled = true;
+            break;
+        }
+        if let Some(cb) = progress {
+            cb(&CleanProgress { event: "clean-progress", done: results.len(), total: total_count, freed_bytes: freed, total_bytes, current: item.name.clone(), status: "working".into() });
+        }
         let mut res = ItemResult {
             id: item.id.clone(),
             path: item.path.clone(),
@@ -595,9 +644,24 @@ pub fn clean(items: &[Item], cat: &Catalog, opts: &CleanOptions) -> CleanResult 
         res.notes = notes;
         results.push(res);
     }
+    if let Some(cb) = progress {
+        let status = if cancelled { "cancelled" } else { "done" };
+        cb(&CleanProgress { event: "clean-progress", done: results.len(), total: total_count, freed_bytes: freed, total_bytes, current: String::new(), status: status.into() });
+    }
     if !opts.dry_run {
         // New backups may push past the budget.
         crate::backup::enforce(&opts.backup);
+    }
+    let graveyard_busy = !opts.dry_run && opts.background_delete && !read_entries(&graveyard()).is_empty();
+    if graveyard_busy {
+        if let Ok(exe) = std::env::current_exe() {
+            let _ = std::process::Command::new(exe)
+                .args(["gc", "--json"])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn();
+        }
     }
     let after = crate::fsutil::disk_info(&home()).free;
     let cleaned_bytes: u64 = results.iter().filter(|r| r.status == "cleaned").map(|r| r.bytes).sum();
@@ -605,6 +669,8 @@ pub fn clean(items: &[Item], cat: &Catalog, opts: &CleanOptions) -> CleanResult 
         .then(snapshot_hint)
         .flatten();
     CleanResult {
+        cancelled,
+        background_delete: graveyard_busy,
         dry_run: opts.dry_run,
         mode: opts.mode,
         freed_bytes: freed,

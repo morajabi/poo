@@ -113,6 +113,9 @@ enum Cmd {
         /// Highest tier to clean in standard mode (default warm).
         #[arg(long)]
         max_tier: Option<String>,
+        /// Stream progress as JSON lines on stderr.
+        #[arg(long)]
+        progress: bool,
     },
     /// Free a target amount with the least regret (emergency plan).
     Free {
@@ -599,6 +602,11 @@ fn save(cfg: &poo::config::Config, out: &Out, what: &str) -> R {
 
 #[allow(clippy::too_many_arguments)]
 fn run_clean(ctx: &Ctx, out: &Out, mut report: poo::model::Report, items: Vec<poo::model::Item>, dry: bool, yes: bool, trash: bool, mode: RiskLevel, max_tier: Option<Tier>) -> R {
+    run_clean_p(ctx, out, &mut report, items, dry, yes, trash, mode, max_tier, false)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_clean_p(ctx: &Ctx, out: &Out, report: &mut poo::model::Report, items: Vec<poo::model::Item>, dry: bool, yes: bool, trash: bool, mode: RiskLevel, max_tier: Option<Tier>, progress: bool) -> R {
     if items.is_empty() {
         if out.json {
             emit(out, &json!({"freed_bytes": 0, "results": []}));
@@ -652,9 +660,22 @@ fn run_clean(ctx: &Ctx, out: &Out, mut report: poo::model::Report, items: Vec<po
             return Ok(());
         }
     }
-    let res = clean::clean(&items, &ctx.cat, &opts);
+    clean::install_cancel_handler();
+    let human_progress = !out.json && is_tty(2) && !dry;
+    let cb = |p: &clean::CleanProgress| {
+        if progress {
+            eprintln!("{}", serde_json::to_string(p).unwrap_or_default());
+        } else if human_progress {
+            eprint!("\r\x1b[2K{}/{}  freed {}  {}", p.done, p.total, bytes(p.freed_bytes), p.current.chars().take(50).collect::<String>());
+            let _ = std::io::stderr().flush();
+        }
+    };
+    let res = clean::clean_with(&items, &ctx.cat, &opts, Some(&cb));
+    if human_progress {
+        eprint!("\r\x1b[2K");
+    }
     if !dry {
-        ops::forget_cleaned(ctx, &mut report, &res);
+        ops::forget_cleaned(ctx, report, &res);
     }
     if out.json {
         emit(out, &serde_json::to_value(&res).unwrap_or_default());
@@ -680,6 +701,12 @@ fn run_clean(ctx: &Ctx, out: &Out, mut report: poo::model::Report, items: Vec<po
         }
         if let Some(n) = &res.snapshot_note {
             println!("\nnote: {}", n);
+        }
+        if res.cancelled {
+            println!("\nCancelled after the item in flight.");
+        }
+        if res.background_delete {
+            println!("\nErasing in the background; free space grows over the next minutes.");
         }
         if dry {
             println!("\nDry run: would free about {} ({} items, {} skipped).", bytes(res.freed_bytes), res.cleaned, res.skipped);
@@ -788,7 +815,7 @@ fn real_main(cli: Cli) -> R {
                 render::plan(&p);
             }
         }
-        Cmd::Clean { ids, plan, free, dry_run, yes, trash, force, danger, max_tier } => {
+        Cmd::Clean { ids, plan, free, dry_run, yes, trash, force, danger, max_tier, progress } => {
             let r = ops::report(&ctx, false, scan_opts(&out, false))?;
             clear_progress(&out);
             let target = free.as_ref().and_then(|s| parse_bytes(s));
@@ -801,7 +828,8 @@ fn real_main(cli: Cli) -> R {
             };
             let mt = max_tier.as_deref().and_then(Tier::parse);
             let mode = if danger { RiskLevel::Danger } else if force { RiskLevel::Force } else { RiskLevel::Standard };
-            run_clean(&ctx, &out, r, items, dry_run, yes, trash, mode, mt)?;
+            let mut r = r;
+            run_clean_p(&ctx, &out, &mut r, items, dry_run, yes, trash, mode, mt, progress)?;
         }
         Cmd::Free { size, dry_run, yes, force } => {
             let target = parse_bytes(&size).ok_or_else(|| CliError::new("usage", 2, format!("bad size `{}`", size)))?;
