@@ -40,7 +40,12 @@ final class LiveSync {
         let nc = NotificationCenter.default
         let ws = NSWorkspace.shared.notificationCenter
         let recheck: (Notification) -> Void = { [weak self] _ in
-            Task { @MainActor in self?.recomputeVisibility() }
+            Task { @MainActor in
+                self?.recomputeVisibility()
+                // Occlusion state lags unhide/activation by a moment; look again.
+                try? await Task.sleep(for: .milliseconds(500))
+                self?.recomputeVisibility()
+            }
         }
         for name in [NSWindow.didChangeOcclusionStateNotification, NSWindow.willCloseNotification,
                      NSWindow.didBecomeKeyNotification, NSApplication.didHideNotification,
@@ -49,6 +54,8 @@ final class LiveSync {
         }
         observers.append(nc.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
+                self?.recomputeVisibility()
+                try? await Task.sleep(for: .milliseconds(500))
                 self?.recomputeVisibility()
                 await self?.refreshIfOlder(than: Self.freshFor)
             }
@@ -126,6 +133,8 @@ final class LiveSync {
                     try? await Task.sleep(for: .seconds(60))
                     guard !Task.isCancelled else { return }
                     // Tiers like "idle for 6h" move with time even when nothing changes on disk.
+                    // `poo watch` already updates at least every 10 minutes on its own.
+                    if self?.store.watching == true { continue }
                     await self?.refreshIfOlder(than: Self.periodicInterval)
                 }
             }
@@ -341,6 +350,9 @@ final class WatchProcess {
     }
 
     private func handle(_ line: String) {
+        if ProcessInfo.processInfo.environment["POO_DEBUG_LIVE"] != nil {
+            FileHandle.standardError.write(Data("watch: \(line.prefix(200))\n".utf8))
+        }
         guard let d = line.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
               let kind = obj["event"] as? String else { return }
