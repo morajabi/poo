@@ -24,6 +24,9 @@ struct Cli {
     /// Human output even when piped.
     #[arg(long, global = true)]
     text: bool,
+    /// Interactive UI without motion (also POO_NO_ANIMATION or macOS Reduce Motion).
+    #[arg(long, global = true)]
+    no_animation: bool,
     #[command(subcommand)]
     cmd: Option<Cmd>,
 }
@@ -49,7 +52,9 @@ struct FilterArgs {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Overview: free space, buckets, plans (default command).
+    /// Interactive terminal UI (default with no command in a terminal).
+    Ui,
+    /// Overview: free space, buckets, plans (default command when piped or with --text).
     Overview {
         #[arg(long)]
         rescan: bool,
@@ -729,11 +734,13 @@ fn run_clean_p(ctx: &Ctx, out: &Out, report: &mut poo::model::Report, items: Vec
     }
     clean::install_cancel_handler();
     let human_progress = !out.json && is_tty(2) && !dry;
+    let tick = std::cell::Cell::new(0usize);
     let cb = |p: &clean::CleanProgress| {
         if progress {
             eprintln!("{}", serde_json::to_string(p).unwrap_or_default());
         } else if human_progress {
-            eprint!("\r\x1b[2K{}/{}  freed {}  {}", p.done, p.total, bytes(p.freed_bytes), p.current.chars().take(50).collect::<String>());
+            eprint!("\r\x1b[2K{}", render::clean_progress_line(p, tick.get()));
+            tick.set(tick.get() + 1);
             let _ = std::io::stderr().flush();
         }
     };
@@ -747,25 +754,7 @@ fn run_clean_p(ctx: &Ctx, out: &Out, report: &mut poo::model::Report, items: Vec
     if out.json {
         emit(out, &serde_json::to_value(&res).unwrap_or_default());
     } else {
-        let st = render::Style::new();
-        for r in &res.results {
-            let mark = match r.status.as_str() {
-                "cleaned" => "✓",
-                "would-clean" => "·",
-                "failed" => "✗",
-                _ => "–",
-            };
-            println!(
-                "{} {:>9}  {}{}",
-                mark,
-                bytes(r.bytes),
-                r.name,
-                r.reason.as_ref().map(|x| st.dim(&format!("  ({})", x))).unwrap_or_default()
-            );
-            for n in &r.notes {
-                println!("            {}", st.dim(n));
-            }
-        }
+        render::clean_result_rows(&res);
         if let Some(n) = &res.snapshot_note {
             println!("\nnote: {}", n);
         }
@@ -776,16 +765,9 @@ fn run_clean_p(ctx: &Ctx, out: &Out, report: &mut poo::model::Report, items: Vec
             println!("\nErasing in the background; free space grows over the next minutes.");
         }
         if dry {
-            println!("\nDry run: would free about {} ({} items, {} skipped).", bytes(res.freed_bytes), res.cleaned, res.skipped);
+            render::clean_summary(&res);
         } else {
-            println!(
-                "\nFreed about {} ({} cleaned, {} skipped, {} failed). Free space now {}.",
-                bytes(res.freed_bytes),
-                res.cleaned,
-                res.skipped,
-                res.failed,
-                bytes(res.disk_free_after)
-            );
+            render::clean_summary(&res);
         }
     }
     if res.failed > 0 && !dry {
@@ -800,7 +782,14 @@ fn real_main(cli: Cli) -> R {
         print!("{}", poo::agent::SKILL);
         return Ok(());
     }
-    let cmd = cli.cmd.unwrap_or(Cmd::Overview { rescan: false });
+    let interactive = !cli.json && !cli.text && is_tty(0) && is_tty(1) && std::env::var("TERM").map_or(true, |t| t != "dumb");
+    let cmd = cli.cmd.unwrap_or(if interactive { Cmd::Ui } else { Cmd::Overview { rescan: false } });
+    if matches!(cmd, Cmd::Ui) {
+        if !is_tty(0) || !is_tty(1) {
+            return Err(CliError::new("usage", 2, "poo ui needs an interactive terminal").hint("use `poo --text` or `poo --json` when piping"));
+        }
+        return poo::tui::run(poo::tui::UiOptions::detect(cli.no_animation)).map_err(Into::into);
+    }
     if matches!(cmd, Cmd::Mcp) {
         return poo::mcp::serve().map_err(Into::into);
     }
@@ -934,33 +923,7 @@ fn real_main(cli: Cli) -> R {
             if out.json {
                 emit(&out, &v);
             } else {
-                let st = render::Style::new();
-                for repo in v["repos"].as_array().into_iter().flatten() {
-                    println!(
-                        "{}  {} across {} checkouts",
-                        st.bold(&tilde(std::path::Path::new(repo["repo"].as_str().unwrap_or("")))),
-                        bytes(repo["build_bytes"].as_u64().unwrap_or(0)),
-                        repo["checkouts"]
-                    );
-                    for w in repo["worktrees"].as_array().into_iter().flatten() {
-                        let item = &w["item"];
-                        let state = match (w["dirty"].as_bool(), w["merged"].as_bool()) {
-                            (Some(true), _) => "dirty",
-                            (_, Some(true)) => "merged",
-                            _ if w["kind"] == "repo" => "main",
-                            _ => "clean",
-                        };
-                        println!(
-                            "  {:>9} {:<7} {:<9} {:<10} {}  {}",
-                            bytes(item["total_bytes"].as_u64().unwrap_or(w["build_bytes"].as_u64().unwrap_or(0))),
-                            state,
-                            item["tier"].as_str().unwrap_or("-"),
-                            w["agent"].as_str().unwrap_or(""),
-                            tilde(std::path::Path::new(w["path"].as_str().unwrap_or(""))),
-                            st.dim(&format!("{} {}", w["branch"].as_str().unwrap_or("(detached)"), item["id"].as_str().unwrap_or("")))
-                        );
-                    }
-                }
+                render::worktrees(&v);
             }
         }
         Cmd::Roots { cmd } => match cmd.unwrap_or(RootsCmd::Ls) {
@@ -1247,7 +1210,7 @@ fn real_main(cli: Cli) -> R {
             }
             human_setup(&mut ctx)?;
         }
-        Cmd::Mcp => unreachable!(),
+        Cmd::Mcp | Cmd::Ui => unreachable!(),
         Cmd::Integration { cmd } => match cmd.unwrap_or(IntegrationCmd::Status) {
             IntegrationCmd::Status => {
                 let st = poo::agent::status();
@@ -1489,22 +1452,8 @@ fn schedule_cmd(ctx: &mut Ctx, out: &Out, cmd: ScheduleCmd) -> R {
             } else if ctx.cfg.schedule.is_empty() {
                 println!("No schedules. Try `poo schedule add nightly` (see `poo schedule presets`).");
             } else {
-                for s in &ctx.cfg.schedule {
-                    let last = state.last_run.get(&s.id);
-                    println!(
-                        "{:<10} {:<9} plan {:<10} every {:<4}{}{}{}  {}",
-                        s.id,
-                        if s.enabled { "on" } else { "off" },
-                        s.plan,
-                        s.every,
-                        s.at.as_ref().map(|a| format!(" at {}", a)).unwrap_or_default(),
-                        s.when_free_below.as_ref().map(|a| format!(" when free < {}", a)).unwrap_or_default(),
-                        s.target_free.as_ref().map(|a| format!(" to {} free", a)).unwrap_or_default(),
-                        last.map(|l| format!("last: {} {} {}", poo::util::age(l.at), l.status, bytes(l.freed_bytes))).unwrap_or_else(|| "never ran".into())
-                    );
-                }
-                println!("
-scheduler agent: {}", if sch::agent_loaded() { "running" } else if sch::agent_installed() { "installed, not loaded" } else { "not installed" });
+                let agent = if sch::agent_loaded() { "running" } else if sch::agent_installed() { "installed, not loaded" } else { "not installed" };
+                render::schedules(&ctx.cfg.schedule, &state, agent);
             }
             Ok(())
         }
@@ -1632,26 +1581,7 @@ fn backups_cmd(ctx: &Ctx, out: &Out, cmd: BackupsCmd) -> R {
             } else if list.is_empty() {
                 println!("No backups. poo saves small ignored files, stashes and rescue branches here before removing worktrees.");
             } else {
-                for b in &list {
-                    println!(
-                        "{:<12} {:<7} {:>9} {:>8}  {:<28} {}",
-                        b.id,
-                        b.kind,
-                        if b.kind == "files" { bytes(b.bytes) } else { format!("{} files", b.files) },
-                        poo::util::age(b.at),
-                        b.label,
-                        match b.kind.as_str() {
-                            "files" => b.path.as_deref().map(|p| tilde(std::path::Path::new(p))).unwrap_or_default(),
-                            _ => format!("{} in {}", b.r#ref.clone().unwrap_or_default(), b.repo.as_deref().map(|r| tilde(std::path::Path::new(r))).unwrap_or_default()),
-                        }
-                    );
-                }
-                println!(
-                    "\n{} in file backups (budget {}; {}).",
-                    bytes(total),
-                    bytes(ctx.cfg.backup.max_backup_bytes),
-                    if ctx.cfg.backup.auto_prune_days > 0 { format!("file backups older than {} days are pruned", ctx.cfg.backup.auto_prune_days) } else { "kept until you prune".into() }
-                );
+                render::backups(&list, total, &ctx.cfg.backup);
             }
             Ok(())
         }
