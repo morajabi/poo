@@ -67,17 +67,29 @@ its bundled CLI.
 Mark projects `active`, `stale` or `protected` (`poo projects set`) and plans follow. Tune
 `scan.keep_recent_checkouts` and `scan.idle_hours` to how many checkouts you build at once.
 
-Everything that is not risk-free carries warnings. `--force` cleans recently used items,
-checkouts with an agent open and worktrees with uncommitted work (stashed first with
-`git stash -u`, never including build output). `--danger` also takes running builds, data,
-protected items and detached commits (saved to a `poo/` branch first). Plans and schedules
-always run in standard mode.
+Everything that is not risk-free carries a note. `--include-in-use` also cleans things in
+use: used in the last hour, checkouts with an agent open, worktrees with uncommitted work
+(stashed first, never including build output). `--dangerously-include-protected` also takes
+running builds, data, kept projects and detached commits (saved to a `poo/` branch first).
+Plans and schedules only ever clean safe items.
+
+## Backups you can see
+
+Before removing a worktree poo copies its small ignored files (`.env`, `Local.xcconfig`)
+into a dated folder, stashes uncommitted work, and saves detached commits to a branch.
+`poo backups` lists them, `restore` puts files back, `prune` removes them. A 2 GB budget and
+a 90-day limit keep the folder from growing; both live in `[backup]` in `config.toml`.
+
+## Agent hooks (opt-in)
+
+`poo hooks install all` makes Claude Code and Codex clean a worktree's build output when an
+agent finishes there and its work already landed in main. Nothing is installed by default.
 
 ## Routine cleanups
 
 ```sh
 poo schedule add nightly    # 03:30 every night: clean what nothing is using
-poo schedule add guard      # every 30 min: if free < 10%, free least-regret items to 20%
+poo schedule add guard      # low-disk guard: below 20 GB free, clean what's not in use until 50 GB
 poo schedule ls
 ```
 

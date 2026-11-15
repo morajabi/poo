@@ -138,14 +138,35 @@ poo combines cost with activity into a tier for each item:
 
 Every item carries `risks`. Each risk names the mode that may clean it anyway:
 
-| mode | allows |
-|---|---|
-| standard | items without risks (plans and schedules only ever use this) |
-| `--force` | `recent`, `agent-active`, `review`, `whole-checkout`, `dirty` (poo runs `git stash push --include-untracked` on the real changes first, never on build output) |
-| `--danger` | `build-running`, `app-running`, `data`, `protected`, `unreachable-commits` (saved to a `poo/<name>` branch first), paths outside your home folder except system trees |
+| mode (JSON) | CLI flag | allows |
+|---|---|---|
+| `safe` | (default) | items without risks; plans and schedules only ever use this |
+| `in-use` | `--include-in-use` | `recent`, `agent-active`, `review`, `whole-checkout`, `dirty` (poo stashes the real changes first, never build output) |
+| `dangerous` | `--dangerously-include-protected` | `build-running`, `app-running`, `data`, `protected`, `unreachable-commits` (saved to a `poo/<name>` branch first), paths outside your home folder except system trees |
 
-Before removing any worktree poo backs up small ignored files (`.env`, `Local.xcconfig`)
-to `~/.local/state/poo/backups/`.
+Status labels people see: junk, unused (cold), idle, in use (warm), active now (hot), check
+first (review), kept (protected).
+
+## Backups
+
+Before removing a worktree poo copies small ignored files (`.env`, `Local.xcconfig`) into a
+dated folder (`~/.local/state/poo/backups/2026-11-15/194407-<name>`), stashes uncommitted
+work when you chose `--include-in-use`, and saves detached commits to a `poo/` branch.
+Every one is recorded: `poo backups` lists them, `poo backups restore <id>` copies files
+back, `poo backups prune <id>|--older-than 30d` removes them. File backups have a budget
+(`backup.max_backup_bytes`, 2 GB) and an age limit (`backup.auto_prune_days`, 90); stashes
+and branches stay until you prune them unless `backup.auto_prune_git = true`.
+`backup.use_trash = true` moves deleted folders to the Trash instead.
+
+## Agent hooks (opt-in)
+
+`poo hooks install claude|codex|all` adds a hook (Claude Code `SessionEnd`, Codex `Stop`)
+that runs `poo hook agent-done` in the background when an agent finishes in a linked
+worktree. With `hooks.on_agent_done = "landed"` (default) poo cleans that worktree's build
+output once its commits are in the main branch; `"always"` cleans after every Claude Code
+session in a worktree. `hooks.remove_landed_worktrees = true` also removes the landed,
+clean worktree. Never the main checkout. `poo hooks uninstall all` removes them.
+`poo config keys` lists every setting with its default.
 
 ### Tags and stacks
 
