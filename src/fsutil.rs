@@ -18,9 +18,82 @@ pub struct Entry {
     pub dev: u64,
     pub ino: u64,
     pub nlink: u64,
+    /// Bytes deleting this entry alone frees (APFS: blocks shared with clones excluded).
+    pub private: u64,
+}
+
+/// Folders macOS guards with a consent prompt. Until someone answers, the first read of
+/// one blocks: forever, if nobody is at the Mac. Each is probed once, off-thread, with a
+/// timeout; a folder that does not answer is skipped for the rest of the run.
+fn guarded_roots() -> &'static [PathBuf] {
+    static ROOTS: std::sync::OnceLock<Vec<PathBuf>> = std::sync::OnceLock::new();
+    ROOTS.get_or_init(|| {
+        let h = crate::util::home();
+        ["Desktop", "Documents", "Downloads", "Library/Mobile Documents", "Library/CloudStorage"]
+            .iter()
+            .map(|p| h.join(p))
+            .chain(std::iter::once(PathBuf::from("/Volumes")))
+            .collect()
+    })
+}
+
+static BLOCKED: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+
+/// Guarded folders that did not answer in time during this run.
+pub fn blocked_folders() -> Vec<PathBuf> {
+    let mut v = BLOCKED.lock().unwrap().clone();
+    v.sort();
+    v.dedup();
+    v
+}
+
+/// False when `path` is inside a guarded folder that does not answer (a pending privacy
+/// prompt, a hung network volume or cloud provider).
+pub fn readable_without_blocking(path: &Path) -> bool {
+    let Some(root) = guarded_roots().iter().find(|r| path.starts_with(r)) else { return true };
+    // /Volumes/<name> is probed per volume.
+    let probe = if root.as_os_str() == "/Volumes" {
+        match path.strip_prefix(root).ok().and_then(|r| r.components().next()) {
+            Some(c) => root.join(c),
+            None => return true,
+        }
+    } else {
+        root.clone()
+    };
+    answers(&probe)
+}
+
+/// Whether listing `dir` returns within a few seconds. macOS blocks the first read of
+/// privacy-guarded folders (another app's container, media libraries, Downloads) until
+/// someone answers a prompt. Probed once per folder per run, off-thread; a folder that
+/// does not answer is skipped and reported, never waited on.
+pub fn answers(dir: &Path) -> bool {
+    static CACHE: std::sync::OnceLock<Mutex<std::collections::HashMap<PathBuf, bool>>> = std::sync::OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()));
+    if let Some(ok) = cache.lock().unwrap().get(dir) {
+        return *ok;
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    let p = dir.to_path_buf();
+    std::thread::spawn(move || {
+        // An error (missing, no permission) answers too: only silence is a problem.
+        let _ = tx.send(std::fs::read_dir(&p).map(|mut d| d.next()).ok());
+    });
+    let ok = match rx.recv_timeout(std::time::Duration::from_secs(3)) {
+        Ok(_) => true,
+        Err(_) => {
+            BLOCKED.lock().unwrap().push(dir.to_path_buf());
+            false
+        }
+    };
+    cache.lock().unwrap().insert(dir.to_path_buf(), ok);
+    ok
 }
 
 pub fn read_entries(dir: &Path) -> Vec<Entry> {
+    if !readable_without_blocking(dir) {
+        return vec![];
+    }
     if let Some(v) = crate::bulk::read_entries_bulk(dir) {
         return v;
     }
@@ -44,6 +117,7 @@ pub fn read_entries_std(dir: &Path) -> Vec<Entry> {
             dev: md.dev(),
             ino: md.ino(),
             nlink: md.nlink(),
+            private: md.blocks() * 512,
         });
     }
     out
@@ -79,10 +153,20 @@ pub struct Sized {
     pub bytes: u64,
     pub files: u64,
     pub newest: i64,
+    /// What deleting it frees: like `bytes`, minus blocks shared with APFS clones elsewhere
+    /// (pnpm stores, cloned checkouts, copied Xcode builds).
+    #[serde(default)]
+    pub frees: u64,
 }
 
 impl Sized {
+    /// A size measured some other way (a tool's report): it frees what it uses.
+    pub fn of(bytes: u64, files: u64, newest: i64) -> Sized {
+        Sized { bytes, files, newest, frees: bytes }
+    }
+
     fn add(mut self, o: Sized) -> Sized {
+        self.frees += o.frees;
         self.bytes += o.bytes;
         self.files += o.files;
         self.newest = self.newest.max(o.newest);
@@ -133,6 +217,7 @@ impl SizeCtx {
             }
             let b = self.file_bytes(e);
             total.bytes += b;
+            total.frees += if b == 0 { 0 } else { e.private.min(b) };
             total.files += 1;
             total.newest = total.newest.max(e.mtime);
             children.push(Child { name: e.name.clone(), bytes: b });
@@ -144,6 +229,7 @@ impl SizeCtx {
             .map(|d| {
                 let mut s = self.size_dir(&d.path, dev, exclude);
                 s.bytes += d.alloc;
+                s.frees += d.alloc;
                 self.remember(&d.path, s);
                 (d.name.clone(), s)
             })
@@ -180,6 +266,7 @@ impl SizeCtx {
             }
             let b = self.file_bytes(e);
             total.bytes += b;
+            total.frees += if b == 0 { 0 } else { e.private.min(b) };
             total.files += 1;
             total.newest = total.newest.max(e.mtime);
             children.push(Child { name: e.name.clone(), bytes: b });
@@ -197,6 +284,8 @@ impl SizeCtx {
                             self.size_entries_delta(&read_entries(&d.path), dev, exclude, &below).0
                         };
                         s.bytes += d.alloc;
+                        s.frees += d.alloc;
+                s.frees += d.alloc;
                                 s
                     }
                 };
@@ -222,6 +311,7 @@ impl SizeCtx {
         let entries = read_entries(path);
         let (mut s, children) = self.size_entries_delta(&entries, md.dev(), exclude, changed);
         s.bytes += md.blocks() * 512;
+        s.frees += md.blocks() * 512;
         Some((s, children))
     }
 
@@ -229,12 +319,14 @@ impl SizeCtx {
     pub fn size_path(&self, path: &Path, exclude: &HashSet<PathBuf>) -> Option<(Sized, Vec<Child>)> {
         let md = std::fs::symlink_metadata(path).ok()?;
         if md.file_type().is_symlink() {
-            return Some((Sized { bytes: 0, files: 0, newest: md.mtime() }, vec![]));
+            return Some((Sized::of(0, 0, md.mtime()), vec![]));
         }
         if md.is_dir() {
             let entries = read_entries(path);
             let (mut s, children) = self.size_entries(&entries, md.dev(), exclude);
             s.bytes += md.blocks() * 512;
+            s.frees += md.blocks() * 512;
+        s.frees += md.blocks() * 512;
             Some((s, children))
         } else {
             let e = Entry {
@@ -247,10 +339,11 @@ impl SizeCtx {
                 dev: md.dev(),
                 ino: md.ino(),
                 nlink: md.nlink(),
+                private: md.blocks() * 512,
             };
             let b = self.file_bytes(&e);
             self.bytes.fetch_add(b, Ordering::Relaxed);
-            Some((Sized { bytes: b, files: 1, newest: md.mtime() }, vec![]))
+            Some((Sized::of(b, 1, md.mtime()), vec![]))
         }
     }
 }
@@ -272,6 +365,9 @@ pub fn expand_glob(pattern: &Path) -> Vec<PathBuf> {
             let Ok(g) = globset::Glob::new(&c) else { return vec![] };
             let m = g.compile_matcher();
             for base in &current {
+                if !readable_without_blocking(base) {
+                    continue;
+                }
                 let Ok(rd) = std::fs::read_dir(base) else { continue };
                 for e in rd.flatten() {
                     let n = e.file_name();
@@ -283,7 +379,7 @@ pub fn expand_glob(pattern: &Path) -> Vec<PathBuf> {
         } else {
             for base in &current {
                 let p = base.join(c.as_ref());
-                if std::fs::symlink_metadata(&p).is_ok() {
+                if readable_without_blocking(&p) && std::fs::symlink_metadata(&p).is_ok() {
                     next.push(p);
                 }
             }

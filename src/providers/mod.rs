@@ -426,7 +426,7 @@ pub fn simulator_devices(rule: &Rule, devices: Option<&Value>) -> Vec<Raw> {
             };
             if let Some(size) = d.get("dataPathSize").and_then(|v| v.as_u64()) {
                 let logs = d.get("logPathSize").and_then(|v| v.as_u64()).unwrap_or(0);
-                raw.sized = Some((Sized { bytes: size + logs, files: 0, newest: last.unwrap_or(0) }, vec![]));
+                raw.sized = Some((Sized::of(size + logs, 0, last.unwrap_or(0)), vec![]));
             }
             raw.meta.insert("udid".into(), Value::String(udid));
             raw.meta.insert("runtime".into(), Value::String(runtime.clone()));
@@ -488,7 +488,7 @@ pub fn simulator_runtimes(rule: &Rule, devices: Option<&Value>) -> Vec<Raw> {
             rule: rule.id.clone(),
             is_virtual: true,
             last_used: r.get("lastUsedAt").and_then(|v| v.as_str()).and_then(parse_iso),
-            sized: Some((Sized { bytes, files: 0, newest: 0 }, vec![])),
+            sized: Some((Sized::of(bytes, 0, 0), vec![])),
             command: Some(vec!["xcrun".into(), "simctl".into(), "runtime".into(), "delete".into(), id.clone()]),
             action: Some(ActionKind::Command),
             ..Default::default()
@@ -536,7 +536,7 @@ pub fn docker(rule: &Rule) -> Vec<Raw> {
             name: name.into(),
             rule: rule.id.clone(),
             is_virtual: true,
-            sized: Some((Sized { bytes: reclaim, files: 0, newest: 0 }, vec![])),
+            sized: Some((Sized::of(reclaim, 0, 0), vec![])),
             tier: Some(tier),
             cost: Some(cost),
             ..Default::default()
@@ -588,7 +588,7 @@ pub fn homebrew(rule: &Rule) -> Vec<Raw> {
         name: format!("Old Homebrew versions ({} entries)", count),
         rule: rule.id.clone(),
         is_virtual: true,
-        sized: Some((Sized { bytes, files: count, newest: 0 }, vec![])),
+        sized: Some((Sized::of(bytes, count, 0), vec![])),
         action: Some(ActionKind::Command),
         command: Some(vec!["brew".into(), "cleanup".into(), "--prune=all".into()]),
         ..Default::default()
@@ -629,7 +629,7 @@ pub fn exec(rule: &Rule) -> Result<Vec<Raw>, String> {
             ..Default::default()
         };
         if let Some(b) = it.get("bytes").and_then(|v| v.as_u64()) {
-            raw.sized = Some((Sized { bytes: b, files: 0, newest: raw.last_used.unwrap_or(0) }, vec![]));
+            raw.sized = Some((Sized::of(b, 0, raw.last_used.unwrap_or(0)), vec![]));
         }
         if let Some(c) = it.get("cost").and_then(|v| v.as_str()) {
             raw.cost = serde_json::from_value(Value::String(c.into())).ok();

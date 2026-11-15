@@ -409,6 +409,10 @@ pub struct Item {
     pub bytes: u64,
     /// Bytes freed when this item is cleaned, including nested items (worktrees).
     pub total_bytes: u64,
+    /// What cleaning it frees: below `bytes` when APFS clones share its blocks (pnpm
+    /// stores, cloned checkouts). Older reports omit it.
+    #[serde(default)]
+    pub frees: u64,
     pub files: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_used: Option<i64>,

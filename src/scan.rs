@@ -222,6 +222,7 @@ impl<'a> Walker<'a> {
             if let Some(rule) = matched {
                 let (mut s, children) = self.ctx.size_entries(&child, dev, &HashSet::new());
                 s.bytes += e.alloc;
+                s.frees += e.alloc;
                 self.items.lock().unwrap().push(Raw {
                     path: e.path.clone(),
                     name: self.label(&e.path, &proj),
@@ -251,7 +252,7 @@ impl<'a> Walker<'a> {
                             path: e.path.clone(),
                             name: self.label(&e.path, &proj),
                             rule: rule.id.clone(),
-                            sized: Some((Sized { bytes: b, files: 0, newest: n }, vec![])),
+                            sized: Some((Sized::of(b, 0, n), vec![])),
                             project: proj.as_ref().map(|p| p.path.clone()),
                             disjoint: true,
                             origin: "ignored".into(),
@@ -314,6 +315,7 @@ impl<'a> Walker<'a> {
             if let Some(rule) = self.rules.iter().find(|r| (!r.ignored || is_ignored) && r.matches_artifact(&e.name, &e.path, &entry_names, &child_names)) {
                 let (mut s, children) = self.ctx.size_entries(&child, dev, &HashSet::new());
                 s.bytes += e.alloc;
+                s.frees += e.alloc;
                 self.items.lock().unwrap().push(Raw {
                     path: e.path.clone(),
                     name: self.label(&e.path, &proj),
@@ -360,6 +362,18 @@ fn rule_candidates(rule: &Rule) -> Vec<(PathBuf, &Rule, bool)> {
     {
         for p in &rule.paths {
             let pattern = expand(p);
+            // The deepest fixed folder of the pattern must answer before poo reads below it.
+            let fixed: PathBuf = pattern.components().take_while(|c| !has_glob(&c.as_os_str().to_string_lossy())).collect();
+            let base = if has_glob(&pattern.to_string_lossy()) { fixed } else { fixed.parent().map(|p| p.to_path_buf()).unwrap_or(fixed) };
+            let probe_at = base.ancestors().find(|a| a.is_dir()).map(|a| a.to_path_buf());
+            if let Some(b) = probe_at {
+                if b != home() && !crate::fsutil::answers(&b) {
+                    continue;
+                }
+                if !has_glob(&pattern.to_string_lossy()) && pattern.is_dir() && !crate::fsutil::answers(&pattern) {
+                    continue;
+                }
+            }
             let matches = if has_glob(&pattern.to_string_lossy()) {
                 expand_glob(&pattern)
             } else if std::fs::symlink_metadata(&pattern).is_ok() {
@@ -633,6 +647,7 @@ pub fn scan(cfg: &Config, cat: &Catalog, opts: &ScanOptions) -> Report {
     });
 
     *phase.lock().unwrap() = "classifying".into();
+    warnings.extend(blocked_warnings());
     let report = build_report(cfg, cat, raws, found_projects, &procs_list, roots, warnings, started);
     report_progress(true);
     report
@@ -1115,6 +1130,8 @@ fn build_report(
             tags: rule.tags.clone(),
             bytes: sized.bytes,
             total_bytes: sized.bytes + raw.nested_bytes,
+            // Sizes a tool reported (no files counted) free what they use.
+            frees: if sized.files == 0 { sized.bytes } else { sized.frees.min(sized.bytes) },
             files: sized.files,
             last_used: raw.last_used,
             tier,
@@ -1430,7 +1447,7 @@ fn slow_providers(cat: &Catalog, devices_json: Option<&Value>) -> (Vec<Raw>, Vec
 // Scan index and incremental rescans
 // ---------------------------------------------------------------------------
 
-const INDEX_VERSION: u32 = 2;
+const INDEX_VERSION: u32 = 3;
 /// Slow providers (Docker, Homebrew, app leftovers, runtimes) are reused this long.
 const SLOW_TTL: i64 = 15 * 60;
 /// A full walk at least this often catches anything the journal cannot tell.
@@ -1680,6 +1697,7 @@ pub fn scan_incremental(cfg: &Config, cat: &Catalog, opts: &ScanOptions) -> Opti
     }
     let mut exclude: HashSet<PathBuf> = known.clone();
     exclude.insert(home().join("Library"));
+    exclude.insert(home().join("OrbStack"));
     exclude.insert(home().join(".Trash"));
     let walker = Walker {
         cat,
@@ -1900,6 +1918,7 @@ pub fn scan_incremental(cfg: &Config, cat: &Catalog, opts: &ScanOptions) -> Opti
     trace(&started, "index");
     let procs_list = procs::list();
     trace(&started, "procs");
+    warnings.extend(blocked_warnings());
     let mut report = build_report(cfg, cat, raws, projects, &procs_list, roots, warnings, started);
     trace(&started, "report");
     report.warnings.retain(|w| !w.is_empty());
@@ -1921,4 +1940,12 @@ fn trace(started: &Instant, step: &str) {
     if std::env::var_os("POO_TRACE").is_some() {
         eprintln!("trace {:>6} ms  {}", started.elapsed().as_millis(), step);
     }
+}
+
+/// Guarded folders that did not answer: say so instead of hanging on them.
+fn blocked_warnings() -> Vec<String> {
+    crate::fsutil::blocked_folders()
+        .iter()
+        .map(|p| format!("skipped {}: macOS is waiting for permission (System Settings > Privacy & Security > Files and Folders, or Full Disk Access)", crate::util::tilde(p)))
+        .collect()
 }

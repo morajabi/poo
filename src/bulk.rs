@@ -43,6 +43,10 @@ mod imp {
     const ATTR_CMN_ERROR: u32 = 0x2000_0000;
     /// `DIR_MNTSTATUS_MNTPOINT` from <sys/attr.h>; not exported by libc 0.2.
     const DIR_MNTSTATUS_MNTPOINT: u32 = 0x0000_0001;
+    /// `ATTR_CMNEXT_PRIVATESIZE` (bytes freed if this file alone were deleted: shared
+    /// clone blocks excluded) and `FSOPT_ATTR_CMN_EXTENDED` from <sys/attr.h>.
+    const ATTR_CMNEXT_PRIVATESIZE: u32 = 0x0000_0008;
+    const FSOPT_ATTR_CMN_EXTENDED: u64 = 0x0000_0020;
     /// `enum vtype` values from <sys/vnode.h>.
     const VDIR: u32 = 2;
     const VLNK: u32 = 5;
@@ -95,7 +99,7 @@ mod imp {
             volattr: 0,
             dirattr: DIR,
             fileattr: FILE,
-            forkattr: 0,
+            forkattr: ATTR_CMNEXT_PRIVATESIZE,
         };
         let mut buf = vec![0u64; BUF_WORDS];
         let size = BUF_WORDS * 8;
@@ -107,7 +111,7 @@ mod imp {
                     &mut al as *mut attrlist as *mut c_void,
                     buf.as_mut_ptr() as *mut c_void,
                     size,
-                    0,
+                    FSOPT_ATTR_CMN_EXTENDED,
                 )
             };
             if n < 0 {
@@ -172,20 +176,26 @@ mod imp {
         }
 
         let is_dir = objtype == VDIR;
-        let (alloc, nlink) = if is_dir {
+        let (alloc, nlink, is_file) = if is_dir {
             let mnt: u32 = if has(ret.dirattr, libc::ATTR_DIR_MOUNTSTATUS) { c.take()? } else { 0 };
             if mnt & DIR_MNTSTATUS_MNTPOINT != 0 {
                 return Some(lstat_entry(name, path));
             }
             let alloc: i64 = if has(ret.dirattr, libc::ATTR_DIR_ALLOCSIZE) { c.take()? } else { 0 };
-            (alloc.max(0) as u64, 1)
+            (alloc.max(0) as u64, 1, None)
         } else {
             if !has(ret.fileattr, libc::ATTR_FILE_LINKCOUNT) || !has(ret.fileattr, libc::ATTR_FILE_ALLOCSIZE) {
                 return Some(lstat_entry(name, path));
             }
             let nlink: u32 = c.take()?;
             let alloc: i64 = c.take()?;
-            (alloc.max(0) as u64, nlink as u64)
+            (alloc.max(0) as u64, nlink as u64, Some(()))
+        };
+        // Extended common attributes come last.
+        let private: Option<i64> = if has(ret.forkattr, ATTR_CMNEXT_PRIVATESIZE) { Some(c.take()?) } else { None };
+        let private = match (is_file, private) {
+            (Some(()), Some(p)) => (p.max(0) as u64).min(alloc),
+            _ => alloc,
         };
         Some(Some(Entry {
             name,
@@ -198,6 +208,7 @@ mod imp {
             dev: dev as u64,
             ino,
             nlink,
+            private,
         }))
     }
 
@@ -214,6 +225,7 @@ mod imp {
             dev: md.dev(),
             ino: md.ino(),
             nlink: md.nlink(),
+            private: md.blocks() * 512,
         })
     }
 }
