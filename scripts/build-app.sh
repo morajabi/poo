@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds the poo CLI and Poo.app (menu bar + window) with the CLI bundled inside.
 #   ARCHS="arm64 x86_64"  universal build (default: this machine's arch)
-#   SIGN_IDENTITY="Developer ID Application: ..."  (default: ad-hoc)
+#   SIGN_IDENTITY="Developer ID Application: ..."  (default: one from the keychain, else ad-hoc)
 #   SPARKLE_PUBLIC_KEY=<base64 EdDSA public key>  turns on Sparkle updates (default: off)
 #   SPARKLE_FEED_URL  (default: the latest GitHub release's appcast.xml)
 #   OUT=dist
@@ -11,7 +11,14 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VERSION="${VERSION:-$(grep -m1 '^version' "$ROOT/Cargo.toml" | cut -d'"' -f2)}"
 OUT="${OUT:-$ROOT/dist}"
 ARCHS="${ARCHS:-$(uname -m)}"
-SIGN_IDENTITY="${SIGN_IDENTITY:--}"
+# Default: a Developer ID (or Apple Development) identity from the keychain when there is
+# one, so the app keeps one code identity across rebuilds and macOS keeps its privacy grants
+# (Downloads, Desktop, Full Disk Access). Ad-hoc signing changes identity on every build.
+if [ -z "${SIGN_IDENTITY:-}" ]; then
+  SIGN_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -n1)"
+  [ -n "$SIGN_IDENTITY" ] || SIGN_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null | sed -n 's/.*"\(Apple Development: [^"]*\)".*/\1/p' | head -n1)"
+  [ -n "$SIGN_IDENTITY" ] || SIGN_IDENTITY="-"
+fi
 SPARKLE_PUBLIC_KEY="${SPARKLE_PUBLIC_KEY:-}"
 SPARKLE_FEED_URL="${SPARKLE_FEED_URL:-https://github.com/morajabi/poo/releases/latest/download/appcast.xml}"
 
