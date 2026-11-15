@@ -52,18 +52,37 @@ Then `poo setup` to pick your dev folders. Homebrew formula and cask are coming
 (`packaging/homebrew`). poo updates itself (`poo update`); the app updates itself and
 its bundled CLI.
 
-## Tiers and plans
+## Tiers, plans and modes
 
 | tier | meaning | cleaned by plans |
 |---|---|---|
-| junk | nothing to rebuild: logs, temp, crash reports, broken simulators | quick, stale, deep, emergency |
-| cold | rebuildable and unused for weeks, or orphaned (project gone, merged worktree) | stale, deep, emergency |
-| warm | rebuildable but used recently | deep, emergency |
-| hot | in use now: a build or agent is running there, or touched in the last hour | never |
-| review | needs a human look: unknown ignored folders, archives, transcripts | never |
-| protected | never: uncommitted worktrees, data, Docker volumes | never |
+| junk | nothing to rebuild: logs, temp, crash reports, broken simulators | quick, not in use, deep, emergency |
+| cold | unused for days, orphaned (project gone), or its worktree's commits already landed | not in use, deep, emergency |
+| idle | nothing uses it now: builds of checkouts other than your 2 newest per repo, untouched for hours | not in use, deep, emergency |
+| warm | in active use: recent, or an agent, editor or shell is open in that checkout | deep, emergency |
+| hot | a build or the owning app is running, or touched in the last hour | never |
+| review | needs a human look: unknown ignored folders, worktrees with uncommitted work | never |
+| protected | data, Docker volumes, projects you protected | never |
 
-Mark projects `active`, `stale` or `protected` (`poo projects set`) and plans follow.
+Mark projects `active`, `stale` or `protected` (`poo projects set`) and plans follow. Tune
+`scan.keep_recent_checkouts` and `scan.idle_hours` to how many checkouts you build at once.
+
+Everything that is not risk-free carries warnings. `--force` cleans recently used items,
+checkouts with an agent open and worktrees with uncommitted work (stashed first with
+`git stash -u`, never including build output). `--danger` also takes running builds, data,
+protected items and detached commits (saved to a `poo/` branch first). Plans and schedules
+always run in standard mode.
+
+## Routine cleanups
+
+```sh
+poo schedule add nightly    # 03:30 every night: clean what nothing is using
+poo schedule add guard      # every 30 min: if free < 10%, free least-regret items to 20%
+poo schedule ls
+```
+
+A launchd agent wakes poo every 15 minutes; due schedules rescan first, respect bucket and
+tag filters, notify you, and log to `poo schedule log`.
 
 ## CLI
 
@@ -103,7 +122,7 @@ everything poo knows, and the questions worth asking you.
 
 ## Mods
 
-Everything poo knows (about 190 rules across Xcode, Swift, Rust, Node, Python, JVM,
+Everything poo knows (hundreds of rules across Xcode, Swift, Rust, Node, Python, JVM,
 Go, Ruby, PHP, Elixir, Haskell, .NET, Flutter, game engines, Docker, AI agents and
 editors, browsers and macOS) is a built-in mod written in the same TOML format you can
 use. Buckets, plans, stacks, worktree homes and guards are mod data too. Add rules,

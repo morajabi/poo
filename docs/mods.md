@@ -126,12 +126,34 @@ poo combines cost with activity into a tier for each item:
 
 | tier | meaning | in plans |
 |---|---|---|
-| `junk` | cost `none` | Quick, Stale, Deep, Emergency |
-| `cold` | rebuildable and untouched for longer than `warm_days`, or orphaned | Stale, Deep, Emergency |
-| `warm` | rebuildable and used recently | Deep, Emergency |
-| `hot` | in use now (build running, touched in the last hour) | never |
-| `review` | needs a human look (unknown ignored folder, unmerged worktree) | never |
-| `protected` | never cleaned (uncommitted work, data) | never |
+| `junk` | cost `none` | Quick, Not in use, Deep, Emergency |
+| `cold` | untouched for longer than `warm_days`, orphaned, or its worktree's commits already landed | Not in use, Deep, Emergency |
+| `idle` | nothing uses it now: builds of checkouts other than your `scan.keep_recent_checkouts` newest per repo, untouched for `scan.idle_hours`; or anything untouched for `idle_days` with nobody working there | Not in use, Deep, Emergency |
+| `warm` | in active use (recent, or an agent, editor or shell is open in that checkout) | Deep, Emergency |
+| `hot` | in use now (a build tool runs there, an app that owns it is open, touched in the last hour) | never |
+| `review` | needs a human look (unknown ignored folder, worktree with uncommitted work) | never |
+| `protected` | never cleaned without `--danger` (data, protected projects) | never |
+
+### Risks and modes
+
+Every item carries `risks`. Each risk names the mode that may clean it anyway:
+
+| mode | allows |
+|---|---|
+| standard | items without risks (plans and schedules only ever use this) |
+| `--force` | `recent`, `agent-active`, `review`, `whole-checkout`, `dirty` (poo runs `git stash push --include-untracked` on the real changes first, never on build output) |
+| `--danger` | `build-running`, `app-running`, `data`, `protected`, `unreachable-commits` (saved to a `poo/<name>` branch first), paths outside your home folder except system trees |
+
+Before removing any worktree poo backs up small ignored files (`.env`, `Local.xcconfig`)
+to `~/.local/state/poo/backups/`.
+
+### Tags and stacks
+
+`tags = ["rust", "build-output"]` group rules into packs that can be switched on or off
+together: `poo rules disable --tag games`, `poo rules enable --stack android`, also
+`--group` and `--bucket`. `stacks = ["rust"]` tells poo which stack a rule belongs to so the
+app and CLI show what is relevant to the machine (`poo rules ls --hits` lists rules that
+matched something). Rules with `enabled = false` are opt-in packs.
 
 Project policies (`poo projects set <path> active|stale|protected`) move every item of a
 project up or down.
@@ -167,6 +189,31 @@ Override a built-in plan from config with `[plan_overrides.stale]`.
 
 `[[stack]] id = "rust" markers = ["Cargo.toml"]` tells poo what a project is built with.
 Stacks show up in `poo projects` and help agents reason about rebuild costs.
+
+## Schedules
+
+Schedules live in `config.toml` and are managed with `poo schedule` (presets: nightly,
+quick, guard, weekly) or the MCP `schedules` tool. A launchd agent
+(`com.morajabi.poo.scheduler`) wakes poo every 15 minutes; due schedules rescan, evaluate
+their plan with their filters, and clean in standard mode.
+
+```toml
+[[schedule]]
+id = "nightly"
+plan = "stale"
+every = "1d"
+at = "03:30"
+exclude_buckets = ["ai"]
+exclude_tags = ["browsers"]
+max_bytes = "200G"
+
+[[schedule]]
+id = "guard"
+plan = "emergency"
+every = "30m"
+when_free_below = "10%"
+target_free = "20%"
+```
 
 ## Exec providers
 
