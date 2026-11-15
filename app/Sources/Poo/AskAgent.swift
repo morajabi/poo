@@ -38,7 +38,7 @@ struct AskAgentButton: View {
             AskAgentItems(target: target)
         } label: {
             if let title {
-                Label(title, systemImage: "sparkles")
+                Label(title, systemImage: "sparkles").labelStyle(.titleAndIcon)
             } else {
                 Image(systemName: "sparkles")
             }

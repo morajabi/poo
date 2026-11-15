@@ -1,13 +1,20 @@
 import SwiftUI
 
-/// The menu bar panel: free space, buckets by size, and a way into the window.
-/// Cleaning happens in the window, where there is room to review it.
+/// The menu bar panel: free space, a collapsible disk breakdown, buckets with one-click
+/// reviewed cleans, and a way into the window for detailed work.
 struct MenuBarView: View {
     @Environment(Store.self) private var store
     @Environment(Updater.self) private var updater
     @Environment(Navigation.self) private var nav
     @Environment(\.openWindow) private var openWindow
     @Environment(\.openSettings) private var openSettings
+    @AppStorage("menuBreakdownExpanded") private var expanded = false
+    @State private var review: PanelReview?
+
+    struct PanelReview: Identifiable {
+        var bucket: String?
+        var id: String { bucket ?? "all" }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -15,8 +22,10 @@ struct MenuBarView: View {
                 .padding(.horizontal, 14)
                 .padding(.top, 12)
                 .padding(.bottom, 10)
+                .zIndex(2)
             Divider()
             if let r = store.report {
+                action(r)
                 buckets(r)
             } else if store.scanning {
                 scanningView
@@ -25,13 +34,12 @@ struct MenuBarView: View {
                     .frame(maxWidth: .infinity, minHeight: 140)
             }
             Divider()
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 6) {
                 Button { open(.overview) } label: {
                     Text("Open Poo").frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
                 .controlSize(.large)
-                .keyboardShortcut(.defaultAction)
+                .keyboardShortcut("o")
                 status
             }
             .padding(.horizontal, 14)
@@ -42,53 +50,129 @@ struct MenuBarView: View {
                 .padding(.vertical, 8)
         }
         .frame(width: 340)
-        .task { await store.loadSchedules() }
+        .task {
+            await store.loadSchedules()
+            await store.loadHistory()
+            // `--preview-menu-cleaning`: show the panel's progress with a simulated clean.
+            if CommandLine.arguments.contains("--preview-menu-cleaning"), store.menuSession == nil, let r = store.report {
+                let items = r.items.filter { $0.status == .notInUse }.sorted { $0.total_bytes > $1.total_bytes }
+                store.menuSession = CleanSession.fake(items: items, freeBefore: r.disk.free, speed: 0.3)
+            }
+        }
+        .sheet(item: $review) { rv in
+            CleanConfirmView(planID: "stale", free: nil, bucket: rv.bucket, onStart: { store.menuSession = $0 })
+                .environment(store)
+        }
     }
 
+    // MARK: Header
+
     private var header: some View {
-        HStack(alignment: .center, spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
                 if let r = store.report {
                     Text("\(Fmt.bytes(r.disk.free)) free")
                         .font(.title3.weight(.semibold))
                         .monospacedDigit()
-                    HStack(spacing: 4) {
-                        if r.notInUseBytes > 0 {
-                            Text("\(Fmt.bytes(r.notInUseBytes)) not in use")
-                            Text("·").foregroundStyle(.tertiary)
-                        }
-                        Text("scanned \(Fmt.ago(r.scannedAt))").foregroundStyle(.tertiary)
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                        .contentTransition(.numericText())
+                        .animation(.default, value: r.disk.free)
                 } else {
                     Text("Poo").font(.title3.weight(.semibold))
                 }
-            }
-            Spacer(minLength: 8)
-            if store.scanning {
-                HStack(spacing: 6) {
-                    if let p = store.progress {
-                        Text(Fmt.bytes(p.bytes)).font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                if store.scanning {
+                    HStack(spacing: 6) {
+                        if let p = store.progress {
+                            Text(Fmt.bytes(p.bytes)).font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                        }
+                        ProgressView().controlSize(.small)
                     }
-                    ProgressView().controlSize(.small)
+                    .help("Scanning…")
+                } else {
+                    Button { Task { await store.scan() } } label: { Image(systemName: "arrow.clockwise") }
+                        .buttonStyle(.borderless)
+                        .keyboardShortcut("r")
+                        .help("Rescan (⌘R)")
                 }
-                .help("Scanning…")
-            } else {
-                Button { Task { await store.scan() } } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .buttonStyle(.borderless)
-                .help("Rescan")
             }
+            if let r = store.report {
+                let d = DiskBreakdown(report: r)
+                Button { withAnimation(.snappy) { expanded.toggle() } } label: {
+                    HStack(spacing: 5) {
+                        if r.notInUseBytes > 0 {
+                            Circle().fill(Palette.reclaim).frame(width: 6, height: 6)
+                            Text("\(Fmt.bytes(r.notInUseBytes)) not in use")
+                        } else {
+                            Text("Nothing to clean right now")
+                        }
+                        Text("·").foregroundStyle(.tertiary)
+                        Text("scanned \(Fmt.ago(r.scannedAt))").foregroundStyle(.tertiary)
+                        Spacer(minLength: 4)
+                        Image(systemName: "chevron.right")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                            .rotationEffect(.degrees(expanded ? 90 : 0))
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(expanded ? "Hide the breakdown" : "Show the breakdown")
+                DiskBreakdownBar(breakdown: d, height: 6, onReview: { review = PanelReview(bucket: nil) })
+                if expanded {
+                    Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 3) {
+                        ForEach(d.segments) { s in
+                            GridRow {
+                                LegendSwatch(kind: s.kind)
+                                Text(s.label).foregroundStyle(.secondary)
+                                Text(Fmt.bytes(s.bytes)).monospacedDigit().gridColumnAlignment(.trailing)
+                            }
+                        }
+                    }
+                    .font(.caption)
+                    .padding(.top, 2)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+        }
+    }
+
+    // MARK: Clean action / progress
+
+    @ViewBuilder
+    private func action(_ r: Report) -> some View {
+        if let s = store.menuSession {
+            MenuCleaningView(session: s) {
+                store.menuSession = nil
+                open(.backups)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            Divider()
+        } else if r.notInUseBytes > 0 {
+            Button { review = PanelReview(bucket: nil) } label: {
+                Text("Clean everything not in use · \(Fmt.bytes(r.plan("stale")?.bytes ?? r.notInUseBytes))")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(store.busy)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .help("Review first. Only items nothing is using are included.")
+            Divider()
         }
     }
 
     private func buckets(_ r: Report) -> some View {
         VStack(spacing: 1) {
             ForEach(r.visibleBuckets.sorted { $0.bytes > $1.bytes }) { b in
-                Button { open(.bucket(b.id)) } label: { MenuBucketRow(bucket: b) }
-                    .buttonStyle(MenuRowStyle())
+                MenuBucketRow(
+                    bucket: b,
+                    onOpen: { open(.bucket(b.id)) },
+                    onClean: b.notInUseBytes > 0 && store.menuSession == nil && !store.busy ? { review = PanelReview(bucket: b.id) } : nil
+                )
             }
         }
         .padding(.horizontal, 5)
@@ -110,8 +194,8 @@ struct MenuBarView: View {
 
     @ViewBuilder
     private var status: some View {
-        if let last = store.lastClean, !last.dry_run {
-            Label("Freed \(Fmt.bytes(last.freed_bytes)) · \(last.cleaned) cleaned", systemImage: "checkmark.circle")
+        if store.freedThisWeek > 0 {
+            Label("Freed with Poo: \(Fmt.bytes(store.freedThisWeek)) this week", systemImage: "leaf")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -134,6 +218,7 @@ struct MenuBarView: View {
                 NSApp.activate(ignoringOtherApps: true)
                 openSettings()
             }
+            .keyboardShortcut(",")
             if updater.available != nil {
                 Button("Update") { Task { await updater.install() } }
             }
@@ -154,33 +239,102 @@ struct MenuBarView: View {
 
 struct MenuBucketRow: View {
     var bucket: BucketSummary
+    var onOpen: () -> Void
+    var onClean: (() -> Void)?
+    @State private var hovering = false
 
     var body: some View {
         let unused = bucket.notInUseBytes
-        HStack(alignment: .center, spacing: 10) {
-            Image(systemName: bucket.symbol)
-                .foregroundStyle(bucket.swiftColor)
-                .font(.body)
-                .frame(width: 20)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(bucket.name)
-                    .fixedSize(horizontal: false, vertical: true)
-                if unused > 0 {
-                    Text("\(Fmt.bytes(unused)) not in use")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+        HStack(alignment: .center, spacing: 8) {
+            Button(action: onOpen) {
+                HStack(alignment: .center, spacing: 10) {
+                    Image(systemName: bucket.symbol)
+                        .foregroundStyle(bucket.swiftColor)
+                        .frame(width: 20)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(bucket.name)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(unused > 0 ? "\(Fmt.bytes(bucket.bytes)) · \(Fmt.bytes(unused)) not in use" : Fmt.bytes(bucket.bytes))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                    .layoutPriority(1)
+                    Spacer(minLength: 4)
                 }
+                .contentShape(Rectangle())
             }
-            .layoutPriority(1)
-            Spacer(minLength: 6)
-            Text(Fmt.bytes(bucket.bytes))
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-                .fixedSize()
+            .buttonStyle(.plain)
+            if let onClean {
+                Button("Clean \(Fmt.bytes(unused))", action: onClean)
+                    .controlSize(.small)
+                    .fixedSize()
+                    .help("Review and clean what's not in use in \(bucket.name)")
+            }
         }
         .padding(.horizontal, 9)
         .padding(.vertical, 5)
-        .contentShape(Rectangle())
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(hovering ? 0.07 : 0)))
+        .onHover { hovering = $0 }
+    }
+}
+
+/// The panel's compact progress: a small broom, the bar, Stop; then "Freed X" for a few seconds.
+struct MenuCleaningView: View {
+    @Bindable var session: CleanSession
+    var onShowBackups: () -> Void
+    @Environment(Store.self) private var store
+
+    var body: some View {
+        Group {
+            switch session.phase {
+            case .running:
+                HStack(spacing: 10) {
+                    SweepAnimation()
+                        .frame(width: 112, height: 56)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(session.cancelling ? "Stopping…" : "Cleaning \(min(session.done + 1, max(session.total, 1))) of \(session.total)")
+                            .font(.callout.weight(.medium)).monospacedDigit()
+                        if session.streaming {
+                            ProgressView(value: session.fraction).controlSize(.small)
+                        } else {
+                            ProgressView().progressViewStyle(.linear).controlSize(.small)
+                        }
+                        Text("Freed \(Fmt.bytes(session.freedBytes))\(session.current.flatMap { $0.isEmpty ? nil : " · \($0)" } ?? "")")
+                            .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                            .lineLimit(1).truncationMode(.middle)
+                    }
+                    Button { session.cancel() } label: { Image(systemName: "stop.circle") }
+                        .buttonStyle(.borderless)
+                        .help("Stop after this item")
+                        .disabled(session.cancelling)
+                }
+            case .finished:
+                let r = session.result
+                let backups = (r?.results ?? []).contains { !($0.notes ?? []).isEmpty }
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.title3)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("\(session.dryRun ? "Would free" : "Freed") \(Fmt.bytes(r?.freed_bytes ?? 0))").font(.callout.weight(.medium))
+                        Text([r.map { "\($0.cleaned) cleaned" }, (r?.skipped ?? 0) > 0 ? "\(r!.skipped) skipped" : nil].compactMap { $0 }.joined(separator: " · "))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if backups { Button("Backups", action: onShowBackups).controlSize(.small) }
+                }
+                .task {
+                    try? await Task.sleep(for: .seconds(6))
+                    if store.menuSession === session { store.menuSession = nil }
+                }
+            case .failed(let m):
+                HStack {
+                    Label(m, systemImage: "exclamationmark.triangle").font(.caption).lineLimit(3)
+                    Spacer()
+                    Button("OK") { store.menuSession = nil }.controlSize(.small)
+                }
+            }
+        }
+        .animation(.smooth, value: session.phase)
     }
 }
 

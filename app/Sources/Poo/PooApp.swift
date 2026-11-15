@@ -65,6 +65,15 @@ struct PooApp: App {
         .windowResizability(.contentSize)
         .commandsRemoved()
 
+        // `Poo --preview-cleaning` runs the stale plan as a dry run (nothing is deleted) to show
+        // the progress UI; `--preview-cleaning=fake` simulates it without calling the CLI.
+        Window("Poo Cleaning", id: "cleaning-preview") {
+            CleaningPreview()
+                .environment(store)
+        }
+        .windowResizability(.contentSize)
+        .commandsRemoved()
+
         Settings {
             SettingsView()
                 .environment(store)
@@ -230,6 +239,7 @@ enum LaunchFlow {
         let args = CommandLine.arguments
         if args.contains("--preview-menu") { openWindow(id: "menu-preview") }
         if args.contains("--preview-confirm") { openWindow(id: "confirm-preview") }
+        if args.contains(where: { $0.hasPrefix("--preview-cleaning") }) { openWindow(id: "cleaning-preview") }
         if !Onboarding.isDone {
             openWindow(id: "onboarding")
         } else if args.contains("--window") || !AppDelegate.showInMenuBar {
@@ -245,16 +255,18 @@ struct MenuBarLabel: View {
 
     var body: some View {
         HStack(spacing: 3) {
-            Image(systemName: store.scanning ? "arrow.triangle.2.circlepath" : "internaldrive")
-            if store.lowDisk {
-                Image(systemName: "exclamationmark.circle")
-                    .help("Free space is below the low-disk guard's threshold")
-            }
+            Image(systemName: store.busy ? "wind" : store.scanning ? "arrow.triangle.2.circlepath" : store.isLowOnSpace ? "exclamationmark.triangle.fill" : "internaldrive")
             if let r = store.report {
                 Text(Fmt.bytes(r.disk.free))
                     .monospacedDigit()
+                    .foregroundStyle(store.isLowOnSpace ? Color.orange : Color.primary)
+                if r.notInUseBytes > 20_000_000_000 && !store.isLowOnSpace {
+                    // A quiet hint that a clean is worth it.
+                    Image(systemName: "circle.fill").font(.system(size: 4)).baselineOffset(6)
+                }
             }
         }
+        .help(store.isLowOnSpace ? "Low on space" : "")
         .task {
             LaunchFlow.run(openWindow)
         }

@@ -27,6 +27,10 @@ final class Store {
     var lowDisk = false
     @ObservationIgnored private var diskGuard: LowDiskGuard?
     var launchers: LauncherList?
+    /// Bytes poo freed in the last 7 days (`poo history`).
+    var freedThisWeek: UInt64 = 0
+    /// A clean started from the menu bar panel, shown in the panel.
+    var menuSession: CleanSession?
     /// Shown briefly after "Copy prompt".
     var toast: String?
 
@@ -83,8 +87,15 @@ final class Store {
         report?.items.filter { $0.bucket == bucket } ?? []
     }
 
-    func plan(_ id: String, free: UInt64? = nil) async -> PlanResult? {
+    func loadHistory() async {
+        guard let h = try? await PooCLI.json(HistoryList.self, ["history"]) else { return }
+        let since = Int64(Date().timeIntervalSince1970) - 7 * 86_400
+        freedThisWeek = h.history.filter { $0.at >= since }.reduce(0) { $0 + $1.bytes }
+    }
+
+    func plan(_ id: String, free: UInt64? = nil, bucket: String? = nil) async -> PlanResult? {
         var args = ["plan", id]
+        if let bucket { args.append(bucket) }
         if let free { args += ["--free", "\(free)"] }
         do { return try await PooCLI.json(PlanResult.self, args) } catch {
             self.error = error.localizedDescription
@@ -99,6 +110,52 @@ final class Store {
         var args = ["clean"] + ids + ["--yes"]
         if let flag = mode.flag { args.append(flag) }
         await runClean(args)
+    }
+
+    /// Starts a clean with live progress. The sheet shows the returned session.
+    func startClean(_ items: [Item], mode: CleanMode, dryRun: Bool = false) -> CleanSession {
+        let session = CleanSession(items: items, freeBefore: report?.disk.free)
+        session.dryRun = dryRun
+        busy = true
+        Task {
+            var args = ["clean"] + items.map(\.id) + ["--yes"]
+            if let flag = mode.flag { args.append(flag) }
+            if dryRun { args.append("--dry-run") }
+            do {
+                let data: Data
+                do {
+                    data = try await runStreaming(args + ["--progress"], session)
+                } catch let f as PooCLI.Failure where f.kind == "usage" && f.message.contains("--progress") {
+                    // Older CLI without progress: same clean, no stream (it never started).
+                    data = try await runStreaming(args, session)
+                }
+                let r = try JSONDecoder().decode(CleanResult.self, from: data)
+                if !r.dry_run { lastClean = r }
+                session.finish(r)
+            } catch {
+                session.phase = .failed(error.localizedDescription)
+            }
+            busy = false
+            if !dryRun {
+                report = PooCLI.cachedReport() ?? report
+                selection.subtract(items.map(\.id))
+                await loadHistory()
+                await scan()
+            }
+        }
+        return session
+    }
+
+    private func runStreaming(_ args: [String], _ session: CleanSession) async throws -> Data {
+        try await PooCLI.run(args, onStderrLine: { line in
+            guard let d = line.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+                  obj["event"] as? String == "clean-progress",
+                  let e = try? JSONDecoder().decode(CleanProgressEvent.self, from: d) else { return }
+            Task { @MainActor in session.apply(e) }
+        }, onStart: { p in
+            Task { @MainActor in session.attach(p) }
+        })
     }
 
     func clean(plan: String, free: UInt64? = nil) async {
@@ -121,6 +178,13 @@ final class Store {
         // The CLI already removed cleaned items from the cached report.
         report = PooCLI.cachedReport() ?? report
         selection.removeAll()
+    }
+
+    /// Below the low-disk guard's threshold, or under 10% free.
+    var isLowOnSpace: Bool {
+        if lowDisk { return true }
+        guard let d = report?.disk, d.total > 0 else { return false }
+        return d.free < d.total / 10
     }
 
     var selectedItems: [Item] {
@@ -203,20 +267,56 @@ final class Store {
     func ask(_ target: String, with launcher: String) async {
         do {
             _ = try await PooCLI.run(["ask", target, "--with", launcher])
+        } catch let f as PooCLI.Failure where f.kind == "not_found" || f.kind == "usage" {
+            // An older CLI that doesn't know this target: hand over a prompt built here.
+            copy(localPrompt(target))
+            let name = launchers?.launchers.first { $0.id == launcher }?.name ?? "your agent"
+            flash("Prompt copied. Paste it into \(name).")
         } catch {
             self.error = error.localizedDescription
         }
     }
 
     func copyPrompt(_ target: String) async {
-        do {
-            let p = try await PooCLI.json(AgentPrompt.self, ["prompt", target])
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(p.prompt, forType: .string)
-            flash("Prompt copied. Paste it into your agent.")
-        } catch {
-            self.error = error.localizedDescription
+        let text = (try? await PooCLI.json(AgentPrompt.self, ["prompt", target]))?.prompt ?? localPrompt(target)
+        copy(text)
+        flash("Prompt copied. Paste it into your agent.")
+    }
+
+    private func copy(_ s: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(s, forType: .string)
+    }
+
+    /// A brief built from the cached report, for targets the CLI can't describe yet.
+    func localPrompt(_ target: String) -> String {
+        guard let r = report else { return "Help me review my disk use with poo (run `poo overview`)." }
+        let outro = "\n\nUse `poo show <id>` for details and look at the folders yourself. Tell me what each one really is and what's safe to clean. Don't delete anything; I'll clean through Poo after reviewing."
+        func line(_ i: Item) -> String {
+            "- \(Fmt.bytes(i.total_bytes)) \(i.name) [\(i.tier.label.lowercased())] \(Fmt.tilde(i.path)): \(i.reasons.joined(separator: "; ")) (poo id \(i.id))"
         }
+        if target.hasPrefix("items:") {
+            let ids = Set(target.dropFirst(6).split(separator: ",").map(String.init))
+            let items = r.items.filter { ids.contains($0.id) }.sorted { $0.total_bytes > $1.total_bytes }
+            return "poo, my disk-space tool, found these \(items.count) items (\(Fmt.bytes(items.reduce(0) { $0 + $1.total_bytes }))). Help me review them.\n\n" + items.map(line).joined(separator: "\n") + outro
+        }
+        if target == "projects" {
+            let ps = r.projects.sorted { $0.artifact_bytes > $1.artifact_bytes }.prefix(60)
+            return "poo, my disk-space tool, found these projects with build output and caches. Help me decide which I still need.\n\n" + ps.map { p in
+                "- \(Fmt.bytes(p.artifact_bytes)) \(p.name) (\(Fmt.tilde(p.path))) \(p.kind), \(p.status), last active \(Fmt.ago(p.last_activity.map { Date(timeIntervalSince1970: TimeInterval($0)) })), stacks: \(p.stacks.joined(separator: ", "))"
+            }.joined(separator: "\n") + outro
+        }
+        if target == "worktrees" {
+            let ws = r.projects.filter { $0.kind == "worktree" }.sorted { $0.artifact_bytes > $1.artifact_bytes }
+            return "poo, my disk-space tool, found these git worktrees. I don't remember what all of them are. Check each one (branch, uncommitted work, whether it landed in main) and tell me which I can remove.\n\n" + ws.map { p in
+                var flags: [String] = [p.branch ?? "detached"]
+                if p.dirty == true { flags.append("uncommitted changes") }
+                if p.merged == true { flags.append("merged") }
+                if let a = p.agent { flags.append("made by \(a)") }
+                return "- \(Fmt.bytes(p.artifact_bytes)) \(Fmt.tilde(p.path)) (\(flags.joined(separator: ", "))), repo \(p.repo.map(Fmt.tilde) ?? "?")"
+            }.joined(separator: "\n") + outro
+        }
+        return "Help me review my disk use with poo. Run `poo overview` and `poo prompt \(target)` for details." + outro
     }
 
     func flash(_ message: String) {

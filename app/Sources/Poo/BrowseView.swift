@@ -49,7 +49,19 @@ struct BrowseView: View {
             if report == nil {
                 ContentUnavailableView("Scanning…", systemImage: "internaldrive")
             } else if groups.isEmpty {
-                ContentUnavailableView.search(text: filter.query)
+                if filter.query.isEmpty {
+                    ContentUnavailableView {
+                        Label("Nothing matches these filters", systemImage: "line.3.horizontal.decrease.circle")
+                    } actions: {
+                        Button("Show everything") {
+                            nav.browse.statuses = []
+                            nav.browse.group = nil
+                            if lockedBucket == nil { nav.browse.bucket = nil }
+                        }
+                    }
+                } else {
+                    ContentUnavailableView.search(text: filter.query)
+                }
             }
         }
         .safeAreaInset(edge: .top, spacing: 0) { filterBar(bucket: bucket) }
@@ -66,6 +78,7 @@ struct BrowseView: View {
                     ForEach(BrowseFilter.Sorting.allCases) { Text($0.label).tag($0) }
                 }
                 .help("Sort by")
+                AskAgentButton(target: askTarget(groups), title: "Ask")
                 Button { showInspector.toggle() } label: { Label("Inspector", systemImage: "sidebar.right") }
                     .help("Show the selected item's details")
             }
@@ -81,6 +94,12 @@ struct BrowseView: View {
             .inspectorColumnWidth(min: 260, ideal: 320, max: 440)
         }
         .onChange(of: inspected) { _, new in if new != nil { showInspector = true } }
+        .onKeyPress(.space) {
+            // Space ticks the highlighted row, like Mail's and Finder's checkbox lists.
+            guard let id = inspected, let i = report?.items.first(where: { $0.id == id }), i.isCleanable else { return .ignored }
+            store.toggle(i.id)
+            return .handled
+        }
     }
 
     private func subtitle(_ groups: [ItemGroup]) -> String {
@@ -102,7 +121,12 @@ struct BrowseView: View {
         }
     }
 
-    private var filterGrouping: BrowseFilter.Grouping { nav.browse.grouping }
+    /// One Ask for the whole screen: the bucket, or the items currently shown (at most 60).
+    private func askTarget(_ groups: [ItemGroup]) -> String {
+        if let id = lockedBucket { return "bucket:\(id)" }
+        let ids = groups.flatMap(\.items).prefix(60).map(\.id)
+        return "items:" + ids.joined(separator: ",")
+    }
 
     private func header(_ g: ItemGroup, grouped: Bool) -> some View {
         let isCollapsed = collapsed.contains(g.id)
@@ -136,11 +160,6 @@ struct BrowseView: View {
         .contextMenu {
             if !g.notInUse.isEmpty { Button("Select not in use") { store.select(g.notInUse, true) } }
             Button("Deselect all") { store.select(g.items, false) }
-            if let p = g.items.first?.project, filterGrouping == .project {
-                AskAgentItems(target: "project:\(p)")
-            } else if let b = g.items.first?.bucket {
-                AskAgentItems(target: "bucket:\(b)")
-            }
         }
         .onTapGesture(count: 2) {
             if isCollapsed { collapsed.remove(g.id) } else { collapsed.insert(g.id) }
@@ -187,10 +206,6 @@ struct BrowseView: View {
                 .help("Show every group")
             }
             Spacer()
-            if let id = lockedBucket ?? nav.browse.bucket {
-                AskAgentButton(target: "bucket:\(id)", title: "Ask")
-                    .controlSize(.small)
-            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
@@ -297,6 +312,7 @@ struct SelectionBar: View {
                 Button("Deselect all") { store.selection.removeAll() }
                     .buttonStyle(.link)
                 Spacer()
+                AskAgentButton(target: "items:" + items.prefix(60).map(\.id).joined(separator: ","), title: "Ask about selected")
                 Button("Clean \(items.count) selected (\(Fmt.bytes(items.reduce(0) { $0 + $1.total_bytes })))…") { nav.review(items: items) }
                     .buttonStyle(.borderedProminent)
                     .disabled(store.busy)

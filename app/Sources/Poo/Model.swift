@@ -297,6 +297,27 @@ struct CleanResult: Codable {
     var disk_free_after: UInt64
     var results: [CleanItemResult]
     var snapshot_note: String?
+    var cancelled: Bool?
+    var disk_free_before: UInt64?
+}
+
+struct HistoryEntry: Codable {
+    var at: Int64
+    var bytes: UInt64
+}
+
+struct HistoryList: Codable {
+    var history: [HistoryEntry]
+}
+
+/// One `clean-progress` line from `poo clean --progress`.
+struct CleanProgressEvent: Codable {
+    var done: Int
+    var total: Int
+    var freed_bytes: UInt64
+    var total_bytes: UInt64?
+    var current: String?
+    var status: String?
 }
 
 struct PlanResult: Codable {

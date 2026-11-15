@@ -39,7 +39,7 @@ struct PooCLI {
     }
 
     /// Runs `poo <args> --json` and returns stdout. Calls `onStderrLine` for each stderr line.
-    static func run(_ args: [String], onStderrLine: (@Sendable (String) -> Void)? = nil) async throws -> Data {
+    static func run(_ args: [String], onStderrLine: (@Sendable (String) -> Void)? = nil, onStart: (@Sendable (Process) -> Void)? = nil) async throws -> Data {
         guard let bin = binary else {
             throw Failure(kind: "missing", message: "The poo command-line tool was not found.", hint: "Reinstall Poo, or install the CLI with the install script.")
         }
@@ -73,7 +73,10 @@ struct PooCLI {
                     cont.resume(throwing: collector.failure(status: proc.terminationStatus))
                 }
             }
-            do { try p.run() } catch { cont.resume(throwing: error) }
+            do {
+                try p.run()
+                onStart?(p)
+            } catch { cont.resume(throwing: error) }
         }
     }
 
@@ -87,6 +90,8 @@ struct PooCLI {
 final class StderrCollector: @unchecked Sendable {
     private var buffer = Data()
     private var lastError: PooCLI.Failure?
+    /// Recent plain stderr lines, for failures that aren't JSON (argument errors).
+    private var plain: [String] = []
     private let lock = NSLock()
     private let onLine: (@Sendable (String) -> Void)?
 
@@ -110,6 +115,12 @@ final class StderrCollector: @unchecked Sendable {
                 lastError = PooCLI.Failure(kind: e["kind"] as? String ?? "error", message: e["message"] as? String ?? line, hint: e["hint"] as? String)
                 lock.unlock()
             } else {
+                if !line.hasPrefix("{"), !line.trimmingCharacters(in: .whitespaces).isEmpty {
+                    lock.lock()
+                    plain.append(line)
+                    if plain.count > 6 { plain.removeFirst() }
+                    lock.unlock()
+                }
                 onLine?(line)
             }
         }
@@ -117,7 +128,10 @@ final class StderrCollector: @unchecked Sendable {
 
     func failure(status: Int32) -> PooCLI.Failure {
         lock.lock(); defer { lock.unlock() }
-        return lastError ?? PooCLI.Failure(kind: "error", message: "poo exited with status \(status)", hint: nil)
+        if let lastError { return lastError }
+        let text = plain.first { $0.hasPrefix("error:") } ?? plain.last
+        return PooCLI.Failure(kind: text?.contains("unexpected argument") == true ? "usage" : "error",
+                              message: text ?? "poo exited with status \(status)", hint: nil)
     }
 }
 

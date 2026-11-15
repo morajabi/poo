@@ -8,10 +8,16 @@ struct CleanConfirmView: View {
     var planID: String?
     var free: UInt64?
     var items: [Item]? = nil
+    /// Limits a plan to one bucket (menu bar "Clean" on a bucket row).
+    var bucket: String? = nil
+    /// When set, the caller shows the progress (menu bar panel) and the sheet closes on start.
+    var onStart: ((CleanSession) -> Void)? = nil
     @State private var plan: PlanResult?
     @State private var loading = true
     @State private var mode: CleanMode = .safe
     @State private var dangerAck = false
+    @State private var session: CleanSession?
+    var onShowBackups: (() -> Void)? = nil
 
     private var list: [Item] { items ?? plan?.items ?? [] }
     private var needed: CleanMode { CleanMode.needed(for: list) }
@@ -21,8 +27,17 @@ struct CleanConfirmView: View {
     private var total: UInt64 { allowed.reduce(0) { $0 + $1.total_bytes } }
 
     var body: some View {
+        if let session {
+            CleaningView(session: session, onShowBackups: onShowBackups) { dismiss() }
+                .interactiveDismissDisabled(session.phase == .running)
+        } else {
+            review
+        }
+    }
+
+    private var review: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(plan?.name ?? "Clean selected items").font(.title3.weight(.semibold))
+            Text(bucket.flatMap { b in store.report?.buckets.first { $0.id == b }?.name }.map { "\(plan?.name ?? "Not in use") · \($0)" } ?? plan?.name ?? "Clean selected items").font(.title3.weight(.semibold))
             if let d = plan?.description { Text(d).foregroundStyle(.secondary) }
             if loading && items == nil {
                 ProgressView().frame(maxWidth: .infinity, minHeight: 200)
@@ -72,11 +87,9 @@ struct CleanConfirmView: View {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Clean \(Fmt.bytes(total))", role: .destructive) {
-                    Task {
-                        // Clean exactly what was reviewed, in the chosen mode.
-                        await store.clean(ids: allowed.map(\.id), mode: mode)
-                        dismiss()
-                    }
+                    // Clean exactly what was reviewed, in the chosen mode.
+                    let s = store.startClean(allowed, mode: mode)
+                    if let onStart { onStart(s); dismiss() } else { session = s }
                 }
                 .keyboardShortcut(.defaultAction)
                 .disabled(allowed.isEmpty || store.busy || (mode == .dangerous && !dangerAck))
@@ -86,7 +99,7 @@ struct CleanConfirmView: View {
         .frame(width: 620)
         .task {
             if items == nil, let planID {
-                plan = await store.plan(planID, free: free)
+                plan = await store.plan(planID, free: free, bucket: bucket)
             }
             loading = false
         }

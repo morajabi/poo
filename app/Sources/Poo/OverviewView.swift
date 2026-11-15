@@ -20,6 +20,7 @@ struct OverviewView: View {
             if let r = store.report {
                 VStack(alignment: .leading, spacing: 18) {
                     summary(r)
+                        .zIndex(1)
                     areas(r)
                     topItems(r)
                     footnotes(r)
@@ -32,6 +33,8 @@ struct OverviewView: View {
             }
         }
         .navigationTitle("Overview")
+        .toolbar { ToolbarItem { AskAgentButton(target: "overview", title: "Ask") } }
+        .task { await store.loadHistory() }
         .navigationSubtitle(store.report.map { "Scanned \(Fmt.ago($0.scannedAt)) · \($0.items.count) items" } ?? "")
     }
 
@@ -39,44 +42,65 @@ struct OverviewView: View {
 
     private func summary(_ r: Report) -> some View {
         let stale = r.plan("stale")
-        return VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .center, spacing: 22) {
-                stat("Free", r.disk.free, of: r.disk.total) { nil }
-                stat("Not in use", r.bytes(for: .notInUse), color: Palette.reclaim) { [.notInUse] }
-                stat("In use", r.bytes(for: .inUse)) { [.inUse] }
-                stat("Check first", r.visibleBuckets.reduce(0) { $0 + $1.bytes(for: .review) }) { [.needsLook] }
-                stat("Kept", r.visibleBuckets.reduce(0) { $0 + $1.bytes(for: .protected) }) { [.needsLook] }
+        let d = DiskBreakdown(report: r)
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(d.caption)
+                    .font(.callout)
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+                    .animation(.default, value: r.scanned_at)
+                    .foregroundStyle(.secondary)
+                    .help(d.trackedExceedsUsed ? "Poo tracks some data on other volumes (simulator runtimes), so it can exceed what this disk reports as used." : "")
                 Spacer(minLength: 8)
-                AskAgentButton(target: "overview", title: "Ask")
                 plansMenu(r)
-                Button("Review & clean \(Fmt.bytes(stale?.bytes ?? 0))…") { nav.review(plan: "stale") }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(store.busy || (stale?.count ?? 0) == 0)
-                    .help(stale?.description ?? "")
+                if (stale?.count ?? 0) > 0 {
+                    Button("Review & clean \(Fmt.bytes(stale?.bytes ?? 0))…") { nav.review(plan: "stale") }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(store.busy)
+                        .help(stale?.description ?? "")
+                } else {
+                    Label("Nothing to clean", systemImage: "checkmark.circle")
+                        .foregroundStyle(.secondary)
+                        .help("Everything Poo found is in use or needs your call.")
+                }
             }
-            DiskBar(report: r, compact: true)
+            DiskBreakdownBar(breakdown: d, onReview: { nav.review(plan: "stale") })
+            HStack(spacing: 18) {
+                ForEach(d.segments) { s in legend(s) }
+                Spacer(minLength: 0)
+            }
         }
         .padding(12)
         .background(.background.secondary, in: RoundedRectangle(cornerRadius: 8))
     }
 
-    private func stat(_ label: String, _ bytes: UInt64, of total: UInt64? = nil, color: Color? = nil, filter: @escaping () -> Set<ItemStatus>?) -> some View {
-        Button {
-            if let f = filter() { nav.browse(statuses: f) }
-        } label: {
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 5) {
-                    if let color { Circle().fill(color).frame(width: 7, height: 7) }
-                    Text(Fmt.bytes(bytes)).font(.body.weight(.semibold)).monospacedDigit()
-                }
-                Text(total.map { "\(label) of \(Fmt.bytes($0))" } ?? label)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+    private func legend(_ s: DiskBreakdown.Segment) -> some View {
+        let filter: Set<ItemStatus>? = {
+            switch s.kind {
+            case .notInUse: return [.notInUse]
+            case .inUse: return [.inUse]
+            case .checkKept: return [.needsLook]
+            default: return nil
             }
-            .contentShape(Rectangle())
+        }()
+        let label = HStack(spacing: 6) {
+            LegendSwatch(kind: s.kind)
+            Text(s.label).foregroundStyle(.secondary)
+            Text(Fmt.bytes(s.bytes)).monospacedDigit().fontWeight(.medium)
+                .contentTransition(.numericText())
         }
-        .buttonStyle(.plain)
-        .help(filter() == nil ? "" : "Show in Browse")
+        .font(.callout)
+        .contentShape(Rectangle())
+        return Group {
+            if let filter {
+                Button { nav.browse(statuses: filter) } label: { label }
+                    .buttonStyle(.plain)
+                    .help(s.help + " Click to browse.")
+            } else {
+                label.help(s.help)
+            }
+        }
     }
 
     private func plansMenu(_ r: Report) -> some View {
@@ -123,7 +147,6 @@ struct OverviewView: View {
                         .onTapGesture { nav.browse(bucket: a.bucket.id, group: a.group, statuses: [.notInUse]) }
                         .contextMenu {
                             Button("Show in Browse") { nav.browse(bucket: a.bucket.id, group: a.group) }
-                            AskAgentItems(target: "bucket:\(a.bucket.id)")
                         }
                 }
             }
@@ -172,8 +195,11 @@ struct OverviewView: View {
     @ViewBuilder
     private func footnotes(_ r: Report) -> some View {
         let lines = (r.warnings + [store.lastClean?.snapshot_note].compactMap { $0 })
-        if !lines.isEmpty || store.lastClean != nil {
+        if !lines.isEmpty || store.lastClean != nil || store.freedThisWeek > 0 {
             VStack(alignment: .leading, spacing: 3) {
+                if store.freedThisWeek > 0 {
+                    Text("Freed with Poo: \(Fmt.bytes(store.freedThisWeek)) this week")
+                }
                 if let last = store.lastClean, !last.dry_run {
                     Text("Last clean freed \(Fmt.bytes(last.freed_bytes)): \(last.cleaned) cleaned, \(last.skipped) skipped")
                 }
@@ -293,7 +319,5 @@ struct ItemContextMenu: View {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(item.path, forType: .string)
         }
-        Divider()
-        AskAgentItems(target: item.id)
     }
 }

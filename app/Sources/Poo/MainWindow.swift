@@ -47,7 +47,10 @@ struct MainWindow: View {
                 if nav.section != .backups { nav.review(items: store.selectedItems) }
             }
             .sheet(item: $nav.review) { r in
-                CleanConfirmView(planID: r.planID, free: r.free, items: r.items)
+                CleanConfirmView(planID: r.planID, free: r.free, items: r.items, onShowBackups: {
+                    nav.review = nil
+                    nav.section = .backups
+                })
             }
             .task {
                 LaunchFlow.run(openWindow)
@@ -94,7 +97,6 @@ struct ItemInspector: View {
                     Button(store.selection.contains(item.id) ? "Deselect" : "Select") { store.toggle(item.id) }
                         .disabled(!item.isCleanable)
                     Button("Reveal") { store.reveal(item) }.disabled(item.isVirtual)
-                    AskAgentButton(target: item.id, title: "Ask")
                     Spacer()
                 }
                 .controlSize(.small)
@@ -190,6 +192,7 @@ struct ProjectsView: View {
             if projects.isEmpty { ContentUnavailableView("No projects yet", systemImage: "folder", description: Text("Add your dev folders in Settings.")) }
         }
         .navigationTitle("Projects")
+        .toolbar { ToolbarItem { AskAgentButton(target: "projects", title: "Ask") } }
         .navigationSubtitle("\(projects.count) projects")
     }
 }
@@ -228,7 +231,6 @@ struct ProjectRow: View {
                 .help("Select the \(notInUse.count) items not in use (\(Fmt.bytes(notInUse.reduce(0) { $0 + $1.total_bytes })))")
                 .opacity(notInUse.isEmpty ? 0 : 1)
                 .disabled(notInUse.isEmpty)
-            AskAgentButton(target: "project:\(p.path)")
             Picker("", selection: Binding(get: { p.policy }, set: { new in Task { await store.setPolicy(p.path, new) } })) {
                 Text("Auto").tag("auto")
                 Text("Active").tag("active")
@@ -254,8 +256,6 @@ struct ProjectRow: View {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(path, forType: .string)
         }
-        Divider()
-        AskAgentItems(target: "project:\(path)")
     }
 
     private func statusText(_ p: Project) -> String {
@@ -306,6 +306,7 @@ struct WorktreesView: View {
             }
         }
         .navigationTitle("Worktrees")
+        .toolbar { ToolbarItem { AskAgentButton(target: "worktrees", title: "Ask") } }
     }
 }
 
@@ -338,7 +339,6 @@ struct WorktreeRow: View {
                 Text(subtitle).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            AskAgentButton(target: item?.id ?? "project:\(project.path)")
             Group {
                 if let item { TierBadge(tier: item.tier) } else { Color.clear }
             }
