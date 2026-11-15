@@ -18,11 +18,19 @@ description = "Compiled output inside your projects and worktrees: target, .buil
 
 [[bucket]]
 id = "xcode"
-name = "Xcode & simulators"
+name = "Xcode & Apple SDKs"
 order = 20
 color = "#2F7CF6"
-symbol = "iphone"
+symbol = "hammer.circle"
 description = "DerivedData, simulators, runtimes, device support and other Apple developer data."
+
+[[bucket]]
+id = "android"
+name = "Android SDK & emulators"
+order = 25
+color = "#3DDC84"
+symbol = "smartphone"
+description = "Emulators, system images, NDKs and other Android SDK pieces."
 
 [[bucket]]
 id = "worktrees"
@@ -102,26 +110,26 @@ max_cost = "none"
 
 [[plan]]
 id = "stale"
-name = "Stale stuff"
+name = "Not in use"
 order = 20
-description = "Adds build output, worktrees and caches nobody touched for weeks, or whose project is gone."
-tiers = ["junk", "cold"]
+description = "Everything nothing is using right now: old or orphaned builds, landed worktrees, and builds of checkouts you moved on from. No data is touched; you rebuild only if you go back."
+tiers = ["junk", "cold", "idle"]
 max_cost = "redownload"
 
 [[plan]]
 id = "deep"
 name = "Deep clean"
 order = 30
-description = "Adds recent builds and caches. Expect rebuilds and redownloads."
-tiers = ["junk", "cold", "warm"]
+description = "Also builds and caches you used recently. Expect rebuilds and redownloads on your active projects."
+tiers = ["junk", "cold", "idle", "warm"]
 max_cost = "redownload"
 
 [[plan]]
 id = "emergency"
 name = "Emergency"
 order = 40
-description = "Out of space: frees the least regrettable items first until 15% of the disk is free."
-tiers = ["junk", "cold", "warm"]
+description = "Out of space: frees the least regrettable items first until the target is met."
+tiers = ["junk", "cold", "idle", "warm"]
 max_cost = "redownload"
 greedy = true
 target_free_percent = 15
