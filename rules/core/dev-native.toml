@@ -1,0 +1,336 @@
+# C / C++ package managers and build systems (vcpkg, Conan, xmake, autotools, clangd),
+# monorepo build tools (Bazel output bases, Buck2, Pants, Please) and Nix.
+# CMake, Meson, ccache and the Bazel disk cache live in rust.toml.
+
+[[stack]]
+id = "cpp"
+name = "C / C++ (no CMake)"
+markers = ["conanfile.txt", "conanfile.py", "vcpkg.json", "xmake.lua", "compile_commands.json", "Makefile.am", "premake5.lua", "SConstruct"]
+
+[[stack]]
+id = "buck"
+name = "Buck2"
+markers = [".buckconfig", ".buckroot"]
+
+[[stack]]
+id = "pants"
+name = "Pants"
+markers = ["pants.toml"]
+
+[[stack]]
+id = "please"
+name = "Please"
+markers = [".plzconfig"]
+
+[[stack]]
+id = "nix"
+name = "Nix"
+markers = ["flake.nix", "shell.nix", "default.nix", "devenv.nix", "devbox.json"]
+
+# ---------------------------------------------------------------------------
+# C / C++
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "cpp.autotools"
+name = "Autotools caches"
+bucket = "build"
+group = "C / C++"
+kind = "artifact"
+tags = ["cpp", "autotools", "build-output"]
+stacks = ["cmake", "cpp"]
+names = ["autom4te.cache"]
+cost = "none"
+description = "autoconf's cache folder, recreated by the next autoreconf."
+
+[[rule]]
+id = "cpp.libtool-dirs"
+name = "Libtool .deps and .libs"
+bucket = "build"
+group = "C / C++"
+kind = "artifact"
+tags = ["cpp", "autotools", "build-output"]
+stacks = ["cmake", "cpp"]
+names = [".deps", ".libs"]
+parent_any = ["Makefile.am", "Makefile.in", "configure.ac", "Makefile"]
+ignored = true
+cost = "rebuild"
+rebuild = "./configure && make"
+description = "In-tree objects and dependency files from autotools and libtool builds. Only when git ignores them."
+
+[[rule]]
+id = "cpp.index-caches"
+name = "clangd and ccls indexes"
+bucket = "build"
+group = "C / C++"
+kind = "artifact"
+tags = ["cpp", "language-server"]
+stacks = ["cmake", "cpp"]
+names = [".ccls-cache", "clangd"]
+path_contains = ["/.ccls-cache", "/.cache/clangd"]
+cost = "rebuild"
+rebuild = "Re-indexed in the background when you open the project"
+warm_days = 14
+description = "Background symbol indexes clangd (.cache/clangd) and ccls keep inside projects."
+
+[[rule]]
+id = "cpp.clangd-global"
+name = "clangd global index"
+bucket = "caches"
+group = "C / C++"
+kind = "path"
+tags = ["cpp", "language-server"]
+stacks = ["cmake", "cpp"]
+paths = ["~/Library/Caches/clangd"]
+cost = "rebuild"
+rebuild = "Re-indexed when clangd needs it"
+warm_days = 30
+description = "clangd's index of files outside any project (system headers, SDKs)."
+
+[[rule]]
+id = "cpp.vcpkg-binary-cache"
+name = "vcpkg binary cache"
+bucket = "caches"
+group = "C / C++"
+kind = "path"
+tags = ["cpp", "vcpkg", "package-cache"]
+stacks = ["cpp", "cmake"]
+paths = ["~/.cache/vcpkg/archives", "~/Library/Caches/vcpkg"]
+cost = "rebuild"
+rebuild = "Ports are rebuilt from source on the next vcpkg install"
+warm_days = 30
+description = "Prebuilt port archives vcpkg reuses across projects."
+
+[[rule]]
+id = "cpp.vcpkg-trees"
+name = "vcpkg buildtrees, packages and downloads"
+bucket = "caches"
+group = "C / C++"
+kind = "artifact"
+tags = ["cpp", "vcpkg", "build-output"]
+stacks = ["cpp", "cmake"]
+names = ["buildtrees", "packages", "downloads"]
+parent_any = [".vcpkg-root"]
+cost = "rebuild"
+rebuild = "vcpkg install"
+description = "Scratch build trees, staged packages and source downloads inside a vcpkg checkout."
+recommend = "Pass --clean-after-build to vcpkg install to stop buildtrees from growing."
+
+[[rule]]
+id = "cpp.vcpkg-installed"
+name = "vcpkg_installed (manifest mode)"
+bucket = "deps"
+group = "C / C++"
+kind = "artifact"
+tags = ["cpp", "vcpkg", "dependencies"]
+stacks = ["cpp", "cmake"]
+names = ["vcpkg_installed"]
+children_any = ["vcpkg", "*-osx", "*-linux", "*-windows"]
+cost = "rebuild"
+rebuild = "vcpkg install (restored from the binary cache when present)"
+description = "Per-project dependency trees vcpkg installs in manifest mode."
+
+[[rule]]
+id = "cpp.conan2-cache"
+name = "Conan 2 package cache"
+bucket = "caches"
+group = "C / C++"
+kind = "path"
+tags = ["cpp", "conan", "package-cache"]
+stacks = ["cpp", "cmake"]
+paths = ["~/.conan2/p"]
+cost = "redownload"
+action = "command"
+command = ["conan", "remove", "*", "--confirm"]
+rebuild = "conan install (packages built from source are rebuilt)"
+warm_days = 30
+description = "Recipes, sources and binaries in the Conan 2 cache, cleaned through conan remove so its database stays consistent."
+
+[[rule]]
+id = "cpp.conan1-cache"
+name = "Conan 1 package cache"
+bucket = "caches"
+group = "C / C++"
+kind = "path"
+tags = ["cpp", "conan", "package-cache"]
+stacks = ["cpp", "cmake"]
+paths = ["~/.conan/data"]
+cost = "redownload"
+rebuild = "conan install"
+warm_days = 30
+description = "Packages in the Conan 1.x cache."
+
+[[rule]]
+id = "cpp.xmake"
+name = "xmake build folders"
+bucket = "build"
+group = "C / C++"
+kind = "artifact"
+tags = ["cpp", "xmake", "build-output"]
+stacks = ["cpp"]
+names = [".xmake", "build"]
+parent_any = ["xmake.lua"]
+ignored = true
+cost = "rebuild"
+rebuild = "xmake"
+description = "xmake configuration cache and build output. Only when git ignores them."
+
+[[rule]]
+id = "cpp.xmake-global"
+name = "xmake packages and cache"
+bucket = "caches"
+group = "C / C++"
+kind = "path"
+tags = ["cpp", "xmake", "package-cache"]
+stacks = ["cpp"]
+paths = ["~/.xmake/packages", "~/.xmake/cache"]
+cost = "redownload"
+rebuild = "xmake require"
+warm_days = 30
+description = "Packages xmake installed for your projects and its download cache."
+
+# ---------------------------------------------------------------------------
+# Monorepo build systems
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "bazel.output-bases"
+name = "Bazel output bases"
+bucket = "build"
+group = "Bazel"
+kind = "path"
+tags = ["bazel", "build-output"]
+stacks = ["bazel"]
+paths = ["/private/var/tmp/_bazel_*"]
+each = true
+system = true
+cost = "rebuild"
+rebuild = "bazel build (same as bazel clean --expunge)"
+warm_days = 14
+description = "One output base per workspace (plus Bazel's install base and repository cache) under /private/var/tmp. The bazel-* symlinks in your workspaces point here."
+recommend = "Run bazel shutdown in a workspace before deleting its output base; the hashed folder name is md5 of the workspace path."
+
+[[rule]]
+id = "buck.out"
+name = "Buck2 buck-out"
+bucket = "build"
+group = "Buck2"
+kind = "artifact"
+tags = ["buck", "build-output"]
+stacks = ["buck"]
+names = ["buck-out"]
+parent_any = [".buckconfig", ".buckroot", "BUCK"]
+cost = "rebuild"
+rebuild = "buck2 build"
+description = "Buck2 build output and its local action cache."
+recommend = "Run buck2 kill first so the daemon lets go of it."
+
+[[rule]]
+id = "pants.workdir"
+name = "Pants workdir"
+bucket = "build"
+group = "Pants"
+kind = "artifact"
+tags = ["pants", "build-output"]
+stacks = ["pants", "python"]
+names = [".pants.d", ".pids"]
+parent_any = ["pants.toml"]
+cost = "rebuild"
+rebuild = "pants <goal>"
+description = "Pants per-repo working directory: run logs, sandboxes and pantsd state."
+
+[[rule]]
+id = "pants.cache"
+name = "Pants global cache"
+bucket = "caches"
+group = "Pants"
+kind = "path"
+tags = ["pants", "compiler-cache"]
+stacks = ["pants", "python"]
+paths = ["~/.cache/pants"]
+cost = "rebuild"
+rebuild = "Refilled by the next pants run"
+warm_days = 30
+description = "Pants' LMDB store, named caches and downloaded tools."
+
+[[rule]]
+id = "please.out"
+name = "Please plz-out"
+bucket = "build"
+group = "Please"
+kind = "artifact"
+tags = ["please", "build-output"]
+stacks = ["please"]
+names = ["plz-out"]
+parent_any = [".plzconfig"]
+cost = "rebuild"
+rebuild = "plz build"
+description = "Please build output."
+
+# ---------------------------------------------------------------------------
+# Nix, direnv, devenv, devbox
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "nix.user-cache"
+name = "Nix fetcher and eval cache"
+bucket = "caches"
+group = "Nix"
+kind = "path"
+tags = ["nix", "package-cache"]
+stacks = ["nix"]
+paths = ["~/.cache/nix"]
+cost = "redownload"
+rebuild = "Refetched by the next nix build or flake evaluation"
+warm_days = 30
+description = "Flake inputs, tarballs and evaluation caches Nix keeps per user."
+
+[[rule]]
+id = "nix.store"
+name = "Nix store garbage"
+bucket = "caches"
+group = "Nix"
+kind = "path"
+tags = ["nix", "package-cache"]
+stacks = ["nix"]
+paths = ["/nix/store"]
+system = true
+cost = "redownload"
+tier = "review"
+action = "command"
+command = ["nix-collect-garbage"]
+rebuild = "Rebuilt or substituted from a binary cache when needed"
+enabled = false
+description = "Off by default: sizing walks the whole store (often millions of files) and nix-collect-garbage frees only paths no GC root uses, so the size shown overstates what you get back."
+recommend = "Enable with `poo rules enable nix.store`. Delete stale .direnv folders and result symlinks first so their store paths become garbage; nix-collect-garbage -d also drops old profile generations."
+
+[[rule]]
+id = "nix.direnv"
+name = "direnv layout folders"
+bucket = "build"
+group = "Nix"
+kind = "artifact"
+tags = ["nix", "direnv", "dependencies"]
+stacks = ["nix", "python"]
+names = [".direnv"]
+cost = "rebuild"
+rebuild = "direnv reload"
+warm_days = 30
+description = "Per-project direnv state: nix-direnv cached shells (GC roots) and layout python virtualenvs."
+recommend = "With nix-direnv these hold GC roots, so the store paths only become garbage after the folder is gone."
+
+[[rule]]
+id = "nix.devenv"
+name = "devenv and devbox state"
+bucket = "deps"
+group = "Nix"
+kind = "artifact"
+tags = ["nix", "devenv", "data"]
+stacks = ["nix"]
+names = [".devenv", ".devbox"]
+parent_any = ["devenv.nix", "devenv.yaml", "devbox.json"]
+cost = "data"
+tier = "review"
+rebuild = "devenv shell / devbox shell"
+description = "devenv and devbox profiles plus service state: local Postgres, Redis or MySQL data lives in here."
+recommend = "Safe only if you do not need the local databases its services created."

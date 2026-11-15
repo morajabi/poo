@@ -1,0 +1,68 @@
+# Terraform, OpenTofu and Terragrunt extras. Core .terraform and plugin cache rules
+# live in langs.toml.
+
+[[stack]]
+id = "terragrunt"
+name = "Terragrunt"
+markers = ["terragrunt.hcl"]
+
+[[rule]]
+id = "terraform.terragrunt-cache"
+name = "Terragrunt caches"
+bucket = "deps"
+group = "Terraform"
+kind = "artifact"
+tags = ["terraform", "terragrunt", "dependencies"]
+stacks = ["terragrunt", "terraform"]
+names = [".terragrunt-cache"]
+cost = "redownload"
+tier = "review"
+rebuild = "terragrunt init"
+description = "Copies of modules and providers per Terragrunt unit. With a local backend the state file lives in here too."
+recommend = "Safe when every unit uses remote state (S3, GCS, Terraform Cloud); otherwise check for terraform.tfstate inside first."
+
+[[rule]]
+id = "terraform.versions"
+name = "Terraform and OpenTofu versions"
+bucket = "caches"
+group = "Terraform"
+kind = "path"
+tags = ["terraform", "toolchain"]
+stacks = ["terraform", "terragrunt"]
+paths = ["~/.tfenv/versions", "~/.tenv/Terraform", "~/.tenv/OpenTofu", "~/.tenv/Terragrunt", "~/.local/share/mise/installs/terraform", "~/.asdf/installs/terraform"]
+each = true
+cost = "redownload"
+tier = "review"
+rebuild = "tfenv / tenv / mise install <version>"
+description = "Terraform, OpenTofu and Terragrunt binaries installed by tfenv, tenv, mise or asdf."
+recommend = "Keep the versions pinned in .terraform-version or required_version."
+
+[[rule]]
+id = "terraform.tfswitch-versions"
+name = "tfswitch Terraform binaries"
+bucket = "caches"
+group = "Terraform"
+kind = "path"
+tags = ["terraform", "toolchain"]
+stacks = ["terraform"]
+paths = ["~/.terraform.versions"]
+each = true
+files = true
+cost = "redownload"
+tier = "review"
+rebuild = "tfswitch <version>"
+description = "Terraform binaries tfswitch downloaded, one file per version."
+
+[[rule]]
+id = "terraform.tool-caches"
+name = "TFLint plugins and Terragrunt provider cache"
+bucket = "caches"
+group = "Terraform"
+kind = "path"
+tags = ["terraform", "terragrunt", "package-cache"]
+stacks = ["terraform", "terragrunt"]
+paths = ["~/.tflint.d/plugins", "~/Library/Caches/terragrunt"]
+cost = "redownload"
+rebuild = "tflint --init / terragrunt init"
+warm_days = 30
+description = "TFLint ruleset plugins and the Terragrunt provider cache server's downloads."

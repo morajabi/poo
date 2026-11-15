@@ -1,11 +1,32 @@
 # Python, data science and ML tooling.
 
+[[stack]]
+id = "jupyter"
+name = "Jupyter"
+markers = ["*.ipynb"]
+
+[[stack]]
+id = "conda"
+name = "Conda"
+markers = ["environment.yml", "environment.yaml"]
+
+[[stack]]
+id = "pixi"
+name = "Pixi"
+markers = ["pixi.toml", "pixi.lock"]
+
+# ---------------------------------------------------------------------------
+# In projects
+# ---------------------------------------------------------------------------
+
 [[rule]]
 id = "python.venv"
 name = "Python virtualenvs"
 bucket = "deps"
 group = "Python"
 kind = "artifact"
+tags = ["python", "dependencies"]
+stacks = ["python"]
 names = [".venv", "venv", ".virtualenv", "env", "virtualenv", ".venv-*", "venv-*"]
 children_all = ["pyvenv.cfg"]
 cost = "redownload"
@@ -19,12 +40,43 @@ name = "Conda environments in projects"
 bucket = "deps"
 group = "Python"
 kind = "artifact"
+tags = ["python", "conda", "dependencies"]
+stacks = ["python", "conda"]
 names = ["*"]
 children_all = ["conda-meta"]
 cost = "redownload"
-rebuild = "conda env create"
+rebuild = "conda env create -p <dir> -f environment.yml"
 warm_days = 30
 description = "Conda environments created inside a project folder."
+
+[[rule]]
+id = "python.pixi-envs"
+name = "Pixi environments"
+bucket = "deps"
+group = "Python"
+kind = "artifact"
+tags = ["python", "pixi", "dependencies"]
+stacks = ["python", "pixi"]
+names = ["envs"]
+path_contains = ["/.pixi/envs"]
+cost = "redownload"
+rebuild = "pixi install"
+warm_days = 30
+description = "Environments pixi installs in .pixi/envs. The project's .pixi/config.toml stays."
+
+[[rule]]
+id = "python.pypackages"
+name = "__pypackages__"
+bucket = "deps"
+group = "Python"
+kind = "artifact"
+tags = ["python", "pdm", "dependencies"]
+stacks = ["python"]
+names = ["__pypackages__"]
+cost = "redownload"
+rebuild = "pdm install"
+warm_days = 30
+description = "PEP 582 local package folders (older PDM projects)."
 
 [[rule]]
 id = "python.pycache"
@@ -32,6 +84,8 @@ name = "__pycache__"
 bucket = "build"
 group = "Python"
 kind = "artifact"
+tags = ["python", "build-output"]
+stacks = ["python"]
 names = ["__pycache__"]
 cost = "none"
 description = "Compiled bytecode, regenerated on import."
@@ -42,9 +96,12 @@ name = "Python tool caches"
 bucket = "build"
 group = "Python"
 kind = "artifact"
-names = [".pytest_cache", ".mypy_cache", ".ruff_cache", ".hypothesis", ".pytype", ".pyre"]
+tags = ["python", "lint-cache", "test-output"]
+stacks = ["python"]
+names = [".pytest_cache", ".mypy_cache", ".ruff_cache", ".hypothesis", ".pytype", ".pyre", ".import_linter_cache"]
 cost = "none"
-description = "pytest, mypy, ruff and hypothesis caches."
+description = "pytest, mypy, ruff, hypothesis, pytype and pyre caches."
+recommend = ".hypothesis also stores the example database that replays past failures; you lose those replays."
 
 [[rule]]
 id = "python.tox"
@@ -52,6 +109,8 @@ name = "tox and nox environments"
 bucket = "deps"
 group = "Python"
 kind = "artifact"
+tags = ["python", "dependencies", "test-output"]
+stacks = ["python"]
 names = [".tox", ".nox"]
 cost = "redownload"
 rebuild = "tox / nox"
@@ -63,6 +122,8 @@ name = "Python build output"
 bucket = "build"
 group = "Python"
 kind = "artifact"
+tags = ["python", "build-output"]
+stacks = ["python"]
 names = ["build", "dist", "*.egg-info", "wheelhouse", "htmlcov"]
 parent_any = ["setup.py", "pyproject.toml", "setup.cfg"]
 ignored = true
@@ -71,13 +132,47 @@ rebuild = "python -m build"
 description = "Wheels, sdists and build folders. Only when git ignores them."
 
 [[rule]]
+id = "python.eggs"
+name = "Python build scratch"
+bucket = "build"
+group = "Python"
+kind = "artifact"
+tags = ["python", "build-output"]
+stacks = ["python"]
+names = [".eggs", "pip-wheel-metadata", ".pdm-build"]
+parent_any = ["setup.py", "pyproject.toml", "setup.cfg"]
+cost = "rebuild"
+rebuild = "python -m build / pip install -e ."
+description = "setup_requires eggs and scratch metadata from setuptools, pip and PDM builds."
+
+[[rule]]
+id = "python.notebook-checkpoints"
+name = "Jupyter checkpoints"
+bucket = "build"
+group = "Jupyter"
+kind = "artifact"
+tags = ["python", "jupyter", "data"]
+stacks = ["python", "jupyter"]
+names = [".ipynb_checkpoints"]
+cost = "data"
+tier = "review"
+description = "Autosaved copies of your notebooks Jupyter uses for \"Revert to checkpoint\". Usually small; they are the only older copy of uncommitted notebooks."
+
+# ---------------------------------------------------------------------------
+# Global caches
+# ---------------------------------------------------------------------------
+
+[[rule]]
 id = "pip.cache"
 name = "pip cache"
 bucket = "caches"
 group = "Python"
 kind = "path"
+tags = ["python", "pip", "package-cache"]
+stacks = ["python"]
 paths = ["~/Library/Caches/pip", "~/.cache/pip"]
 cost = "redownload"
+rebuild = "Refilled by the next pip install"
 warm_days = 30
 description = "pip's wheel and HTTP cache."
 
@@ -87,10 +182,13 @@ name = "uv cache"
 bucket = "caches"
 group = "Python"
 kind = "path"
+tags = ["python", "uv", "package-cache"]
+stacks = ["python"]
 paths = ["~/.cache/uv", "~/Library/Caches/uv"]
 cost = "redownload"
 action = "command"
 command = ["uv", "cache", "prune"]
+rebuild = "uv sync"
 warm_days = 30
 description = "uv's package cache. `uv cache prune` drops unused entries and keeps hardlinked venvs working."
 
@@ -100,11 +198,32 @@ name = "uv-managed Pythons"
 bucket = "caches"
 group = "Python versions"
 kind = "path"
+tags = ["python", "uv", "toolchain"]
+stacks = ["python"]
 paths = ["~/.local/share/uv/python"]
 each = true
 cost = "redownload"
 tier = "review"
+rebuild = "uv python install <version>"
 description = "Python interpreters installed by uv."
+recommend = "uv python uninstall <version> also cleans the shims uv created."
+
+[[rule]]
+id = "uv.tools"
+name = "uv tools"
+bucket = "caches"
+group = "Python tools"
+kind = "path"
+tags = ["python", "uv", "toolchain"]
+stacks = ["python"]
+paths = ["~/.local/share/uv/tools"]
+each = true
+cost = "redownload"
+tier = "review"
+action = "command"
+command = ["uv", "tool", "uninstall", "{name}"]
+rebuild = "uv tool install <name>"
+description = "Command-line tools installed with uv tool install, one environment each. Cleaning uninstalls the tool."
 
 [[rule]]
 id = "poetry.cache"
@@ -112,10 +231,29 @@ name = "Poetry cache"
 bucket = "caches"
 group = "Python"
 kind = "path"
+tags = ["python", "poetry", "package-cache"]
+stacks = ["python"]
 paths = ["~/Library/Caches/pypoetry/artifacts", "~/Library/Caches/pypoetry/cache"]
 cost = "redownload"
+rebuild = "poetry install"
 warm_days = 30
-description = "Poetry downloads. Its virtualenvs folder is left alone: projects run from it."
+description = "Poetry downloads. Its virtualenvs are listed separately (poetry.virtualenvs) for review."
+
+[[rule]]
+id = "poetry.virtualenvs"
+name = "Poetry virtualenvs"
+bucket = "deps"
+group = "Python envs outside projects"
+kind = "path"
+tags = ["python", "poetry", "dependencies"]
+stacks = ["python"]
+paths = ["~/Library/Caches/pypoetry/virtualenvs"]
+each = true
+cost = "redownload"
+tier = "review"
+rebuild = "poetry install"
+description = "One virtualenv per project and Python version. Projects run from these, and envs of deleted or moved projects stay behind."
+recommend = "Names are <project>-<hash>-py<version>; envs of projects you no longer have are safe."
 
 [[rule]]
 id = "pipenv.cache"
@@ -123,10 +261,130 @@ name = "Pipenv and pipx caches"
 bucket = "caches"
 group = "Python"
 kind = "path"
+tags = ["python", "pipenv", "pipx", "package-cache"]
+stacks = ["python"]
 paths = ["~/Library/Caches/pipenv", "~/.cache/pipenv", "~/.local/pipx/.cache"]
 cost = "redownload"
+rebuild = "Refilled by the next pipenv or pipx install"
 warm_days = 30
 description = "Pipenv and pipx caches."
+
+[[rule]]
+id = "pipenv.virtualenvs"
+name = "Pipenv virtualenvs"
+bucket = "deps"
+group = "Python envs outside projects"
+kind = "path"
+tags = ["python", "pipenv", "dependencies"]
+stacks = ["python"]
+paths = ["~/.local/share/virtualenvs"]
+each = true
+cost = "redownload"
+tier = "review"
+rebuild = "pipenv install"
+description = "Pipenv's per-project virtualenvs. Envs of deleted or moved projects stay behind."
+
+[[rule]]
+id = "pipx.venvs"
+name = "pipx apps"
+bucket = "caches"
+group = "Python tools"
+kind = "path"
+tags = ["python", "pipx", "toolchain"]
+stacks = ["python"]
+paths = ["~/.local/pipx/venvs", "~/.local/share/pipx/venvs"]
+each = true
+cost = "redownload"
+tier = "review"
+action = "command"
+command = ["pipx", "uninstall", "{name}"]
+rebuild = "pipx install <name>"
+description = "Command-line apps installed with pipx, one virtualenv each. Cleaning uninstalls the app."
+
+[[rule]]
+id = "pipx.logs"
+name = "pipx logs"
+bucket = "junk"
+group = "Logs"
+kind = "path"
+tags = ["python", "pipx", "logs"]
+stacks = ["python"]
+paths = ["~/.local/pipx/logs", "~/.local/state/pipx/log"]
+cost = "none"
+contents = true
+description = "Logs pipx writes on every install."
+
+[[rule]]
+id = "hatch.envs"
+name = "Hatch environments"
+bucket = "deps"
+group = "Python envs outside projects"
+kind = "path"
+tags = ["python", "hatch", "dependencies"]
+stacks = ["python"]
+paths = ["~/Library/Application Support/hatch/env/virtual"]
+each = true
+cost = "redownload"
+rebuild = "hatch run (recreates and syncs the env)"
+warm_days = 30
+description = "Hatch's environments, one folder per project. hatch run recreates them on demand."
+
+[[rule]]
+id = "hatch.cache"
+name = "Hatch and PDM caches"
+bucket = "caches"
+group = "Python"
+kind = "path"
+tags = ["python", "hatch", "pdm", "package-cache"]
+stacks = ["python"]
+paths = ["~/Library/Caches/hatch", "~/Library/Caches/pdm"]
+cost = "redownload"
+rebuild = "Refilled by the next hatch or pdm install"
+warm_days = 30
+description = "Download and wheel caches of Hatch and PDM."
+
+[[rule]]
+id = "pdm.venvs"
+name = "PDM virtualenvs"
+bucket = "deps"
+group = "Python envs outside projects"
+kind = "path"
+tags = ["python", "pdm", "dependencies"]
+stacks = ["python"]
+paths = ["~/Library/Application Support/pdm/venvs"]
+each = true
+cost = "redownload"
+tier = "review"
+rebuild = "pdm install"
+description = "Centralised PDM virtualenvs (when venv.in_project is off). Envs of deleted projects stay behind."
+
+[[rule]]
+id = "python.virtualenv-seeds"
+name = "virtualenv seed wheels"
+bucket = "caches"
+group = "Python"
+kind = "path"
+tags = ["python", "package-cache"]
+stacks = ["python"]
+paths = ["~/Library/Application Support/virtualenv", "~/.local/share/virtualenv"]
+cost = "redownload"
+rebuild = "Downloaded again by the next virtualenv"
+warm_days = 30
+description = "pip, setuptools and wheel copies virtualenv seeds new environments with."
+
+[[rule]]
+id = "python.formatter-caches"
+name = "Black and pip-tools caches"
+bucket = "caches"
+group = "Python"
+kind = "path"
+tags = ["python", "lint-cache"]
+stacks = ["python"]
+paths = ["~/Library/Caches/black", "~/Library/Caches/pip-tools"]
+cost = "rebuild"
+rebuild = "Rebuilt by the next black or pip-compile run"
+warm_days = 30
+description = "Black's per-version file cache and pip-tools' dependency cache."
 
 [[rule]]
 id = "conda.pkgs"
@@ -134,24 +392,88 @@ name = "Conda package cache"
 bucket = "caches"
 group = "Python"
 kind = "path"
+tags = ["python", "conda", "package-cache"]
+stacks = ["python", "conda"]
 paths = ["~/miniconda3/pkgs", "~/anaconda3/pkgs", "~/miniforge3/pkgs", "~/mambaforge/pkgs", "~/.conda/pkgs", "~/opt/anaconda3/pkgs", "~/opt/miniconda3/pkgs"]
 cost = "redownload"
 action = "command"
 command = ["conda", "clean", "--all", "--yes"]
+rebuild = "conda install"
 warm_days = 30
 description = "Downloaded conda packages and tarballs."
 
 [[rule]]
-id = "python.pyenv"
-name = "pyenv versions"
+id = "conda.micromamba-pkgs"
+name = "micromamba package cache"
 bucket = "caches"
-group = "Python versions"
+group = "Python"
 kind = "path"
-paths = ["~/.pyenv/versions", "~/.asdf/installs/python", "~/.local/share/mise/installs/python"]
+tags = ["python", "conda", "package-cache"]
+stacks = ["python", "conda"]
+paths = ["~/micromamba/pkgs", "~/.local/share/mamba/pkgs"]
+cost = "redownload"
+rebuild = "micromamba install"
+warm_days = 30
+description = "Downloaded packages of micromamba (environments hardlink from here; they keep working)."
+
+[[rule]]
+id = "conda.envs"
+name = "Conda environments"
+bucket = "deps"
+group = "Python envs outside projects"
+kind = "path"
+tags = ["python", "conda", "dependencies"]
+stacks = ["python", "conda"]
+paths = ["~/miniconda3/envs", "~/anaconda3/envs", "~/miniforge3/envs", "~/mambaforge/envs", "~/.conda/envs", "~/opt/anaconda3/envs", "~/opt/miniconda3/envs", "~/micromamba/envs", "~/.local/share/mamba/envs"]
 each = true
 cost = "redownload"
 tier = "review"
-description = "Python versions installed by pyenv, asdf or mise."
+rebuild = "conda env create -f environment.yml"
+description = "Named conda and mamba environments. Some were set up by hand and cannot be recreated from a file."
+recommend = "Export what you want to keep first: conda env export -n <name> > environment.yml."
+
+[[rule]]
+id = "python.pixi-cache"
+name = "Pixi (rattler) cache"
+bucket = "caches"
+group = "Python"
+kind = "path"
+tags = ["python", "pixi", "package-cache"]
+stacks = ["python", "pixi"]
+paths = ["~/Library/Caches/rattler/cache", "~/.cache/rattler/cache"]
+cost = "redownload"
+rebuild = "pixi install"
+warm_days = 30
+description = "Conda packages pixi downloaded; environments link from here and keep working."
+
+[[rule]]
+id = "python.pyenv"
+name = "Python versions"
+bucket = "caches"
+group = "Python versions"
+kind = "path"
+tags = ["python", "toolchain"]
+stacks = ["python"]
+paths = ["~/.pyenv/versions", "~/.asdf/installs/python", "~/.local/share/mise/installs/python", "~/.rye/py"]
+each = true
+cost = "redownload"
+tier = "review"
+rebuild = "pyenv/asdf/mise install python <version>"
+description = "Python versions installed by pyenv, asdf, mise or rye. pyenv virtualenvs live inside them."
+recommend = "Keep the versions your .python-version files pin."
+
+[[rule]]
+id = "python.pyenv-cache"
+name = "pyenv downloads and sources"
+bucket = "junk"
+group = "Installers"
+kind = "path"
+tags = ["python", "installer"]
+stacks = ["python"]
+paths = ["~/.pyenv/cache", "~/.pyenv/sources"]
+cost = "none"
+contents = true
+description = "Source tarballs and build trees pyenv keeps after installing a Python."
 
 [[rule]]
 id = "precommit.cache"
@@ -159,10 +481,14 @@ name = "pre-commit environments"
 bucket = "caches"
 group = "Python"
 kind = "path"
+tags = ["python", "pre-commit", "lint-cache"]
+stacks = ["python"]
 paths = ["~/.cache/pre-commit"]
 cost = "redownload"
+rebuild = "pre-commit install-hooks"
 warm_days = 30
 description = "Hook environments pre-commit builds per repo version."
+recommend = "pre-commit gc removes environments no config references."
 
 [[rule]]
 id = "jupyter.runtime"
@@ -170,11 +496,17 @@ name = "Jupyter runtime files"
 bucket = "junk"
 group = "Temp"
 kind = "path"
+tags = ["python", "jupyter", "temp"]
+stacks = ["python", "jupyter"]
 paths = ["~/Library/Jupyter/runtime"]
 cost = "none"
 contents = true
 min_age_days = 7
 description = "Old kernel connection files."
+
+# ---------------------------------------------------------------------------
+# Model caches written by Python libraries
+# ---------------------------------------------------------------------------
 
 [[rule]]
 id = "ml.huggingface"
@@ -182,9 +514,12 @@ name = "Hugging Face cache"
 bucket = "ai"
 group = "Model weights"
 kind = "path"
+tags = ["ai", "models", "python"]
+stacks = ["python"]
 paths = ["~/.cache/huggingface/hub", "~/.cache/huggingface/datasets", "~/.cache/huggingface/xet"]
 each = true
 cost = "redownload"
+rebuild = "Downloaded again on next use (from_pretrained, load_dataset)"
 warm_days = 30
 description = "Downloaded models and datasets, one item per repo."
 recommend = "Models you have not loaded in a month are good candidates; they redownload on next use."
@@ -195,7 +530,10 @@ name = "PyTorch and Keras caches"
 bucket = "ai"
 group = "Model weights"
 kind = "path"
-paths = ["~/.cache/torch", "~/.keras", "~/.cache/whisper", "~/.cache/clip", "~/.cache/lm-evaluation-harness", "~/.cache/modelscope"]
+tags = ["ai", "models", "python"]
+stacks = ["python"]
+paths = ["~/.cache/torch", "~/.keras/models", "~/.keras/datasets", "~/.cache/whisper", "~/.cache/clip", "~/.cache/lm-evaluation-harness", "~/.cache/modelscope"]
 cost = "redownload"
+rebuild = "Downloaded again on next use"
 warm_days = 30
 description = "Hub checkpoints for torch, keras, whisper and friends."

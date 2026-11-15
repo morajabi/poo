@@ -1,0 +1,1029 @@
+# Language extras: Ruby, PHP, Elixir/Erlang/Gleam, Haskell, OCaml, Nim, Crystal,
+# Julia, R, Perl, Lua, .NET, PureScript, ReScript and Solidity.
+# Core rules for several of these live in langs.toml.
+
+[[stack]]
+id = "erlang"
+name = "Erlang"
+markers = ["rebar.config", "erlang.mk"]
+
+[[stack]]
+id = "gleam"
+name = "Gleam"
+markers = ["gleam.toml"]
+
+[[stack]]
+id = "ocaml"
+name = "OCaml"
+markers = ["dune-project", "*.opam"]
+
+[[stack]]
+id = "nim"
+name = "Nim"
+markers = ["*.nimble", "nim.cfg", "config.nims"]
+
+[[stack]]
+id = "crystal"
+name = "Crystal"
+markers = ["shard.yml"]
+
+[[stack]]
+id = "julia"
+name = "Julia"
+markers = ["Project.toml", "JuliaProject.toml"]
+
+[[stack]]
+id = "r"
+name = "R"
+markers = ["renv.lock", "*.Rproj", "DESCRIPTION"]
+
+[[stack]]
+id = "perl"
+name = "Perl"
+markers = ["cpanfile", "Makefile.PL", "Build.PL", "dist.ini"]
+
+[[stack]]
+id = "lua"
+name = "Lua"
+markers = ["*.rockspec", ".luarocks"]
+
+[[stack]]
+id = "laravel"
+name = "Laravel"
+markers = ["artisan"]
+
+[[stack]]
+id = "purescript"
+name = "PureScript"
+markers = ["spago.yaml", "spago.dhall"]
+
+[[stack]]
+id = "rescript"
+name = "ReScript"
+markers = ["rescript.json", "bsconfig.json"]
+
+[[stack]]
+id = "solidity"
+name = "Solidity"
+markers = ["foundry.toml", "hardhat.config.js", "hardhat.config.ts", "hardhat.config.cjs"]
+
+# ---------------------------------------------------------------------------
+# Ruby
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "ruby.versions"
+name = "Ruby versions"
+bucket = "caches"
+group = "Ruby versions"
+kind = "path"
+tags = ["ruby", "toolchain"]
+stacks = ["ruby"]
+paths = ["~/.rbenv/versions", "~/.rvm/rubies", "~/.rubies", "~/.local/share/mise/installs/ruby", "~/.asdf/installs/ruby"]
+each = true
+cost = "redownload"
+tier = "review"
+rebuild = "rbenv install / rvm install / ruby-install <version> (compiles Ruby)"
+description = "Ruby versions installed by rbenv, rvm, chruby (ruby-install), mise or asdf, each with its own gems."
+recommend = "Keep the versions your .ruby-version files pin."
+
+[[rule]]
+id = "ruby.build-leftovers"
+name = "rbenv and rvm build leftovers"
+bucket = "junk"
+group = "Installers"
+kind = "path"
+tags = ["ruby", "installer"]
+stacks = ["ruby"]
+paths = ["~/.rbenv/cache", "~/.rvm/archives", "~/.rvm/src", "~/.rvm/tmp", "~/.rvm/log"]
+cost = "none"
+contents = true
+description = "Source tarballs, build trees and logs rbenv/ruby-build and rvm keep after installing a Ruby (rvm cleanup all)."
+
+[[rule]]
+id = "ruby.spec-cache"
+name = "RubyGems and Bundler caches"
+bucket = "caches"
+group = "Ruby"
+kind = "path"
+tags = ["ruby", "package-cache"]
+stacks = ["ruby"]
+paths = ["~/.gem/specs", "~/.local/share/gem/specs", "~/.bundle/cache"]
+cost = "redownload"
+rebuild = "Refilled by the next gem or bundle install"
+warm_days = 30
+description = "Gem spec indexes and Bundler's compact index cache."
+
+[[rule]]
+id = "ruby.coverage"
+name = "SimpleCov coverage"
+bucket = "build"
+group = "Test output"
+kind = "artifact"
+tags = ["ruby", "test-output"]
+stacks = ["ruby"]
+names = ["coverage"]
+parent_any = ["Gemfile", ".simplecov"]
+children_any = [".resultset.json", ".last_run.json"]
+ignored = true
+cost = "none"
+description = "SimpleCov reports from test runs."
+
+[[rule]]
+id = "ruby.yard"
+name = "YARD cache"
+bucket = "build"
+group = "Ruby"
+kind = "artifact"
+tags = ["ruby", "docs", "build-output"]
+stacks = ["ruby"]
+names = [".yardoc"]
+cost = "rebuild"
+rebuild = "yard doc"
+description = "YARD's parsed documentation database."
+
+[[rule]]
+id = "rails.public-builds"
+name = "Rails asset builds"
+bucket = "build"
+group = "Ruby"
+kind = "artifact"
+tags = ["ruby", "rails", "build-output"]
+stacks = ["ruby", "node"]
+names = ["packs", "packs-test", "vite-dev", "vite-test"]
+path_contains = ["/public/packs", "/public/vite-"]
+ignored = true
+cost = "rebuild"
+rebuild = "bin/rails assets:precompile / bin/vite build"
+description = "Webpacker, Shakapacker and Vite Ruby output in public/. Only when git ignores it."
+
+# ---------------------------------------------------------------------------
+# PHP
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "php.versions"
+name = "PHP versions"
+bucket = "caches"
+group = "PHP"
+kind = "path"
+tags = ["php", "toolchain"]
+stacks = ["php"]
+paths = ["~/.phpenv/versions", "~/.local/share/mise/installs/php", "~/.asdf/installs/php"]
+each = true
+cost = "redownload"
+tier = "review"
+rebuild = "phpenv/mise/asdf install php <version> (compiles PHP)"
+description = "PHP versions built by phpenv, mise or asdf."
+
+[[rule]]
+id = "php.laravel-logs"
+name = "Laravel logs"
+bucket = "junk"
+group = "Logs"
+kind = "artifact"
+tags = ["php", "laravel", "logs"]
+stacks = ["php", "laravel"]
+names = ["logs"]
+parent_all = ["app", "framework"]
+children_any = ["laravel*.log", "*.log"]
+cost = "none"
+contents = true
+description = "storage/logs of a Laravel app; laravel.log grows forever unless you use daily logs."
+
+[[rule]]
+id = "php.laravel-views"
+name = "Laravel compiled views"
+bucket = "build"
+group = "PHP"
+kind = "artifact"
+tags = ["php", "laravel", "build-output"]
+stacks = ["php", "laravel"]
+names = ["views"]
+path_contains = ["/storage/framework/views"]
+cost = "rebuild"
+contents = true
+rebuild = "Compiled again on the next request (php artisan view:cache)"
+description = "Compiled Blade templates. Sessions and the app cache next to them are not touched."
+
+[[rule]]
+id = "php.symfony-cache"
+name = "Symfony var/cache"
+bucket = "build"
+group = "PHP"
+kind = "artifact"
+tags = ["php", "symfony", "build-output"]
+stacks = ["php"]
+names = ["cache"]
+path_contains = ["/var/cache"]
+parent_all = ["cache", "log"]
+ignored = true
+cost = "rebuild"
+rebuild = "bin/console cache:warmup"
+description = "Symfony's compiled container and per-environment caches. Only when git ignores them."
+
+[[rule]]
+id = "php.symfony-logs"
+name = "Symfony var/log"
+bucket = "junk"
+group = "Logs"
+kind = "artifact"
+tags = ["php", "symfony", "logs"]
+stacks = ["php"]
+names = ["log"]
+path_contains = ["/var/log"]
+parent_all = ["cache", "log"]
+children_any = ["*.log"]
+ignored = true
+cost = "none"
+contents = true
+description = "dev.log and test.log of a Symfony app."
+
+[[rule]]
+id = "php.tool-caches"
+name = "PHPUnit cache"
+bucket = "build"
+group = "PHP"
+kind = "artifact"
+tags = ["php", "test-output"]
+stacks = ["php"]
+names = [".phpunit.cache"]
+cost = "none"
+description = "PHPUnit 10+ result and coverage cache."
+
+[[rule]]
+id = "php.local-server-logs"
+name = "Valet and Herd logs"
+bucket = "junk"
+group = "Logs"
+kind = "path"
+tags = ["php", "logs"]
+stacks = ["php", "laravel"]
+paths = ["~/.config/valet/Log", "~/Library/Application Support/Herd/Log"]
+cost = "none"
+contents = true
+description = "nginx and PHP-FPM logs of Laravel Valet and Herd."
+
+# ---------------------------------------------------------------------------
+# Elixir, Erlang, Gleam
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "elixir.lsp-caches"
+name = "Elixir language server state"
+bucket = "build"
+group = "Elixir"
+kind = "artifact"
+tags = ["elixir", "language-server"]
+stacks = ["elixir"]
+names = [".lexical", ".elixir-tools"]
+parent_any = ["mix.exs"]
+cost = "rebuild"
+rebuild = "Rebuilt when the editor opens the project"
+description = "Build and index state of Lexical and Next LS."
+
+[[rule]]
+id = "elixir.cover"
+name = "Elixir and Erlang coverage"
+bucket = "build"
+group = "Test output"
+kind = "artifact"
+tags = ["elixir", "erlang", "test-output"]
+stacks = ["elixir", "erlang"]
+names = ["cover"]
+parent_any = ["mix.exs", "rebar.config"]
+ignored = true
+cost = "none"
+description = "Coverage reports from mix test --cover or rebar3 cover."
+
+[[rule]]
+id = "elixir.mix-archives"
+name = "Mix archives"
+bucket = "caches"
+group = "Elixir"
+kind = "path"
+tags = ["elixir", "toolchain"]
+stacks = ["elixir"]
+paths = ["~/.mix/archives"]
+each = true
+cost = "redownload"
+tier = "review"
+rebuild = "mix local.hex / mix archive.install hex phx_new"
+description = "Installed Mix archives (hex, phx_new, ...), one per version. Old versions linger after upgrades."
+
+[[rule]]
+id = "elixir.versions"
+name = "Elixir versions"
+bucket = "caches"
+group = "Elixir"
+kind = "path"
+tags = ["elixir", "toolchain"]
+stacks = ["elixir"]
+paths = ["~/.asdf/installs/elixir", "~/.local/share/mise/installs/elixir", "~/.kiex/elixirs"]
+each = true
+cost = "redownload"
+tier = "review"
+rebuild = "asdf/mise install elixir <version>"
+description = "Elixir versions installed by asdf, mise or kiex."
+
+[[rule]]
+id = "erlang.build"
+name = "rebar3 _build"
+bucket = "build"
+group = "Erlang"
+kind = "artifact"
+tags = ["erlang", "build-output"]
+stacks = ["erlang"]
+names = ["_build"]
+parent_any = ["rebar.config"]
+parent_none = ["mix.exs"]
+cost = "rebuild"
+rebuild = "rebar3 compile"
+description = "rebar3 build output and fetched dependencies."
+
+[[rule]]
+id = "erlang.rebar3-cache"
+name = "rebar3 cache"
+bucket = "caches"
+group = "Erlang"
+kind = "path"
+tags = ["erlang", "package-cache"]
+stacks = ["erlang", "elixir"]
+paths = ["~/.cache/rebar3"]
+cost = "redownload"
+rebuild = "rebar3 get-deps"
+warm_days = 30
+description = "Hex packages, plugins and git dependencies rebar3 caches."
+
+[[rule]]
+id = "erlang.versions"
+name = "Erlang/OTP versions"
+bucket = "caches"
+group = "Erlang"
+kind = "path"
+tags = ["erlang", "toolchain"]
+stacks = ["erlang", "elixir"]
+paths = ["~/.asdf/installs/erlang", "~/.local/share/mise/installs/erlang"]
+each = true
+cost = "redownload"
+tier = "review"
+rebuild = "asdf/mise install erlang <version> (compiles OTP, slow)"
+description = "Erlang/OTP versions installed by asdf or mise."
+
+[[rule]]
+id = "erlang.kerl-leftovers"
+name = "kerl build leftovers"
+bucket = "junk"
+group = "Installers"
+kind = "path"
+tags = ["erlang", "installer"]
+stacks = ["erlang", "elixir"]
+paths = ["~/.kerl/builds", "~/.kerl/archives"]
+cost = "none"
+contents = true
+description = "OTP source archives and build trees kerl keeps after installing (kerl cleanup all)."
+
+[[rule]]
+id = "gleam.build"
+name = "Gleam build"
+bucket = "build"
+group = "Gleam"
+kind = "artifact"
+tags = ["gleam", "build-output"]
+stacks = ["gleam"]
+names = ["build"]
+parent_any = ["gleam.toml"]
+children_any = ["dev", "prod", "packages", "lsp"]
+cost = "rebuild"
+rebuild = "gleam build"
+description = "Gleam compiled output and downloaded packages."
+
+[[rule]]
+id = "gleam.cache"
+name = "Gleam package cache"
+bucket = "caches"
+group = "Gleam"
+kind = "path"
+tags = ["gleam", "package-cache"]
+stacks = ["gleam"]
+paths = ["~/Library/Caches/gleam", "~/.cache/gleam"]
+cost = "redownload"
+rebuild = "gleam deps download"
+warm_days = 30
+description = "Hex packages Gleam downloaded."
+
+# ---------------------------------------------------------------------------
+# Haskell
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "haskell.stack-ghcs"
+name = "Stack-installed GHCs"
+bucket = "caches"
+group = "Haskell"
+kind = "path"
+tags = ["haskell", "toolchain"]
+stacks = ["haskell"]
+paths = ["~/.stack/programs/*"]
+each = true
+cost = "redownload"
+tier = "review"
+rebuild = "stack setup"
+description = "GHC versions stack downloaded for resolvers you used (1-3 GB each)."
+recommend = "Keep the GHCs of resolvers in your stack.yaml files."
+
+[[rule]]
+id = "haskell.ghcup-ghcs"
+name = "ghcup GHC versions"
+bucket = "caches"
+group = "Haskell"
+kind = "path"
+tags = ["haskell", "toolchain"]
+stacks = ["haskell"]
+paths = ["~/.ghcup/ghc"]
+each = true
+cost = "redownload"
+tier = "review"
+action = "command"
+command = ["ghcup", "rm", "ghc", "{name}"]
+rebuild = "ghcup install ghc <version>"
+description = "GHC versions installed with ghcup, removed through ghcup so its symlinks stay right."
+
+[[rule]]
+id = "haskell.logs"
+name = "cabal and ghcup logs"
+bucket = "junk"
+group = "Logs"
+kind = "path"
+tags = ["haskell", "logs"]
+stacks = ["haskell"]
+paths = ["~/.cabal/logs", "~/.local/state/cabal/logs", "~/.ghcup/logs", "~/.ghcup/tmp"]
+cost = "none"
+contents = true
+description = "Build logs from cabal and install logs and temp files from ghcup."
+
+[[rule]]
+id = "haskell.hls-caches"
+name = "Haskell language server caches"
+bucket = "caches"
+group = "Haskell"
+kind = "path"
+tags = ["haskell", "language-server"]
+stacks = ["haskell"]
+paths = ["~/.cache/hie-bios", "~/.cache/ghcide"]
+cost = "rebuild"
+rebuild = "Rebuilt when HLS loads a project"
+warm_days = 14
+description = "HLS (ghcide) interface files and hie-bios build state."
+
+# ---------------------------------------------------------------------------
+# OCaml
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "ocaml.build"
+name = "dune _build"
+bucket = "build"
+group = "OCaml"
+kind = "artifact"
+tags = ["ocaml", "build-output"]
+stacks = ["ocaml"]
+names = ["_build"]
+parent_any = ["dune-project", "_tags", "myocamlbuild.ml"]
+cost = "rebuild"
+rebuild = "dune build"
+description = "dune and ocamlbuild output."
+
+[[rule]]
+id = "ocaml.local-switch"
+name = "Local opam switches"
+bucket = "deps"
+group = "OCaml"
+kind = "artifact"
+tags = ["ocaml", "dependencies"]
+stacks = ["ocaml"]
+names = ["_opam"]
+parent_any = ["dune-project", "*.opam", "opam"]
+cost = "rebuild"
+rebuild = "opam switch create . --deps-only (compiles the compiler and every package)"
+warm_days = 30
+description = "A project-local opam switch: its own OCaml compiler and packages."
+
+[[rule]]
+id = "ocaml.opam-cache"
+name = "opam download cache"
+bucket = "caches"
+group = "OCaml"
+kind = "path"
+tags = ["ocaml", "package-cache"]
+stacks = ["ocaml"]
+paths = ["~/.opam/download-cache"]
+cost = "redownload"
+rebuild = "Fetched again by the next opam install"
+warm_days = 30
+description = "Package archives opam downloaded (opam clean --download-cache)."
+
+[[rule]]
+id = "ocaml.opam-logs"
+name = "opam logs"
+bucket = "junk"
+group = "Logs"
+kind = "path"
+tags = ["ocaml", "logs"]
+stacks = ["ocaml"]
+paths = ["~/.opam/log"]
+cost = "none"
+contents = true
+description = "Build logs opam keeps for every package install."
+
+[[rule]]
+id = "ocaml.dune-cache"
+name = "dune shared cache"
+bucket = "caches"
+group = "OCaml"
+kind = "path"
+tags = ["ocaml", "compiler-cache"]
+stacks = ["ocaml"]
+paths = ["~/.cache/dune"]
+cost = "rebuild"
+rebuild = "Refilled by the next dune build"
+warm_days = 30
+description = "dune's shared build cache (dune cache trim shrinks it)."
+
+# ---------------------------------------------------------------------------
+# Nim, Crystal
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "nim.build"
+name = "Nim nimcache and nimbledeps"
+bucket = "build"
+group = "Nim"
+kind = "artifact"
+tags = ["nim", "build-output"]
+stacks = ["nim"]
+names = ["nimcache", "nimbledeps"]
+parent_any = ["*.nimble", "nim.cfg", "config.nims"]
+cost = "rebuild"
+rebuild = "nimble build"
+description = "Generated C sources and project-local Nimble dependencies."
+
+[[rule]]
+id = "nim.compile-cache"
+name = "Nim compile cache"
+bucket = "caches"
+group = "Nim"
+kind = "path"
+tags = ["nim", "compiler-cache"]
+stacks = ["nim"]
+paths = ["~/.cache/nim"]
+cost = "rebuild"
+rebuild = "Refilled by the next nim c"
+warm_days = 14
+description = "Default nimcache location: generated C and objects for every program you compiled."
+
+[[rule]]
+id = "nim.nimble-pkgs"
+name = "Nimble packages"
+bucket = "caches"
+group = "Nim"
+kind = "path"
+tags = ["nim", "package-cache"]
+stacks = ["nim"]
+paths = ["~/.nimble/pkgs2", "~/.nimble/pkgs"]
+cost = "redownload"
+rebuild = "nimble install -d"
+warm_days = 30
+description = "Globally installed Nimble packages your projects build against."
+
+[[rule]]
+id = "nim.toolchains"
+name = "choosenim toolchains"
+bucket = "caches"
+group = "Nim"
+kind = "path"
+tags = ["nim", "toolchain"]
+stacks = ["nim"]
+paths = ["~/.choosenim/toolchains"]
+each = true
+cost = "redownload"
+tier = "review"
+rebuild = "choosenim <version>"
+description = "Nim compilers installed with choosenim."
+
+[[rule]]
+id = "crystal.deps"
+name = "Crystal shards lib"
+bucket = "deps"
+group = "Crystal"
+kind = "artifact"
+tags = ["crystal", "dependencies"]
+stacks = ["crystal"]
+names = ["lib"]
+parent_any = ["shard.yml"]
+children_any = [".shards.info"]
+cost = "redownload"
+rebuild = "shards install"
+description = "Dependencies shards installed into lib/ (identified by lib/.shards.info)."
+
+[[rule]]
+id = "crystal.bin"
+name = "Crystal bin"
+bucket = "build"
+group = "Crystal"
+kind = "artifact"
+tags = ["crystal", "build-output"]
+stacks = ["crystal"]
+names = ["bin"]
+parent_any = ["shard.yml"]
+ignored = true
+cost = "rebuild"
+rebuild = "shards build"
+description = "Binaries from shards build. Only when git ignores bin/."
+
+[[rule]]
+id = "crystal.caches"
+name = "Crystal compiler and shards caches"
+bucket = "caches"
+group = "Crystal"
+kind = "path"
+tags = ["crystal", "compiler-cache", "package-cache"]
+stacks = ["crystal"]
+paths = ["~/.cache/crystal", "~/.cache/shards"]
+cost = "rebuild"
+rebuild = "Refilled by the next crystal build or shards install"
+warm_days = 14
+description = "Crystal's per-program object cache and shards' git cache."
+
+# ---------------------------------------------------------------------------
+# Julia
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "julia.compiled"
+name = "Julia precompile cache"
+bucket = "caches"
+group = "Julia"
+kind = "path"
+tags = ["julia", "compiler-cache"]
+stacks = ["julia"]
+paths = ["~/.julia/compiled"]
+each = true
+cost = "rebuild"
+rebuild = "Precompiled again on the next `using` (slow for big packages)"
+warm_days = 30
+description = "Precompiled package images, one folder per Julia version. Versions you upgraded from stay behind."
+
+[[rule]]
+id = "julia.packages"
+name = "Julia packages and artifacts"
+bucket = "caches"
+group = "Julia"
+kind = "path"
+tags = ["julia", "package-cache"]
+stacks = ["julia"]
+paths = ["~/.julia/packages", "~/.julia/artifacts"]
+cost = "redownload"
+action = "command"
+command = ["julia", "-e", "using Pkg; Pkg.gc()"]
+rebuild = "Pkg.instantiate()"
+warm_days = 30
+description = "Installed package versions and binary artifacts, cleaned through Pkg.gc(), which removes only what no recent environment uses."
+
+[[rule]]
+id = "julia.conda"
+name = "Conda.jl environment"
+bucket = "caches"
+group = "Julia"
+kind = "path"
+tags = ["julia", "python", "dependencies"]
+stacks = ["julia", "python"]
+paths = ["~/.julia/conda"]
+cost = "redownload"
+rebuild = "Pkg.build(\"Conda\"); Pkg.build(\"PyCall\")"
+warm_days = 60
+description = "The private Miniconda Conda.jl and PyCall install."
+
+[[rule]]
+id = "julia.versions"
+name = "juliaup Julia versions"
+bucket = "caches"
+group = "Julia"
+kind = "path"
+tags = ["julia", "toolchain"]
+stacks = ["julia"]
+paths = ["~/.julia/juliaup/julia-*"]
+cost = "redownload"
+tier = "review"
+action = "command"
+command = ["juliaup", "gc"]
+rebuild = "juliaup add <channel>"
+description = "Julia versions installed by juliaup. Cleaning runs juliaup gc, which removes versions no channel points to."
+
+# ---------------------------------------------------------------------------
+# R
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "r.renv-library"
+name = "renv project libraries"
+bucket = "deps"
+group = "R"
+kind = "artifact"
+tags = ["r", "dependencies"]
+stacks = ["r"]
+names = ["library"]
+parent_all = ["activate.R"]
+cost = "redownload"
+rebuild = "renv::restore()"
+warm_days = 30
+description = "A project's renv library (mostly links into the renv cache)."
+
+[[rule]]
+id = "r.renv-cache"
+name = "renv global cache"
+bucket = "caches"
+group = "R"
+kind = "path"
+tags = ["r", "package-cache"]
+stacks = ["r"]
+paths = ["~/Library/Caches/org.R-project.R/R/renv"]
+cost = "redownload"
+tier = "review"
+rebuild = "renv::restore() in each project"
+description = "Packages shared by every renv project. Project libraries link here, so they break until renv::restore() runs again."
+recommend = "renv::clean() and renv::purge() remove only what no project uses."
+
+[[rule]]
+id = "r.pak-cache"
+name = "pak cache"
+bucket = "caches"
+group = "R"
+kind = "path"
+tags = ["r", "package-cache"]
+stacks = ["r"]
+paths = ["~/Library/Caches/org.R-project.R/R/pak"]
+cost = "redownload"
+rebuild = "Refilled by the next pak::pkg_install()"
+warm_days = 30
+description = "Package downloads and metadata cached by pak."
+
+[[rule]]
+id = "r.user-libraries"
+name = "R user libraries per version"
+bucket = "caches"
+group = "R"
+kind = "path"
+tags = ["r", "dependencies"]
+stacks = ["r"]
+paths = ["~/Library/R/arm64/*", "~/Library/R/x86_64/*"]
+cost = "redownload"
+tier = "review"
+rebuild = "install.packages() under that R version"
+description = "Packages installed per R minor version. Libraries of R versions you upgraded from are unused."
+
+# ---------------------------------------------------------------------------
+# Perl, Lua
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "perl.build"
+name = "Perl blib and _build"
+bucket = "build"
+group = "Perl"
+kind = "artifact"
+tags = ["perl", "build-output"]
+stacks = ["perl"]
+names = ["blib", "_build"]
+parent_any = ["Makefile.PL", "Build.PL"]
+cost = "rebuild"
+rebuild = "perl Makefile.PL && make / perl Build.PL && ./Build"
+description = "ExtUtils::MakeMaker and Module::Build output."
+
+[[rule]]
+id = "perl.carton-local"
+name = "Carton local"
+bucket = "deps"
+group = "Perl"
+kind = "artifact"
+tags = ["perl", "dependencies"]
+stacks = ["perl"]
+names = ["local"]
+parent_any = ["cpanfile"]
+ignored = true
+cost = "redownload"
+rebuild = "carton install"
+description = "Modules Carton installed for a project. Only when git ignores local/."
+
+[[rule]]
+id = "perl.versions"
+name = "Perl versions"
+bucket = "caches"
+group = "Perl"
+kind = "path"
+tags = ["perl", "toolchain"]
+stacks = ["perl"]
+paths = ["~/perl5/perlbrew/perls", "~/.plenv/versions"]
+each = true
+cost = "redownload"
+tier = "review"
+rebuild = "perlbrew install / plenv install <version>"
+description = "Perls built by perlbrew or plenv, each with its own modules."
+
+[[rule]]
+id = "perl.build-leftovers"
+name = "cpanm and perlbrew leftovers"
+bucket = "junk"
+group = "Installers"
+kind = "path"
+tags = ["perl", "installer"]
+stacks = ["perl"]
+paths = ["~/.cpanm/work", "~/perl5/perlbrew/build", "~/perl5/perlbrew/dists"]
+cost = "none"
+contents = true
+description = "Build folders cpanm keeps for every install, and perlbrew's sources and tarballs."
+
+[[rule]]
+id = "lua.modules"
+name = "lua_modules"
+bucket = "deps"
+group = "Lua"
+kind = "artifact"
+tags = ["lua", "dependencies"]
+stacks = ["lua"]
+names = ["lua_modules"]
+children_any = ["lib", "share", "bin"]
+cost = "redownload"
+rebuild = "luarocks install --tree lua_modules --only-deps <rockspec>"
+description = "Project-local LuaRocks trees."
+
+[[rule]]
+id = "lua.luarocks-cache"
+name = "LuaRocks cache"
+bucket = "caches"
+group = "Lua"
+kind = "path"
+tags = ["lua", "package-cache"]
+stacks = ["lua"]
+paths = ["~/.cache/luarocks"]
+cost = "redownload"
+rebuild = "Refilled by the next luarocks install"
+warm_days = 30
+description = "Downloaded rocks and manifests."
+
+# ---------------------------------------------------------------------------
+# .NET
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "dotnet.ide-state"
+name = "Visual Studio .vs folders"
+bucket = "build"
+group = ".NET"
+kind = "artifact"
+tags = ["dotnet", "ide"]
+stacks = ["dotnet"]
+names = [".vs"]
+parent_any = ["*.sln", "*.slnx", "*.csproj", "*.fsproj"]
+cost = "rebuild"
+rebuild = "Recreated when the solution is opened"
+description = "Visual Studio and Rider solution state: intellisense databases, open files, breakpoints."
+
+[[rule]]
+id = "dotnet.test-results"
+name = ".NET TestResults"
+bucket = "build"
+group = "Test output"
+kind = "artifact"
+tags = ["dotnet", "test-output"]
+stacks = ["dotnet"]
+names = ["TestResults"]
+parent_any = ["*.sln", "*.slnx", "*.csproj", "*.fsproj"]
+ignored = true
+cost = "none"
+description = "Test run results and coverage files."
+
+[[rule]]
+id = "dotnet.artifacts"
+name = ".NET artifacts output"
+bucket = "build"
+group = ".NET"
+kind = "artifact"
+tags = ["dotnet", "build-output"]
+stacks = ["dotnet"]
+names = ["artifacts"]
+parent_any = ["Directory.Build.props", "*.sln", "*.slnx"]
+children_any = ["bin", "obj", "publish", "package"]
+ignored = true
+cost = "rebuild"
+rebuild = "dotnet build"
+description = "The .NET 8 artifacts output layout (UseArtifactsOutput)."
+
+[[rule]]
+id = "dotnet.packages-folder"
+name = "NuGet packages folder"
+bucket = "deps"
+group = ".NET"
+kind = "artifact"
+tags = ["dotnet", "dependencies"]
+stacks = ["dotnet"]
+names = ["packages"]
+parent_any = ["*.sln", "packages.config", "NuGet.Config", "nuget.config"]
+ignored = true
+cost = "redownload"
+rebuild = "nuget restore / dotnet restore"
+description = "Solution-level packages folder of packages.config projects. Only when git ignores it."
+
+[[rule]]
+id = "dotnet.sdks"
+name = ".NET SDKs in your home folder"
+bucket = "caches"
+group = ".NET"
+kind = "path"
+tags = ["dotnet", "toolchain"]
+stacks = ["dotnet"]
+paths = ["~/.dotnet/sdk", "~/.local/share/mise/installs/dotnet", "~/.asdf/installs/dotnet-core"]
+each = true
+cost = "redownload"
+tier = "review"
+rebuild = "dotnet-install.sh --version <version>"
+description = "SDKs installed with dotnet-install, mise or asdf (each 200-500 MB)."
+recommend = "Keep the SDKs your global.json files pin."
+
+# ---------------------------------------------------------------------------
+# PureScript, ReScript, Solidity
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "purescript.build"
+name = "PureScript output"
+bucket = "build"
+group = "PureScript"
+kind = "artifact"
+tags = ["purescript", "build-output"]
+stacks = ["purescript", "node"]
+names = [".spago", "output", ".psci_modules"]
+parent_any = ["spago.yaml", "spago.dhall"]
+ignored = true
+cost = "rebuild"
+rebuild = "spago build"
+description = "Spago package sets, compiled output and REPL modules. Only when git ignores them."
+
+[[rule]]
+id = "rescript.lib"
+name = "ReScript lib"
+bucket = "build"
+group = "ReScript"
+kind = "artifact"
+tags = ["rescript", "build-output"]
+stacks = ["rescript", "node"]
+names = ["lib"]
+parent_any = ["rescript.json", "bsconfig.json"]
+children_any = ["bs", "ocaml", "rescript.lock"]
+cost = "rebuild"
+rebuild = "rescript build"
+description = "ReScript compiler output (lib/bs, lib/ocaml)."
+
+[[rule]]
+id = "solidity.foundry"
+name = "Foundry out and cache"
+bucket = "build"
+group = "Solidity"
+kind = "artifact"
+tags = ["solidity", "build-output"]
+stacks = ["solidity"]
+names = ["out", "cache"]
+parent_any = ["foundry.toml"]
+children_any = ["*.sol", "solidity-files-cache.json", "build-info"]
+cost = "rebuild"
+rebuild = "forge build"
+description = "Compiled contracts and the compiler cache. broadcast/ (deployment records) is not touched."
+
+[[rule]]
+id = "solidity.hardhat"
+name = "Hardhat artifacts and cache"
+bucket = "build"
+group = "Solidity"
+kind = "artifact"
+tags = ["solidity", "build-output"]
+stacks = ["solidity", "node"]
+names = ["artifacts", "cache", "typechain-types", "typechain"]
+parent_any = ["hardhat.config.js", "hardhat.config.ts", "hardhat.config.cjs", "hardhat.config.mjs"]
+ignored = true
+cost = "rebuild"
+rebuild = "npx hardhat compile"
+description = "Compiled contracts, compiler cache and generated TypeChain types. Only when git ignores them."
+
+[[rule]]
+id = "solidity.toolchains"
+name = "solc versions and Foundry cache"
+bucket = "caches"
+group = "Solidity"
+kind = "path"
+tags = ["solidity", "toolchain"]
+stacks = ["solidity"]
+paths = ["~/.svm/[0-9]*", "~/.foundry/cache"]
+cost = "redownload"
+rebuild = "Downloaded again by forge or hardhat when a contract needs that solc"
+warm_days = 60
+description = "solc compilers downloaded per version and Foundry's RPC and Etherscan cache."

@@ -1,0 +1,107 @@
+# Cross-platform mobile: Flutter/FVM and React Native/Expo/Metro.
+# Core Dart/Flutter rules live in langs.toml, Expo project state in web.toml,
+# Android SDK pieces in dev-jvm.toml.
+
+[[stack]]
+id = "react-native"
+name = "React Native / Expo"
+markers = ["metro.config.js", "metro.config.cjs", "metro.config.mjs", "react-native.config.js", "eas.json"]
+
+[[stack]]
+id = "fvm"
+name = "FVM (Flutter versions)"
+markers = [".fvmrc", ".fvm"]
+
+# ---------------------------------------------------------------------------
+# Flutter and Dart
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "flutter.fvm-versions"
+name = "FVM Flutter SDKs"
+bucket = "caches"
+group = "Flutter"
+kind = "path"
+tags = ["flutter", "dart", "fvm", "toolchain"]
+stacks = ["flutter", "fvm"]
+paths = ["~/fvm/versions", "~/.fvm/versions"]
+each = true
+cost = "redownload"
+tier = "review"
+rebuild = "fvm install <version>"
+description = "Flutter SDKs installed with FVM (1-3 GB each with their engine cache)."
+recommend = "Keep the versions your projects pin in .fvmrc; fvm remove <version> also tidies FVM's config."
+
+[[rule]]
+id = "flutter.fvm-git-cache"
+name = "FVM git cache"
+bucket = "caches"
+group = "Flutter"
+kind = "path"
+tags = ["flutter", "fvm", "package-cache"]
+stacks = ["flutter", "fvm"]
+paths = ["~/fvm/cache.git"]
+cost = "redownload"
+rebuild = "Cloned again by the next fvm install"
+warm_days = 60
+description = "The local mirror of the Flutter repository FVM clones new versions from."
+
+[[rule]]
+id = "flutter.sdk-cache"
+name = "Flutter SDK bin/cache"
+bucket = "caches"
+group = "Flutter"
+kind = "path"
+tags = ["flutter", "dart", "toolchain"]
+stacks = ["flutter"]
+paths = ["~/flutter/bin/cache", "~/development/flutter/bin/cache", "~/sdk/flutter/bin/cache", "~/fvm/versions/*/bin/cache"]
+cost = "redownload"
+rebuild = "flutter precache (or any flutter command)"
+warm_days = 30
+description = "Engine artifacts and the Dart SDK each Flutter checkout downloads into bin/cache, including platforms you may not build for."
+
+[[rule]]
+id = "dart.analysis-server"
+name = "Dart analysis server cache"
+bucket = "caches"
+group = "Flutter"
+kind = "path"
+tags = ["dart", "flutter", "language-server"]
+stacks = ["flutter"]
+paths = ["~/.dartServer/.analysis-driver"]
+cost = "rebuild"
+rebuild = "Rebuilt when the editor analyses your projects again"
+warm_days = 14
+description = "Summaries the Dart analysis server caches for every package it analysed."
+
+# ---------------------------------------------------------------------------
+# React Native, Expo, Metro
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "rn.metro-cache"
+name = "Metro bundler cache"
+bucket = "caches"
+group = "React Native"
+kind = "path"
+tags = ["react-native", "node", "bundler-cache"]
+stacks = ["react-native", "node"]
+paths = ["$TMPDIR/metro-*", "$TMPDIR/haste-map-*", "$TMPDIR/react-native-packager-cache-*"]
+cost = "rebuild"
+rebuild = "Rebuilt by the next bundle (npx expo start --clear / npx react-native start --reset-cache)"
+warm_days = 7
+description = "Metro's transform cache and file maps in the temp folder."
+
+[[rule]]
+id = "rn.expo-go-downloads"
+name = "Expo Go downloads"
+bucket = "caches"
+group = "React Native"
+kind = "path"
+tags = ["react-native", "expo", "simulator"]
+stacks = ["react-native", "node"]
+paths = ["~/.expo/ios-simulator-app-cache", "~/.expo/android-apk-cache"]
+cost = "redownload"
+rebuild = "Downloaded again when you open a project in a simulator or emulator"
+warm_days = 30
+description = "Expo Go builds the Expo CLI downloads per SDK version for simulators and emulators."

@@ -1,0 +1,417 @@
+# Web framework extras, monorepo tools, static site generators, test output and
+# Node toolchain managers. Core JS rules live in web.toml.
+
+[[stack]]
+id = "nextjs"
+name = "Next.js"
+markers = ["next.config.js", "next.config.mjs", "next.config.ts", "next.config.cjs"]
+
+[[stack]]
+id = "nuxt"
+name = "Nuxt"
+markers = ["nuxt.config.ts", "nuxt.config.js", "nuxt.config.mjs"]
+
+[[stack]]
+id = "svelte"
+name = "Svelte / SvelteKit"
+markers = ["svelte.config.js", "svelte.config.ts", "svelte.config.mjs"]
+
+[[stack]]
+id = "astro"
+name = "Astro"
+markers = ["astro.config.mjs", "astro.config.ts", "astro.config.js"]
+
+[[stack]]
+id = "angular"
+name = "Angular"
+markers = ["angular.json"]
+
+[[stack]]
+id = "vite"
+name = "Vite"
+markers = ["vite.config.ts", "vite.config.js", "vite.config.mjs", "vite.config.mts"]
+
+[[stack]]
+id = "gatsby"
+name = "Gatsby"
+markers = ["gatsby-config.js", "gatsby-config.ts", "gatsby-config.mjs"]
+
+[[stack]]
+id = "storybook"
+name = "Storybook"
+markers = [".storybook"]
+
+[[stack]]
+id = "playwright"
+name = "Playwright"
+markers = ["playwright.config.ts", "playwright.config.js", "playwright.config.mjs"]
+
+[[stack]]
+id = "cypress"
+name = "Cypress"
+markers = ["cypress.config.ts", "cypress.config.js", "cypress.config.mjs", "cypress.json"]
+
+[[stack]]
+id = "pnpm"
+name = "pnpm"
+markers = ["pnpm-lock.yaml", "pnpm-workspace.yaml"]
+
+[[stack]]
+id = "yarn"
+name = "Yarn"
+markers = ["yarn.lock", ".yarnrc.yml"]
+
+[[stack]]
+id = "nx"
+name = "Nx"
+markers = ["nx.json"]
+
+[[stack]]
+id = "turborepo"
+name = "Turborepo"
+markers = ["turbo.json"]
+
+[[stack]]
+id = "rush"
+name = "Rush"
+markers = ["rush.json"]
+
+[[stack]]
+id = "lerna"
+name = "Lerna"
+markers = ["lerna.json"]
+
+[[stack]]
+id = "moon"
+name = "moon"
+markers = [".moon"]
+
+[[stack]]
+id = "meteor"
+name = "Meteor"
+markers = [".meteor"]
+
+[[stack]]
+id = "ember"
+name = "Ember"
+markers = ["ember-cli-build.js"]
+
+[[stack]]
+id = "hugo"
+name = "Hugo"
+markers = ["hugo.toml", "hugo.yaml", "hugo.json"]
+
+[[stack]]
+id = "jekyll"
+name = "Jekyll"
+markers = ["_config.yml"]
+
+[[stack]]
+id = "eleventy"
+name = "Eleventy"
+markers = [".eleventy.js", "eleventy.config.js", "eleventy.config.mjs", "eleventy.config.cjs", "eleventy.config.ts"]
+
+# ---------------------------------------------------------------------------
+# Framework build output
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "node.server-frameworks"
+name = "Vinxi and Nitro build state"
+bucket = "build"
+group = "JS build output"
+kind = "artifact"
+tags = ["node", "build-output"]
+stacks = ["node", "vite"]
+names = [".vinxi", ".nitro", ".tanstack", ".solid"]
+parent_any = ["package.json", "app.config.*", "nitro.config.*"]
+cost = "rebuild"
+rebuild = "npm run build / npm run dev"
+description = "Build and dev state from SolidStart and TanStack Start (Vinxi) and Nitro servers."
+
+[[rule]]
+id = "node.remix-public-build"
+name = "Remix public/build"
+bucket = "build"
+group = "JS build output"
+kind = "artifact"
+tags = ["node", "remix", "build-output"]
+stacks = ["node"]
+names = ["build"]
+path_contains = ["/public/build"]
+children_any = ["_assets", "_shared", "manifest-*.js", "entry.client-*.js", "root-*.js", "routes"]
+ignored = true
+cost = "rebuild"
+rebuild = "remix build"
+description = "Client bundles Remix v1 writes to public/build. Only when git ignores it."
+
+[[rule]]
+id = "node.ember-tmp"
+name = "Ember tmp"
+bucket = "build"
+group = "JS build output"
+kind = "artifact"
+tags = ["node", "ember", "build-output"]
+stacks = ["node", "ember"]
+names = ["tmp"]
+parent_any = ["ember-cli-build.js"]
+ignored = true
+cost = "rebuild"
+rebuild = "ember build"
+description = "Broccoli build scratch space of an Ember app."
+
+[[rule]]
+id = "node.meteor-local"
+name = "Meteor build caches"
+bucket = "build"
+group = "JS build output"
+kind = "artifact"
+tags = ["node", "meteor", "build-output"]
+stacks = ["node", "meteor"]
+names = ["build", "bundler-cache", "plugin-cache", "isopacks"]
+path_contains = ["/.meteor/local/"]
+cost = "rebuild"
+rebuild = "meteor run"
+description = "Build output and bundler caches in .meteor/local. The local dev database (.meteor/local/db) is never matched."
+
+[[rule]]
+id = "node.vitepress"
+name = "VitePress and VuePress output"
+bucket = "build"
+group = "Docs sites"
+kind = "artifact"
+tags = ["node", "static-site", "build-output"]
+stacks = ["node", "vite"]
+names = ["cache", "dist", ".cache", ".temp"]
+path_contains = ["/.vitepress/cache", "/.vitepress/dist", "/.vuepress/.cache", "/.vuepress/.temp", "/.vuepress/dist"]
+cost = "rebuild"
+rebuild = "vitepress build / vuepress build"
+description = "VitePress and VuePress dev caches and built sites."
+
+[[rule]]
+id = "hugo.public"
+name = "Hugo public and resources"
+bucket = "build"
+group = "Docs sites"
+kind = "artifact"
+tags = ["hugo", "static-site", "build-output"]
+stacks = ["hugo"]
+names = ["public", "resources"]
+parent_any = ["hugo.toml", "hugo.yaml", "hugo.json", "archetypes"]
+ignored = true
+cost = "rebuild"
+rebuild = "hugo"
+description = "Hugo's generated site and processed-resources cache. Only when git ignores them."
+
+[[rule]]
+id = "hugo.cache"
+name = "Hugo cache"
+bucket = "caches"
+group = "Docs sites"
+kind = "path"
+tags = ["hugo", "static-site", "package-cache"]
+stacks = ["hugo"]
+paths = ["~/Library/Caches/hugo_cache", "$TMPDIR/hugo_cache"]
+cost = "redownload"
+rebuild = "Refilled by the next hugo build (modules are fetched again)"
+warm_days = 30
+description = "Hugo modules, remote resources and image processing cache."
+
+# ---------------------------------------------------------------------------
+# Test output and test caches
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "node.cypress-artifacts"
+name = "Cypress screenshots and videos"
+bucket = "build"
+group = "Test output"
+kind = "artifact"
+tags = ["node", "cypress", "test-output"]
+stacks = ["node", "cypress"]
+names = ["screenshots", "videos", "downloads"]
+path_contains = ["/cypress/screenshots", "/cypress/videos", "/cypress/downloads"]
+ignored = true
+cost = "none"
+description = "Screenshots, videos and downloads from Cypress runs. Only when git ignores them."
+
+[[rule]]
+id = "node.jest-cache"
+name = "Jest cache"
+bucket = "caches"
+group = "Test output"
+kind = "path"
+tags = ["node", "jest", "test-output"]
+stacks = ["node"]
+paths = ["$TMPDIR/jest_*"]
+cost = "rebuild"
+rebuild = "Rebuilt by the next jest run (jest --clearCache does the same)"
+warm_days = 7
+description = "Jest's transform and haste map cache in the temp folder."
+
+# ---------------------------------------------------------------------------
+# Monorepo tools
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "node.rush-temp"
+name = "Rush common/temp"
+bucket = "deps"
+group = "Monorepo caches"
+kind = "artifact"
+tags = ["node", "rush", "monorepo", "dependencies"]
+stacks = ["node", "rush"]
+names = ["temp"]
+path_contains = ["/common/temp"]
+parent_any = ["config"]
+children_any = ["node_modules", "pnpm-store", "pnpm-lock.yaml", "shrinkwrap-deps.json", "rush-link.json", "install-run"]
+cost = "redownload"
+rebuild = "rush install"
+warm_days = 30
+description = "Rush's install workspace: the shared pnpm store and node_modules for every project."
+
+[[rule]]
+id = "node.rush-global"
+name = "Rush versions"
+bucket = "caches"
+group = "Monorepo caches"
+kind = "path"
+tags = ["node", "rush", "toolchain"]
+stacks = ["node", "rush"]
+paths = ["~/.rush/node-*"]
+cost = "redownload"
+rebuild = "Installed again by the next rush command"
+warm_days = 60
+description = "Rush engine versions installed per Node version by rush's version selector."
+
+[[rule]]
+id = "node.moon-cache"
+name = "moon cache"
+bucket = "build"
+group = "Monorepo caches"
+kind = "artifact"
+tags = ["node", "moon", "monorepo", "build-output"]
+stacks = ["node", "moon"]
+names = ["cache"]
+path_contains = ["/.moon/cache"]
+cost = "rebuild"
+rebuild = "moon run <target>"
+description = "moon task outputs, hashes and logs."
+
+[[rule]]
+id = "node.yarn-project-cache"
+name = "Yarn Berry project cache"
+bucket = "deps"
+group = "Node"
+kind = "artifact"
+tags = ["node", "yarn", "dependencies"]
+stacks = ["node", "yarn"]
+names = ["cache", "unplugged"]
+path_contains = ["/.yarn/cache", "/.yarn/unplugged"]
+ignored = true
+cost = "redownload"
+rebuild = "yarn install"
+warm_days = 30
+description = "A project's Yarn Berry zip cache and unplugged packages. Only when git ignores them (zero-install repos commit .yarn/cache)."
+
+# ---------------------------------------------------------------------------
+# Node, pnpm, Bun and friends: global extras
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "node.manager-downloads"
+name = "Node version manager downloads"
+bucket = "junk"
+group = "Installers"
+kind = "path"
+tags = ["node", "installer"]
+stacks = ["node"]
+paths = ["~/.nvm/.cache"]
+cost = "none"
+contents = true
+description = "Tarballs nvm keeps after installing a Node version (nvm cache clear does the same)."
+
+[[rule]]
+id = "node.volta-inventory"
+name = "Volta inventory"
+bucket = "caches"
+group = "Node versions"
+kind = "path"
+tags = ["node", "volta", "toolchain"]
+stacks = ["node"]
+paths = ["~/.volta/tools/inventory"]
+cost = "redownload"
+rebuild = "Downloaded again when Volta needs that version"
+warm_days = 30
+description = "Archives of every Node, npm, pnpm and Yarn version Volta downloaded."
+
+[[rule]]
+id = "node.proto-tools"
+name = "proto tool versions"
+bucket = "caches"
+group = "Node versions"
+kind = "path"
+tags = ["node", "proto", "toolchain"]
+stacks = ["node", "bun", "deno", "go", "python", "rust"]
+paths = ["~/.proto/tools/*"]
+each = true
+cost = "redownload"
+tier = "review"
+rebuild = "proto install <tool> <version>"
+description = "Tool versions installed by moonrepo proto (node, bun, deno, go, python...)."
+recommend = "Keep the versions pinned in .prototools files."
+
+[[rule]]
+id = "node.proto-temp"
+name = "proto temp downloads"
+bucket = "junk"
+group = "Installers"
+kind = "path"
+tags = ["node", "proto", "installer"]
+stacks = ["node"]
+paths = ["~/.proto/temp"]
+cost = "none"
+contents = true
+description = "Downloads proto leaves behind after installing tools."
+
+[[rule]]
+id = "pnpm.metadata-cache"
+name = "pnpm metadata and dlx cache"
+bucket = "caches"
+group = "Node"
+kind = "path"
+tags = ["node", "pnpm", "package-cache"]
+stacks = ["node", "pnpm"]
+paths = ["~/Library/Caches/pnpm", "~/.cache/pnpm"]
+cost = "redownload"
+rebuild = "Refilled by the next pnpm install or pnpm dlx"
+warm_days = 30
+description = "Registry metadata and pnpm dlx installs."
+
+[[rule]]
+id = "pnpm.tools"
+name = "pnpm self-installed versions"
+bucket = "caches"
+group = "Node"
+kind = "path"
+tags = ["node", "pnpm", "toolchain"]
+stacks = ["node", "pnpm"]
+paths = ["~/Library/pnpm/.tools"]
+cost = "redownload"
+rebuild = "Downloaded again when a packageManager field asks for that pnpm"
+warm_days = 60
+description = "pnpm versions pnpm downloaded to honour packageManager fields."
+
+[[rule]]
+id = "bun.transpiler-cache"
+name = "Bun transpiler cache"
+bucket = "caches"
+group = "Node"
+kind = "path"
+tags = ["bun", "compiler-cache"]
+stacks = ["bun"]
+paths = ["~/Library/Caches/bun"]
+cost = "rebuild"
+rebuild = "Refilled as bun runs large files again"
+warm_days = 14
+description = "Bun's runtime transpiler cache for large source files."

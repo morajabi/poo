@@ -1,4 +1,10 @@
 # JVM, Android, Ruby, PHP, Elixir, Haskell, .NET, Dart, game engines and infra.
+# Extras for these stacks live in dev-jvm.toml, dev-langs.toml, dev-mobile.toml,
+# dev-games.toml and dev-terraform.toml.
+
+# ---------------------------------------------------------------------------
+# Gradle, Maven, sbt
+# ---------------------------------------------------------------------------
 
 [[rule]]
 id = "gradle.build"
@@ -6,6 +12,8 @@ name = "Gradle build folders"
 bucket = "build"
 group = "Gradle / Android"
 kind = "artifact"
+tags = ["jvm", "gradle", "android", "build-output"]
+stacks = ["gradle", "jvm", "android"]
 names = ["build"]
 parent_any = ["build.gradle", "build.gradle.kts"]
 cost = "rebuild"
@@ -18,10 +26,13 @@ name = "Gradle project caches"
 bucket = "build"
 group = "Gradle / Android"
 kind = "artifact"
+tags = ["jvm", "gradle", "android", "build-output"]
+stacks = ["gradle", "jvm", "android"]
 names = [".gradle", ".kotlin", ".cxx", ".externalNativeBuild"]
 parent_any = ["settings.gradle", "settings.gradle.kts", "build.gradle", "build.gradle.kts", "gradlew"]
 cost = "rebuild"
-description = "Per-project Gradle, Kotlin and native build caches."
+rebuild = "./gradlew build"
+description = "Per-project Gradle, Kotlin and native (CMake/ndk-build) build caches."
 
 [[rule]]
 id = "gradle.caches"
@@ -29,10 +40,14 @@ name = "Gradle caches"
 bucket = "caches"
 group = "Gradle / Android"
 kind = "path"
+tags = ["jvm", "gradle", "android", "package-cache"]
+stacks = ["gradle", "jvm", "android"]
 paths = ["~/.gradle/caches", "~/.gradle/native", "~/.gradle/build-scan-data", "~/.gradle/.tmp"]
 cost = "redownload"
+rebuild = "Refilled by the next ./gradlew build"
 warm_days = 30
 description = "Downloaded dependencies and transformed artifacts. Often the largest JVM cache."
+recommend = "Stop daemons first (./gradlew --stop). Old per-version folders are listed separately as jvm.gradle-version-caches."
 
 [[rule]]
 id = "gradle.wrappers"
@@ -40,9 +55,12 @@ name = "Gradle wrapper distributions"
 bucket = "caches"
 group = "Gradle / Android"
 kind = "path"
+tags = ["jvm", "gradle", "toolchain"]
+stacks = ["gradle", "jvm", "android"]
 paths = ["~/.gradle/wrapper/dists"]
 each = true
 cost = "redownload"
+rebuild = "./gradlew downloads it again"
 warm_days = 60
 description = "One Gradle distribution per version any project used."
 
@@ -52,9 +70,13 @@ name = "Gradle daemon logs"
 bucket = "junk"
 group = "Logs"
 kind = "path"
+tags = ["jvm", "gradle", "logs"]
+stacks = ["gradle", "jvm", "android"]
 paths = ["~/.gradle/daemon"]
+each = true
+min_age_days = 7
 cost = "none"
-description = "Logs and registry of past Gradle daemons."
+description = "Logs and registries of Gradle daemons, one folder per Gradle version. Folders of versions you no longer run show up after a week."
 
 [[rule]]
 id = "maven.target"
@@ -62,10 +84,12 @@ name = "Maven and sbt target"
 bucket = "build"
 group = "JVM"
 kind = "artifact"
+tags = ["jvm", "maven", "scala", "clojure", "build-output"]
+stacks = ["maven", "scala", "clojure", "jvm"]
 names = ["target"]
 parent_any = ["pom.xml", "build.sbt", "project.clj", "build.boot"]
 cost = "rebuild"
-rebuild = "mvn package / sbt compile"
+rebuild = "mvn package / sbt compile / lein compile"
 description = "Maven, sbt and Leiningen build output."
 
 [[rule]]
@@ -74,8 +98,11 @@ name = "Scala tooling caches"
 bucket = "build"
 group = "JVM"
 kind = "artifact"
+tags = ["jvm", "scala", "language-server", "build-output"]
+stacks = ["scala", "jvm"]
 names = [".bsp", ".metals", ".bloop", ".scala-build"]
 cost = "rebuild"
+rebuild = "Re-imported by Metals or the next scala-cli / sbt run"
 description = "Metals, Bloop and scala-cli state."
 
 [[rule]]
@@ -84,46 +111,64 @@ name = "Maven repository"
 bucket = "caches"
 group = "JVM"
 kind = "path"
+tags = ["jvm", "maven", "package-cache"]
+stacks = ["maven", "jvm", "gradle", "clojure"]
 paths = ["~/.m2/repository"]
 cost = "redownload"
+rebuild = "mvn dependency:resolve (or the next build)"
 warm_days = 30
-description = "Local Maven repository."
+description = "Local Maven repository. Artifacts you `mvn install` yourself also live here."
+recommend = "If you install snapshots of your own libraries locally, rebuild them after clearing this."
 
 [[rule]]
 id = "jvm.other-caches"
-name = "Coursier, Ivy, sbt and Konan"
+name = "Coursier, Ivy and sbt caches"
 bucket = "caches"
 group = "JVM"
 kind = "path"
-paths = ["~/Library/Caches/Coursier", "~/.ivy2/cache", "~/.sbt/boot", "~/.konan", "~/.cache/coursier"]
+tags = ["jvm", "scala", "package-cache"]
+stacks = ["scala", "jvm"]
+paths = ["~/Library/Caches/Coursier", "~/.ivy2/cache", "~/.sbt/boot", "~/.cache/coursier"]
 cost = "redownload"
+rebuild = "Fetched again by the next sbt, mill or coursier run"
 warm_days = 30
-description = "Other JVM dependency caches and Kotlin/Native toolchains."
+description = "Other JVM dependency caches (Kotlin/Native toolchains are listed as kotlin.native)."
+
+# ---------------------------------------------------------------------------
+# Android
+# ---------------------------------------------------------------------------
 
 [[rule]]
 id = "android.avd"
 name = "Android emulators"
-bucket = "xcode"
+bucket = "android"
 group = "Android emulators"
 kind = "path"
+tags = ["android", "emulator"]
+stacks = ["android"]
 paths = ["~/.android/avd"]
 each = true
 exclude = ["*.ini"]
 cost = "rebuild"
 tier = "review"
+rebuild = "Create the device again in Android Studio's Device Manager; installed apps and data are lost"
 description = "Android virtual devices with their data."
 
 [[rule]]
 id = "android.system-images"
 name = "Android system images"
-bucket = "xcode"
+bucket = "android"
 group = "Android SDK"
 kind = "path"
+tags = ["android", "emulator", "sdk"]
+stacks = ["android"]
 paths = ["~/Library/Android/sdk/system-images"]
 each = true
 cost = "redownload"
 tier = "review"
+rebuild = "sdkmanager \"system-images;android-<api>;<variant>;<abi>\""
 description = "Emulator system images (several GB each)."
+recommend = "Keep images your emulators use; an emulator whose image is gone stops booting."
 
 [[rule]]
 id = "android.caches"
@@ -131,8 +176,11 @@ name = "Android tool caches"
 bucket = "caches"
 group = "Gradle / Android"
 kind = "path"
+tags = ["android", "ide", "compiler-cache"]
+stacks = ["android", "gradle"]
 paths = ["~/.android/cache", "~/.android/build-cache", "~/Library/Caches/Google/AndroidStudio*"]
 cost = "rebuild"
+rebuild = "Rebuilt by Android Studio and the next build (re-indexing takes a while)"
 warm_days = 30
 description = "Android SDK and Studio caches."
 
@@ -142,9 +190,12 @@ name = "JetBrains IDE caches"
 bucket = "system"
 group = "IDEs"
 kind = "path"
+tags = ["jetbrains", "ide", "language-server"]
+stacks = ["jetbrains", "jvm"]
 paths = ["~/Library/Caches/JetBrains"]
 each = true
 cost = "rebuild"
+rebuild = "The IDE re-indexes on next launch"
 warm_days = 30
 description = "Indexes per IDE version. Versions you upgraded from stay behind."
 
@@ -154,9 +205,15 @@ name = "JetBrains logs"
 bucket = "junk"
 group = "Logs"
 kind = "path"
+tags = ["jetbrains", "ide", "logs"]
+stacks = ["jetbrains", "jvm"]
 paths = ["~/Library/Logs/JetBrains"]
 cost = "none"
 description = "IDE logs."
+
+# ---------------------------------------------------------------------------
+# Ruby
+# ---------------------------------------------------------------------------
 
 [[rule]]
 id = "ruby.vendor-bundle"
@@ -164,6 +221,8 @@ name = "Bundler vendor/bundle"
 bucket = "deps"
 group = "Ruby"
 kind = "artifact"
+tags = ["ruby", "dependencies"]
+stacks = ["ruby"]
 names = ["bundle"]
 path_contains = ["/vendor/bundle"]
 cost = "redownload"
@@ -176,10 +235,13 @@ name = "Rails tmp"
 bucket = "build"
 group = "Ruby"
 kind = "artifact"
+tags = ["ruby", "rails", "build-output"]
+stacks = ["ruby"]
 names = ["tmp"]
 parent_any = ["Gemfile"]
 children_any = ["cache", "pids", "sockets", "storage"]
 cost = "rebuild"
+rebuild = "bin/rails tmp:create (caches refill as the app runs)"
 description = "Rails asset and bootsnap caches."
 
 [[rule]]
@@ -188,6 +250,8 @@ name = "Rails logs"
 bucket = "junk"
 group = "Logs"
 kind = "artifact"
+tags = ["ruby", "rails", "logs"]
+stacks = ["ruby"]
 names = ["log"]
 parent_any = ["Gemfile"]
 children_any = ["development.log", "test.log"]
@@ -197,14 +261,18 @@ description = "development.log and test.log grow forever."
 
 [[rule]]
 id = "ruby.gems"
-name = "Ruby gems and versions"
+name = "User-installed gems"
 bucket = "caches"
 group = "Ruby"
 kind = "path"
-paths = ["~/.gem", "~/.rbenv/versions", "~/.rvm/gems", "~/.local/share/mise/installs/ruby", "~/.asdf/installs/ruby"]
+tags = ["ruby", "package-cache"]
+stacks = ["ruby"]
+paths = ["~/.gem/ruby", "~/.rvm/gems"]
+each = true
 cost = "redownload"
 tier = "review"
-description = "Installed gems and Ruby versions."
+rebuild = "gem install / bundle install"
+description = "Gems installed with --user-install or into rvm gemsets, one folder per Ruby version or gemset. Ruby versions themselves are ruby.versions."
 
 [[rule]]
 id = "php.vendor"
@@ -212,6 +280,8 @@ name = "Composer vendor"
 bucket = "deps"
 group = "PHP"
 kind = "artifact"
+tags = ["php", "dependencies"]
+stacks = ["php"]
 names = ["vendor"]
 parent_any = ["composer.json"]
 cost = "redownload"
@@ -224,8 +294,11 @@ name = "Composer cache"
 bucket = "caches"
 group = "PHP"
 kind = "path"
+tags = ["php", "package-cache"]
+stacks = ["php"]
 paths = ["~/Library/Caches/composer", "~/.composer/cache", "~/.cache/composer"]
 cost = "redownload"
+rebuild = "composer install"
 warm_days = 30
 description = "Composer downloads."
 
@@ -235,6 +308,8 @@ name = "Go vendor"
 bucket = "deps"
 group = "Go"
 kind = "artifact"
+tags = ["go", "dependencies"]
+stacks = ["go"]
 names = ["vendor"]
 parent_any = ["go.mod"]
 ignored = true
@@ -242,17 +317,23 @@ cost = "redownload"
 rebuild = "go mod vendor"
 description = "Vendored Go modules, when git ignores them."
 
+# ---------------------------------------------------------------------------
+# Elixir, Haskell, .NET, Dart, Elm
+# ---------------------------------------------------------------------------
+
 [[rule]]
 id = "elixir.build"
 name = "Elixir _build and deps"
 bucket = "build"
 group = "Elixir"
 kind = "artifact"
+tags = ["elixir", "build-output", "dependencies"]
+stacks = ["elixir"]
 names = ["_build", "deps", ".elixir_ls"]
 parent_any = ["mix.exs"]
 cost = "rebuild"
 rebuild = "mix deps.get && mix compile"
-description = "Compiled Elixir and fetched dependencies."
+description = "Compiled Elixir, fetched dependencies and ElixirLS build state."
 
 [[rule]]
 id = "elixir.hex"
@@ -260,10 +341,13 @@ name = "Hex and Mix caches"
 bucket = "caches"
 group = "Elixir"
 kind = "path"
-paths = ["~/.hex/packages", "~/.mix/archives", "~/Library/Caches/mix"]
+tags = ["elixir", "package-cache"]
+stacks = ["elixir", "erlang"]
+paths = ["~/.hex/packages", "~/Library/Caches/mix"]
 cost = "redownload"
+rebuild = "mix deps.get"
 warm_days = 30
-description = "Hex package cache."
+description = "Hex package cache and Mix.install caches. Installed Mix archives are elixir.mix-archives."
 
 [[rule]]
 id = "haskell.build"
@@ -271,21 +355,28 @@ name = "Haskell build output"
 bucket = "build"
 group = "Haskell"
 kind = "artifact"
+tags = ["haskell", "build-output"]
+stacks = ["haskell"]
 names = ["dist-newstyle", ".stack-work", "dist"]
 parent_any = ["*.cabal", "cabal.project", "stack.yaml"]
 cost = "rebuild"
+rebuild = "cabal build / stack build"
 description = "cabal and stack build directories."
 
 [[rule]]
 id = "haskell.caches"
-name = "Haskell toolchains and packages"
+name = "Haskell package caches"
 bucket = "caches"
 group = "Haskell"
 kind = "path"
-paths = ["~/.stack", "~/.cabal/packages", "~/.cabal/store", "~/.ghcup/cache"]
+tags = ["haskell", "package-cache"]
+stacks = ["haskell"]
+paths = ["~/.stack/snapshots", "~/.stack/pantry", "~/.stack/indices", "~/.cabal/packages", "~/.cabal/store", "~/.cache/cabal/packages", "~/.local/state/cabal/store", "~/.ghcup/cache"]
 cost = "redownload"
+rebuild = "cabal build / stack build (compiles every dependency again)"
 warm_days = 30
-description = "Stack snapshots, cabal store and ghcup downloads."
+description = "Stack snapshots and package index, cabal package downloads and store, ghcup downloads."
+recommend = "The cabal store and stack snapshots hold compiled libraries; rebuilding them can take a long time."
 
 [[rule]]
 id = "dotnet.bin-obj"
@@ -293,8 +384,11 @@ name = ".NET bin and obj"
 bucket = "build"
 group = ".NET"
 kind = "artifact"
+tags = ["dotnet", "build-output"]
+stacks = ["dotnet"]
 names = ["bin", "obj"]
 parent_any = ["*.csproj", "*.fsproj", "*.vbproj"]
+children_any = ["Debug", "Release", "project.assets.json", "*.nuget.*", "*.cache", "*.dll", "publish"]
 cost = "rebuild"
 rebuild = "dotnet build"
 description = "MSBuild output."
@@ -305,10 +399,13 @@ name = "NuGet packages"
 bucket = "caches"
 group = ".NET"
 kind = "path"
+tags = ["dotnet", "package-cache"]
+stacks = ["dotnet"]
 paths = ["~/.nuget/packages", "~/.local/share/NuGet"]
 cost = "redownload"
+rebuild = "dotnet restore"
 warm_days = 30
-description = "Global NuGet packages."
+description = "Global NuGet packages and HTTP cache."
 
 [[rule]]
 id = "dart.tool"
@@ -316,6 +413,8 @@ name = "Dart and Flutter build"
 bucket = "build"
 group = "Flutter"
 kind = "artifact"
+tags = ["dart", "flutter", "build-output"]
+stacks = ["flutter"]
 names = [".dart_tool", "build", ".flutter-plugins-dependencies"]
 parent_any = ["pubspec.yaml"]
 cost = "rebuild"
@@ -328,10 +427,14 @@ name = "Pub cache"
 bucket = "caches"
 group = "Flutter"
 kind = "path"
+tags = ["dart", "flutter", "package-cache"]
+stacks = ["flutter"]
 paths = ["~/.pub-cache/hosted", "~/.pub-cache/git", "~/Library/Caches/flutter_engine"]
 cost = "redownload"
+rebuild = "flutter pub get / dart pub get"
 warm_days = 30
 description = "Dart packages and Flutter engine artifacts."
+recommend = "Globally activated packages (~/.pub-cache/global_packages) are not touched."
 
 [[rule]]
 id = "elm.stuff"
@@ -339,10 +442,17 @@ name = "elm-stuff"
 bucket = "build"
 group = "Elm"
 kind = "artifact"
+tags = ["elm", "build-output"]
+stacks = ["elm"]
 names = ["elm-stuff"]
 parent_any = ["elm.json"]
 cost = "rebuild"
+rebuild = "elm make"
 description = "Elm compiler output."
+
+# ---------------------------------------------------------------------------
+# Terraform and static sites
+# ---------------------------------------------------------------------------
 
 [[rule]]
 id = "terraform.dir"
@@ -350,6 +460,8 @@ name = "Terraform providers"
 bucket = "deps"
 group = "Terraform"
 kind = "artifact"
+tags = ["terraform", "dependencies"]
+stacks = ["terraform"]
 names = [".terraform"]
 cost = "redownload"
 rebuild = "terraform init"
@@ -361,8 +473,11 @@ name = "Terraform plugin cache"
 bucket = "caches"
 group = "Terraform"
 kind = "path"
+tags = ["terraform", "package-cache"]
+stacks = ["terraform"]
 paths = ["~/.terraform.d/plugin-cache"]
 cost = "redownload"
+rebuild = "terraform init"
 warm_days = 30
 description = "Shared provider cache."
 
@@ -372,11 +487,18 @@ name = "Static site output"
 bucket = "build"
 group = "Docs sites"
 kind = "artifact"
+tags = ["static-site", "jekyll", "eleventy", "build-output"]
+stacks = ["jekyll", "eleventy", "hugo", "ruby", "node"]
 names = ["_site", ".jekyll-cache", ".sass-cache", "resources"]
-parent_any = ["_config.yml", "hugo.toml", "hugo.yaml", "config.toml"]
+parent_any = ["_config.yml", "hugo.toml", "hugo.yaml", "config.toml", ".eleventy.js", "eleventy.config.*"]
 ignored = true
 cost = "rebuild"
-description = "Jekyll and Hugo generated sites."
+rebuild = "jekyll build / hugo / npx @11ty/eleventy"
+description = "Jekyll, Eleventy and Hugo generated sites. Only when git ignores them."
+
+# ---------------------------------------------------------------------------
+# Game engines
+# ---------------------------------------------------------------------------
 
 [[rule]]
 id = "unity.library"
@@ -384,11 +506,14 @@ name = "Unity Library and Temp"
 bucket = "build"
 group = "Game engines"
 kind = "artifact"
+tags = ["unity", "games", "build-output"]
+stacks = ["unity"]
 names = ["Library", "Temp", "obj", "Logs"]
 parent_all = ["Assets", "ProjectSettings"]
 cost = "rebuild"
 rebuild = "Reopen the project in Unity (reimport can take a while)"
 description = "Unity's import cache and temp folders."
+recommend = "Close the project in Unity first; Library is rebuilt by a full reimport."
 
 [[rule]]
 id = "unreal.intermediate"
@@ -396,10 +521,13 @@ name = "Unreal intermediates"
 bucket = "build"
 group = "Game engines"
 kind = "artifact"
-names = ["Intermediate", "DerivedDataCache", "Saved", "Binaries"]
+tags = ["unreal", "games", "build-output"]
+stacks = ["unreal"]
+names = ["Intermediate", "DerivedDataCache"]
 parent_any = ["*.uproject", "*.uplugin"]
 cost = "rebuild"
-description = "Unreal build intermediates and DDC."
+rebuild = "Regenerate project files and build in the editor or with UnrealBuildTool"
+description = "Unreal build intermediates and the project's derived data cache. Saved/ (autosaves, config) and prebuilt plugin Binaries are left alone."
 
 [[rule]]
 id = "godot.cache"
@@ -407,10 +535,17 @@ name = "Godot import cache"
 bucket = "build"
 group = "Game engines"
 kind = "artifact"
+tags = ["godot", "games", "build-output"]
+stacks = ["godot"]
 names = [".godot", ".import"]
 parent_any = ["project.godot"]
 cost = "rebuild"
+rebuild = "Reopen the project in Godot (assets are reimported)"
 description = "Godot's imported assets cache."
+
+# ---------------------------------------------------------------------------
+# Version managers
+# ---------------------------------------------------------------------------
 
 [[rule]]
 id = "asdf.mise-downloads"
@@ -418,6 +553,8 @@ name = "asdf and mise downloads"
 bucket = "junk"
 group = "Installers"
 kind = "path"
+tags = ["asdf", "mise", "installer"]
+stacks = ["node", "python", "ruby", "go", "jvm"]
 paths = ["~/.asdf/downloads", "~/Library/Caches/mise", "~/.cache/mise"]
 cost = "none"
 contents = true

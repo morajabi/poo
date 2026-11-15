@@ -1,0 +1,169 @@
+# Game engine extras: Unity, Unreal and Godot. Project folders (Library, Intermediate,
+# .godot) live in langs.toml.
+
+[[rule]]
+id = "unity.package-cache"
+name = "Unity package cache"
+bucket = "caches"
+group = "Game engines"
+kind = "path"
+tags = ["unity", "games", "package-cache"]
+stacks = ["unity"]
+paths = ["~/Library/Unity/cache"]
+cost = "redownload"
+rebuild = "Fetched again by the Package Manager when a project opens"
+warm_days = 30
+description = "Unity Package Manager's global cache of registry, git and npm packages."
+
+[[rule]]
+id = "unity.asset-store"
+name = "Unity Asset Store downloads"
+bucket = "caches"
+group = "Game engines"
+kind = "path"
+tags = ["unity", "games", "package-cache"]
+stacks = ["unity"]
+paths = ["~/Library/Unity/Asset Store-5.x"]
+each = true
+cost = "redownload"
+tier = "review"
+rebuild = "Download again from My Assets in the Package Manager"
+description = "Asset Store packages you downloaded, one folder per publisher. Already imported projects keep their copy."
+
+[[rule]]
+id = "unity.logs"
+name = "Unity and Unity Hub logs"
+bucket = "junk"
+group = "Logs"
+kind = "path"
+tags = ["unity", "games", "logs"]
+stacks = ["unity"]
+paths = ["~/Library/Logs/Unity", "~/Library/Application Support/UnityHub/logs"]
+cost = "none"
+contents = true
+description = "Editor, player and Hub logs."
+
+[[rule]]
+id = "unity.editors"
+name = "Old Unity editor versions"
+bucket = "caches"
+group = "Game engines"
+kind = "provider"
+provider = "versions"
+tags = ["unity", "games", "toolchain"]
+stacks = ["unity"]
+params.path = "/Applications/Unity/Hub/Editor"
+params.keep = 1
+system = true
+cost = "redownload"
+tier = "review"
+action = "trash"
+rebuild = "Install again from Unity Hub"
+description = "Unity editors installed through Unity Hub, except the most recently installed one (5-15 GB each with modules)."
+recommend = "Keep the editor versions in your projects' ProjectSettings/ProjectVersion.txt. Moved to the Trash, so you can put one back."
+
+[[rule]]
+id = "unity.builds"
+name = "Unity player builds"
+bucket = "build"
+group = "Game engines"
+kind = "artifact"
+tags = ["unity", "games", "build-output"]
+stacks = ["unity"]
+names = ["Build", "Builds"]
+parent_all = ["Assets", "ProjectSettings"]
+ignored = true
+cost = "rebuild"
+rebuild = "File > Build Settings > Build"
+description = "Player builds next to a Unity project. Only when git ignores them."
+
+[[rule]]
+id = "unreal.binaries"
+name = "Unreal compiled binaries"
+bucket = "build"
+group = "Game engines"
+kind = "artifact"
+tags = ["unreal", "games", "build-output"]
+stacks = ["unreal"]
+names = ["Binaries"]
+parent_any = ["*.uproject", "*.uplugin"]
+parent_all = ["Source"]
+cost = "rebuild"
+rebuild = "Build the project in your IDE or with UnrealBuildTool"
+description = "Compiled modules of projects and plugins that ship their Source. Prebuilt plugins without Source are left alone."
+
+[[rule]]
+id = "unreal.saved-logs"
+name = "Unreal logs and crash reports"
+bucket = "junk"
+group = "Logs"
+kind = "artifact"
+tags = ["unreal", "games", "logs"]
+stacks = ["unreal"]
+names = ["Logs", "Crashes"]
+path_contains = ["/Saved/Logs", "/Saved/Crashes"]
+cost = "none"
+description = "Saved/Logs and Saved/Crashes of a project. Autosaves and Saved/Config stay."
+
+[[rule]]
+id = "unreal.shared-ddc"
+name = "Unreal shared derived data cache"
+bucket = "caches"
+group = "Game engines"
+kind = "path"
+tags = ["unreal", "games", "compiler-cache"]
+stacks = ["unreal"]
+paths = ["~/Library/Application Support/Epic/UnrealEngine/Common/DerivedDataCache"]
+cost = "rebuild"
+rebuild = "Shaders and assets are rebuilt as projects open (slow first launch)"
+warm_days = 30
+description = "The local DDC every Unreal project on this Mac shares: compiled shaders and cooked asset data."
+
+[[rule]]
+id = "unreal.engines"
+name = "Old Unreal Engine versions"
+bucket = "caches"
+group = "Game engines"
+kind = "provider"
+provider = "versions"
+tags = ["unreal", "games", "toolchain"]
+stacks = ["unreal"]
+params.path = "/Users/Shared/Epic Games"
+params.pattern = "UE_*"
+params.keep = 1
+system = true
+cost = "redownload"
+tier = "review"
+action = "trash"
+rebuild = "Install again from the Epic Games Launcher"
+description = "Unreal Engine installs from the Epic Games Launcher except the most recent one (30-60 GB each)."
+recommend = "Keep the EngineAssociation versions of your .uproject files."
+
+[[rule]]
+id = "godot.editor-cache"
+name = "Godot editor cache"
+bucket = "caches"
+group = "Game engines"
+kind = "path"
+tags = ["godot", "games", "compiler-cache"]
+stacks = ["godot"]
+paths = ["~/Library/Caches/Godot"]
+cost = "rebuild"
+rebuild = "Rebuilt by the editor (shader cache, thumbnails)"
+warm_days = 30
+description = "Godot's editor shader cache and resource thumbnails."
+
+[[rule]]
+id = "godot.export-templates"
+name = "Godot export templates"
+bucket = "caches"
+group = "Game engines"
+kind = "path"
+tags = ["godot", "games", "toolchain"]
+stacks = ["godot"]
+paths = ["~/Library/Application Support/Godot/export_templates"]
+each = true
+cost = "redownload"
+tier = "review"
+rebuild = "Editor > Manage Export Templates > Download"
+description = "Export templates per Godot version (about 1 GB each). Templates of versions you upgraded from are unused."

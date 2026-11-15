@@ -1,0 +1,461 @@
+# JVM and Android extras: SDKMAN candidates, JDKs, Gradle/Maven extras, Kotlin,
+# Clojure, Scala tools and Android SDK components. Core Gradle, Maven, sbt and
+# Android rules live in langs.toml.
+
+[[stack]]
+id = "clojure"
+name = "Clojure"
+markers = ["project.clj", "deps.edn", "build.boot", "shadow-cljs.edn", "bb.edn"]
+
+[[stack]]
+id = "mill"
+name = "Mill"
+markers = ["build.mill", "build.sc"]
+
+[[stack]]
+id = "android"
+name = "Android"
+markers = ["local.properties", "proguard-rules.pro", "AndroidManifest.xml"]
+
+# ---------------------------------------------------------------------------
+# SDKMAN: old versions per candidate, keeping `current` and the newest other
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "jvm.sdkman-java"
+name = "Old SDKMAN Java versions"
+bucket = "caches"
+group = "JDKs"
+kind = "provider"
+provider = "versions"
+tags = ["jvm", "sdkman", "toolchain"]
+stacks = ["jvm"]
+params.path = "~/.sdkman/candidates/java"
+params.active = ["~/.sdkman/candidates/java/current"]
+params.keep = 1
+cost = "redownload"
+tier = "review"
+action = "delete"
+rebuild = "sdk install java <version>"
+description = "JDKs installed with SDKMAN other than the default (current) and the newest other one."
+recommend = "Keep versions pinned in .sdkmanrc files or Gradle toolchains."
+
+[[rule]]
+id = "jvm.sdkman-kotlin"
+name = "Old SDKMAN Kotlin versions"
+bucket = "caches"
+group = "JVM tool versions"
+kind = "provider"
+provider = "versions"
+tags = ["jvm", "kotlin", "sdkman", "toolchain"]
+stacks = ["jvm", "gradle"]
+params.path = "~/.sdkman/candidates/kotlin"
+params.active = ["~/.sdkman/candidates/kotlin/current"]
+params.keep = 1
+cost = "redownload"
+tier = "review"
+action = "delete"
+rebuild = "sdk install kotlin <version>"
+description = "Kotlin compilers installed with SDKMAN other than current and the newest other one."
+
+[[rule]]
+id = "jvm.sdkman-gradle"
+name = "Old SDKMAN Gradle versions"
+bucket = "caches"
+group = "JVM tool versions"
+kind = "provider"
+provider = "versions"
+tags = ["jvm", "gradle", "sdkman", "toolchain"]
+stacks = ["jvm", "gradle"]
+params.path = "~/.sdkman/candidates/gradle"
+params.active = ["~/.sdkman/candidates/gradle/current"]
+params.keep = 1
+cost = "redownload"
+tier = "review"
+action = "delete"
+rebuild = "sdk install gradle <version>"
+description = "Gradle versions installed with SDKMAN other than current and the newest other one. Projects using ./gradlew do not need them."
+
+[[rule]]
+id = "jvm.sdkman-maven"
+name = "Old SDKMAN Maven versions"
+bucket = "caches"
+group = "JVM tool versions"
+kind = "provider"
+provider = "versions"
+tags = ["jvm", "maven", "sdkman", "toolchain"]
+stacks = ["jvm", "maven"]
+params.path = "~/.sdkman/candidates/maven"
+params.active = ["~/.sdkman/candidates/maven/current"]
+params.keep = 1
+cost = "redownload"
+tier = "review"
+action = "delete"
+rebuild = "sdk install maven <version>"
+description = "Maven versions installed with SDKMAN other than current and the newest other one."
+
+[[rule]]
+id = "jvm.sdkman-scala"
+name = "Old SDKMAN Scala versions"
+bucket = "caches"
+group = "JVM tool versions"
+kind = "provider"
+provider = "versions"
+tags = ["jvm", "scala", "sdkman", "toolchain"]
+stacks = ["jvm", "scala"]
+params.path = "~/.sdkman/candidates/scala"
+params.active = ["~/.sdkman/candidates/scala/current"]
+params.keep = 1
+cost = "redownload"
+tier = "review"
+action = "delete"
+rebuild = "sdk install scala <version>"
+description = "Scala versions installed with SDKMAN other than current and the newest other one."
+
+[[rule]]
+id = "jvm.sdkman-sbt"
+name = "Old SDKMAN sbt versions"
+bucket = "caches"
+group = "JVM tool versions"
+kind = "provider"
+provider = "versions"
+tags = ["jvm", "scala", "sdkman", "toolchain"]
+stacks = ["jvm", "scala"]
+params.path = "~/.sdkman/candidates/sbt"
+params.active = ["~/.sdkman/candidates/sbt/current"]
+params.keep = 1
+cost = "redownload"
+tier = "review"
+action = "delete"
+rebuild = "sdk install sbt <version>"
+description = "sbt launchers installed with SDKMAN other than current and the newest other one."
+
+[[rule]]
+id = "jvm.sdkman-archives"
+name = "SDKMAN archives and temp"
+bucket = "junk"
+group = "Installers"
+kind = "path"
+tags = ["jvm", "sdkman", "installer"]
+stacks = ["jvm"]
+paths = ["~/.sdkman/archives", "~/.sdkman/tmp"]
+cost = "none"
+contents = true
+description = "Zips SDKMAN keeps after installing a candidate (sdk flush archives / sdk flush temp)."
+
+# ---------------------------------------------------------------------------
+# JDKs and Gradle/Maven extras
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "jvm.jdks"
+name = "Downloaded JDKs"
+bucket = "caches"
+group = "JDKs"
+kind = "path"
+tags = ["jvm", "toolchain"]
+stacks = ["jvm"]
+paths = ["~/Library/Java/JavaVirtualMachines", "~/.jabba/jdk", "~/.asdf/installs/java", "~/.local/share/mise/installs/java"]
+each = true
+cost = "redownload"
+tier = "review"
+rebuild = "Download again from IntelliJ, jabba, asdf or mise"
+description = "JDKs downloaded by IntelliJ IDEA / Android Studio, jabba, asdf or mise."
+recommend = "Keep the JDKs your projects and IDE run configurations target; system JDKs in /Library/Java are left alone."
+
+[[rule]]
+id = "jvm.gradle-jdks"
+name = "Gradle toolchain JDKs"
+bucket = "caches"
+group = "Gradle / Android"
+kind = "path"
+tags = ["jvm", "gradle", "toolchain"]
+stacks = ["jvm", "gradle"]
+paths = ["~/.gradle/jdks"]
+each = true
+cost = "redownload"
+rebuild = "Provisioned again by the next build that asks for that toolchain"
+warm_days = 60
+description = "JDKs Gradle auto-provisions for java toolchains, one per vendor and version."
+
+[[rule]]
+id = "jvm.gradle-version-caches"
+name = "Per-version Gradle caches"
+bucket = "caches"
+group = "Gradle / Android"
+kind = "path"
+tags = ["jvm", "gradle", "compiler-cache"]
+stacks = ["jvm", "gradle", "android"]
+paths = ["~/.gradle/caches/[0-9]*"]
+cost = "rebuild"
+rebuild = "Recreated by the next build on that Gradle version"
+warm_days = 30
+description = "~/.gradle/caches/<version> folders (script caches, generated accessors, file hashes). Versions you upgraded from stay forever."
+
+[[rule]]
+id = "jvm.maven-wrapper"
+name = "Maven wrapper distributions"
+bucket = "caches"
+group = "JVM"
+kind = "path"
+tags = ["jvm", "maven", "toolchain"]
+stacks = ["jvm", "maven"]
+paths = ["~/.m2/wrapper/dists"]
+each = true
+cost = "redownload"
+rebuild = "./mvnw downloads it again"
+warm_days = 60
+description = "One Maven distribution per version any ./mvnw used."
+
+# ---------------------------------------------------------------------------
+# Kotlin
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "kotlin.daemon-logs"
+name = "Kotlin daemon logs"
+bucket = "junk"
+group = "Logs"
+kind = "path"
+tags = ["jvm", "kotlin", "logs"]
+stacks = ["jvm", "gradle"]
+paths = ["$TMPDIR/kotlin-daemon.*.log"]
+cost = "none"
+min_age_days = 1
+description = "A new log file per Kotlin compile daemon start, written to the temp folder."
+
+[[rule]]
+id = "kotlin.native"
+name = "Kotlin/Native toolchains"
+bucket = "caches"
+group = "JVM"
+kind = "path"
+tags = ["jvm", "kotlin", "toolchain"]
+stacks = ["jvm", "gradle"]
+paths = ["~/.konan/dependencies", "~/.konan/cache", "~/.konan/kotlin-native-prebuilt-*"]
+cost = "redownload"
+rebuild = "Downloaded again by the next Kotlin Multiplatform build"
+warm_days = 30
+description = "Kotlin/Native compilers, LLVM and platform libraries downloaded per Kotlin version."
+recommend = "Every Kotlin upgrade adds a new kotlin-native-prebuilt folder; older ones are rarely needed."
+
+# ---------------------------------------------------------------------------
+# Clojure and Scala
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "clojure.project-caches"
+name = "Clojure project caches"
+bucket = "build"
+group = "Clojure"
+kind = "artifact"
+tags = ["jvm", "clojure", "build-output"]
+stacks = ["clojure", "jvm"]
+names = [".cpcache", ".shadow-cljs"]
+parent_any = ["deps.edn", "shadow-cljs.edn", "bb.edn"]
+cost = "rebuild"
+rebuild = "clojure -M ... / shadow-cljs compile"
+description = "Classpath cache of the Clojure CLI and shadow-cljs build state."
+
+[[rule]]
+id = "clojure.tool-caches"
+name = "clj-kondo and clojure-lsp caches"
+bucket = "build"
+group = "Clojure"
+kind = "artifact"
+tags = ["jvm", "clojure", "lint-cache", "language-server"]
+stacks = ["clojure", "jvm"]
+names = [".cache"]
+path_contains = ["/.clj-kondo/.cache", "/.lsp/.cache"]
+cost = "rebuild"
+rebuild = "Rebuilt when the linter or editor analyses the project again"
+description = "Analysis caches of clj-kondo and clojure-lsp. The config next to them stays."
+
+[[rule]]
+id = "clojure.global-caches"
+name = "Clojure CLI and Leiningen caches"
+bucket = "caches"
+group = "Clojure"
+kind = "path"
+tags = ["jvm", "clojure", "package-cache"]
+stacks = ["clojure", "jvm"]
+paths = ["~/.gitlibs/libs", "~/.gitlibs/_repos", "~/.clojure/.cpcache", "~/.lein/self-installs"]
+cost = "redownload"
+rebuild = "Fetched again by the next clojure or lein run (Maven jars live in ~/.m2)"
+warm_days = 30
+description = "Git dependencies of the Clojure CLI, its user classpath cache and Leiningen's standalone jars."
+
+[[rule]]
+id = "scala.cli-cache"
+name = "Scala CLI cache"
+bucket = "caches"
+group = "JVM"
+kind = "path"
+tags = ["jvm", "scala", "package-cache"]
+stacks = ["scala", "jvm"]
+paths = ["~/Library/Caches/ScalaCli"]
+cost = "redownload"
+rebuild = "Fetched again by the next scala-cli run"
+warm_days = 30
+description = "Compiler bridges, JVMs and Bloop state downloaded by Scala CLI."
+
+[[rule]]
+id = "scala.mill-out"
+name = "Mill out"
+bucket = "build"
+group = "JVM"
+kind = "artifact"
+tags = ["jvm", "scala", "mill", "build-output"]
+stacks = ["mill", "scala", "jvm"]
+names = ["out"]
+parent_any = ["build.mill", "build.sc", "build.mill.scala"]
+ignored = true
+cost = "rebuild"
+rebuild = "./mill __.compile"
+description = "Mill's build output and cache. Only when git ignores it."
+
+# ---------------------------------------------------------------------------
+# Android SDK components (old versions only, kept for review)
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "android.sdk-build-tools"
+name = "Old Android build-tools"
+bucket = "android"
+group = "Android SDK"
+kind = "provider"
+provider = "versions"
+tags = ["android", "sdk", "toolchain"]
+stacks = ["android", "gradle"]
+params.path = "~/Library/Android/sdk/build-tools"
+params.keep = 1
+cost = "redownload"
+tier = "review"
+action = "delete"
+rebuild = "sdkmanager \"build-tools;<version>\" (Android Gradle Plugin installs what it needs)"
+description = "Android build-tools versions other than the newest."
+recommend = "Projects that set buildToolsVersion need that exact version; the Android Gradle Plugin downloads missing ones."
+
+[[rule]]
+id = "android.sdk-platforms"
+name = "Old Android platforms"
+bucket = "android"
+group = "Android SDK"
+kind = "provider"
+provider = "versions"
+tags = ["android", "sdk", "toolchain"]
+stacks = ["android", "gradle"]
+params.path = "~/Library/Android/sdk/platforms"
+params.keep = 2
+cost = "redownload"
+tier = "review"
+action = "delete"
+rebuild = "sdkmanager \"platforms;android-<api>\""
+description = "SDK platforms (android.jar per API level) other than the two newest."
+recommend = "Keep the compileSdk levels of the projects you build."
+
+[[rule]]
+id = "android.sdk-ndk"
+name = "Old Android NDKs"
+bucket = "android"
+group = "Android SDK"
+kind = "provider"
+provider = "versions"
+tags = ["android", "sdk", "cpp", "toolchain"]
+stacks = ["android", "gradle", "cpp"]
+params.path = "~/Library/Android/sdk/ndk"
+params.keep = 1
+cost = "redownload"
+tier = "review"
+action = "delete"
+rebuild = "sdkmanager \"ndk;<version>\" (or the ndkVersion in build.gradle)"
+description = "Side-by-side NDK versions (1-2 GB each) other than the newest."
+recommend = "React Native and Flutter pin an ndkVersion; keep the ones your projects ask for."
+
+[[rule]]
+id = "android.sdk-cmake"
+name = "Old Android CMake versions"
+bucket = "android"
+group = "Android SDK"
+kind = "provider"
+provider = "versions"
+tags = ["android", "sdk", "cpp", "toolchain"]
+stacks = ["android", "gradle", "cpp"]
+params.path = "~/Library/Android/sdk/cmake"
+params.keep = 1
+cost = "redownload"
+tier = "review"
+action = "delete"
+rebuild = "sdkmanager \"cmake;<version>\""
+description = "CMake builds installed through the Android SDK, other than the newest."
+
+[[rule]]
+id = "android.sdk-sources"
+name = "Android SDK sources"
+bucket = "android"
+group = "Android SDK"
+kind = "provider"
+provider = "versions"
+tags = ["android", "sdk", "docs"]
+stacks = ["android"]
+params.path = "~/Library/Android/sdk/sources"
+params.keep = 1
+cost = "redownload"
+tier = "review"
+action = "delete"
+rebuild = "sdkmanager \"sources;android-<api>\""
+description = "Framework sources per API level, used only for browsing in the IDE."
+
+[[rule]]
+id = "android.sdk-ndk-bundle"
+name = "Legacy ndk-bundle"
+bucket = "android"
+group = "Android SDK"
+kind = "path"
+tags = ["android", "sdk", "cpp", "toolchain"]
+stacks = ["android", "cpp"]
+paths = ["~/Library/Android/sdk/ndk-bundle"]
+cost = "redownload"
+tier = "review"
+rebuild = "sdkmanager \"ndk-bundle\""
+description = "The pre-side-by-side NDK location. Current Android Gradle Plugin versions use sdk/ndk/<version> instead."
+
+[[rule]]
+id = "android.sdk-temp"
+name = "Android SDK download leftovers"
+bucket = "junk"
+group = "Installers"
+kind = "path"
+tags = ["android", "sdk", "installer"]
+stacks = ["android"]
+paths = ["~/Library/Android/sdk/.temp", "~/Library/Android/sdk/.downloadIntermediates"]
+cost = "none"
+contents = true
+description = "Partial and finished downloads sdkmanager leaves inside the SDK."
+
+[[rule]]
+id = "android.quickboot"
+name = "Emulator Quick Boot snapshots"
+bucket = "android"
+group = "Android emulators"
+kind = "path"
+tags = ["android", "emulator"]
+stacks = ["android"]
+paths = ["~/.android/avd/*.avd/snapshots/default_boot"]
+cost = "rebuild"
+rebuild = "The emulator cold boots once and saves a new snapshot"
+warm_days = 14
+description = "The automatic Quick Boot snapshot of each emulator (RAM image, often 1-4 GB). Named snapshots you saved are not touched."
+
+[[rule]]
+id = "android.studio-logs"
+name = "Android Studio logs"
+bucket = "junk"
+group = "Logs"
+kind = "path"
+tags = ["android", "ide", "logs"]
+stacks = ["android", "jvm"]
+paths = ["~/Library/Logs/Google/AndroidStudio*"]
+cost = "none"
+contents = true
+description = "IDE logs per Android Studio version."
