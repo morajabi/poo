@@ -11,6 +11,7 @@ fn item(path: &str, kind: ActionKind) -> Item {
         group: "Rust".into(), tags: vec![], bytes: 1, total_bytes: 1, files: 1, last_used: None, tier: Tier::Cold,
         cost: Cost::Rebuild, reasons: vec![], rebuild: None, project: None, repo: None, agent: None,
         action: Action { kind, command: None }, risks: vec![], safeguards: vec![], children: vec![], meta: BTreeMap::new(),
+        report_only: false, recommend: None,
     }
 }
 
