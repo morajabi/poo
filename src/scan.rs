@@ -452,8 +452,11 @@ pub fn scan(cfg: &Config, cat: &Catalog, opts: &ScanOptions) -> Report {
                 provider_items.extend(providers::simulator_devices(r, devices_json.as_ref()));
             }
         }
+        // A provider item is more specific than a generic path rule for the same folder.
+        let provider_paths: HashSet<PathBuf> = provider_items.iter().filter(|r| !r.is_virtual).map(|r| r.path.clone()).collect();
+        let candidates: Vec<_> = candidates.into_iter().filter(|(p, _, _)| !provider_paths.contains(p)).collect();
         let mut claimed: HashSet<PathBuf> = candidates.iter().map(|(p, _, _)| p.clone()).collect();
-        claimed.extend(provider_items.iter().filter(|r| !r.is_virtual).map(|r| r.path.clone()));
+        claimed.extend(provider_paths.iter().cloned());
 
         // Exclusions for root walks.
         let mut exclude: HashSet<PathBuf> = claimed.clone();

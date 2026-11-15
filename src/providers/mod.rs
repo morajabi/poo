@@ -229,8 +229,30 @@ pub fn installed_bundle_ids() -> HashSet<String> {
     for r in roots {
         if let Ok(rd) = std::fs::read_dir(&r) {
             for e in rd.flatten() {
-                if e.file_name().to_string_lossy().ends_with(".app") {
+                let n = e.file_name().to_string_lossy().to_string();
+                if n.ends_with(".app") {
                     add_app(&e.path(), &mut ids, 2);
+                    // iPad and iPhone apps on Apple silicon wrap the real bundle.
+                    if let Ok(w) = std::fs::read_dir(e.path().join("Wrapper")) {
+                        for inner in w.flatten() {
+                            if inner.file_name().to_string_lossy().ends_with(".app") {
+                                if let Ok(v) = plist::Value::from_file(inner.path().join("Info.plist")) {
+                                    if let Some(id) = v.as_dictionary().and_then(|d| d.get("CFBundleIdentifier")).and_then(|v| v.as_string()) {
+                                        ids.insert(id.to_lowercase());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else if e.path().is_dir() && !n.starts_with('.') {
+                    // Vendor folders (/Applications/Adobe ..., Setapp) hold apps one level down.
+                    if let Ok(sub) = std::fs::read_dir(e.path()) {
+                        for s in sub.flatten() {
+                            if s.file_name().to_string_lossy().ends_with(".app") {
+                                add_app(&s.path(), &mut ids, 2);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -263,12 +285,24 @@ pub fn app_leftovers(rule: &Rule, installed: &HashSet<String>) -> Vec<Raw> {
                 continue;
             }
             let lname = name.to_lowercase();
-            // Installed if any installed id equals it, extends it, or it extends an installed id.
+            // Installed if any installed id equals it, extends it, or it extends an installed id,
+            // or another app from the same vendor (com.vendor.*) is installed: vendors share
+            // helper and cache ids between their apps.
+            let vendor: String = lname.splitn(3, '.').take(2).collect::<Vec<_>>().join(".");
             let present = installed.iter().any(|id| {
-                lname == *id || lname.starts_with(&format!("{}.", id)) || id.starts_with(&format!("{}.", lname))
+                lname == *id
+                    || lname.starts_with(&format!("{}.", id))
+                    || id.starts_with(&format!("{}.", lname))
+                    || id.starts_with(&format!("{}.", vendor))
             });
             if present {
                 continue;
+            }
+            // Last check: Spotlight knows apps anywhere (including ones you build in Xcode).
+            if let Some(out) = run_capture(&["mdfind", &format!("kMDItemCFBundleIdentifier == '{}'", name)], 5) {
+                if !out.trim().is_empty() {
+                    continue;
+                }
             }
             // A process whose name matches the id's last part means the app is around.
             let last = lname.rsplit('.').next().unwrap_or("");

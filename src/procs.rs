@@ -55,8 +55,9 @@ pub fn list() -> Vec<Proc> {
         }
         let path_bytes = &buf[VNODE_INFO_SIZE..VNODE_INFO_SIZE + PATH_MAX];
         let Ok(cwd) = CStr::from_bytes_until_nul(path_bytes) else { continue };
+        // GUI apps run with cwd "/": keep them, running_apps checks need their names.
         let cwd = cwd.to_string_lossy().to_string();
-        if cwd.is_empty() || cwd == "/" {
+        if cwd.is_empty() {
             continue;
         }
         let mut name_buf = [0u8; 256];

@@ -136,7 +136,8 @@ pub fn floor_check(item: &Item, rule_kind: Option<RuleKind>, rule_system: bool, 
         return Err("that is your home folder or one of its parents".into());
     }
     let inside_home = p.starts_with(&h);
-    let inside_tmp = p.starts_with(&tmp) && p != tmp;
+    let user_cache = crate::util::darwin_user_cache_dir().and_then(|c| std::fs::canonicalize(c).ok());
+    let inside_tmp = (p.starts_with(&tmp) && p != tmp) || user_cache.as_ref().map_or(false, |c| p.starts_with(c) && &p != c);
     if !(inside_home || inside_tmp || rule_system) {
         if mode < RiskLevel::Danger {
             return Err("outside your home and temp folders (needs --dangerously-include-protected)".into());

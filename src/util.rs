@@ -8,8 +8,25 @@ pub fn home() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("/"))
 }
 
-/// Expands `~`, `$HOME` and `$TMPDIR` at the start of a path.
+/// The per-user cache folder macOS keeps next to $TMPDIR (/var/folders/../C).
+pub fn darwin_user_cache_dir() -> Option<PathBuf> {
+    let tmp = std::env::var("TMPDIR").ok()?;
+    let t = PathBuf::from(tmp.trim_end_matches('/'));
+    if t.file_name()? != "T" {
+        return None;
+    }
+    let c = t.parent()?.join("C");
+    c.is_dir().then_some(c)
+}
+
+/// Expands `~`, `$HOME`, `$TMPDIR` and `$DARWIN_USER_CACHE_DIR` at the start of a path.
 pub fn expand(path: &str) -> PathBuf {
+    if let Some(rest) = path.strip_prefix("$DARWIN_USER_CACHE_DIR") {
+        if let Some(c) = darwin_user_cache_dir() {
+            return PathBuf::from(format!("{}{}", c.display(), rest));
+        }
+        return PathBuf::from("/nonexistent-darwin-user-cache-dir");
+    }
     let tmp = std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".into());
     let tmp = tmp.trim_end_matches('/').to_string();
     if path == "~" {
