@@ -359,9 +359,15 @@ impl Config {
     pub fn save(&self) -> Result<()> {
         let path = config_path();
         std::fs::create_dir_all(path.parent().unwrap())?;
+        // Only what differs from the defaults is written, so improved defaults reach
+        // everyone who never changed that setting.
+        let mut mine = toml::Value::try_from(self)?;
+        let defaults = toml::Value::try_from(Config::default())?;
+        prune_defaults(&mut mine, &defaults);
+        let body = toml::to_string_pretty(&mine)?;
         let text = format!(
-            "# poo configuration. Edit freely, or use `poo roots`, `poo rules`, `poo buckets`,\n# `poo projects` and `poo config`. Docs: https://github.com/morajabi/poo/blob/main/docs/mods.md\n\n{}",
-            toml::to_string_pretty(self)?
+            "# poo configuration: only settings that differ from the defaults are listed.\n# Edit freely, or use `poo config set`, `poo roots`, `poo rules`, `poo buckets` and\n# `poo projects`. All keys: `poo config keys`. Docs: https://github.com/morajabi/poo/blob/main/docs/mods.md\n\n{}",
+            body
         );
         let tmp = path.with_extension(format!("toml.tmp-{}", std::process::id()));
         std::fs::write(&tmp, text)?;
@@ -408,4 +414,26 @@ pub fn detect_roots() -> Vec<PathBuf> {
         out.push(canon);
     }
     out
+}
+
+/// Removes keys whose value equals the default, and tables left empty.
+fn prune_defaults(v: &mut toml::Value, d: &toml::Value) {
+    if let (toml::Value::Table(t), toml::Value::Table(dt)) = (v, d) {
+        let keys: Vec<String> = t.keys().cloned().collect();
+        for k in keys {
+            let Some(dv) = dt.get(&k) else { continue };
+            let drop = {
+                let cur = t.get_mut(&k).unwrap();
+                if cur == dv {
+                    true
+                } else {
+                    prune_defaults(cur, dv);
+                    matches!(cur, toml::Value::Table(x) if x.is_empty())
+                }
+            };
+            if drop {
+                t.remove(&k);
+            }
+        }
+    }
 }
