@@ -155,3 +155,72 @@ fn plan_filters_by_bucket_and_tag() {
     assert!(Filter { tags: vec!["rust".into()], ..Default::default() }.matches(&it));
     assert!(!Filter { exclude_tags: vec!["build-output".into()], ..Default::default() }.matches(&it));
 }
+
+#[test]
+fn risky_artifact_matchers() {
+    let cat = catalog::load(&Config::default());
+    let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+    let p = std::path::Path::new("/x/proj/thing");
+    let m = |id: &str, name: &str, parent: &[&str], children: &[&str]| {
+        cat.rule(id).unwrap_or_else(|| panic!("missing {}", id)).matches_artifact(name, p, &s(parent), &s(children))
+    };
+
+    // CMake: a build tree yes, an in-source build (the source folder itself) never.
+    assert!(m("cmake.build", "build", &["CMakeLists.txt"], &["CMakeCache.txt", "CMakeFiles", "Makefile"]));
+    assert!(!m("cmake.build", "lib", &["CMakeLists.txt"], &["CMakeCache.txt", "CMakeLists.txt", "src"]));
+    assert!(!m("meson.build", "proj", &[], &["build.ninja", "meson-private", "meson.build"]));
+
+    // Conda: an env inside a project yes, a whole Miniconda install no.
+    assert!(m("python.conda-env", "env", &["environment.yml"], &["conda-meta", "bin", "lib"]));
+    assert!(!m("python.conda-env", "miniconda3", &[], &["conda-meta", "condabin", "envs", "pkgs", "bin"]));
+
+    // Generic names need git to ignore them.
+    for id in ["php.vendor", "node.electron-builds", "rn.expo-prebuild", "docs.mkdocs-site", "docs.sphinx-build", "docs.mdbook", "jvm.intellij-out", "node.framework-caches"] {
+        assert!(cat.rule(id).unwrap().ignored, "{} must only match git-ignored folders", id);
+    }
+    // Jekyll no longer claims Hugo's resources/ or any folder next to a config.toml.
+    assert!(!m("jekyll.site", "resources", &["config.toml"], &["_gen"]));
+    assert!(!m("jekyll.site", "_site", &["config.toml", "pyproject.toml"], &["index.html"]));
+    assert!(m("jekyll.site", "_site", &["_config.yml", "Gemfile"], &["index.html"]));
+
+    // Expo prebuild only with an Expo config and native project inside.
+    assert!(m("rn.expo-prebuild", "ios", &["app.json", "package.json"], &["Podfile", "App.xcworkspace"]));
+    assert!(!m("rn.expo-prebuild", "ios", &["package.json"], &["Podfile"]));
+    assert!(!m("rn.expo-prebuild", "android", &["app.json", "package.json"], &["README.md"]));
+
+    // Electron packaging output, not a plain dist of JS files.
+    assert!(m("node.electron-builds", "dist", &["package.json"], &["mac-arm64", "MyApp-1.0.0-arm64.dmg", "latest-mac.yml"]));
+    assert!(!m("node.electron-builds", "dist", &["package.json"], &["index.js", "index.d.ts"]));
+
+    // Lean, docs, sbt, Racket, Elixir deps.
+    assert!(m("lean.lake", ".lake", &["lakefile.lean", "lean-toolchain"], &["build", "packages"]));
+    assert!(m("docs.sphinx-build", "_build", &["conf.py", "index.rst"], &["html", "doctrees"]));
+    assert!(!m("docs.sphinx-build", "_build", &["mix.exs"], &["dev", "test"]));
+    assert!(m("scala.sbt-project-target", "target", &["build.properties", "plugins.sbt"], &["scala-2.12", "streams"]));
+    assert!(!m("scala.sbt-project-target", "project", &["build.sbt"], &["build.properties", "plugins.sbt"]));
+    assert!(m("racket.compiled", "compiled", &["main.rkt"], &["main_rkt.zo", "main_rkt.dep"]));
+    assert!(!m("racket.compiled", "compiled", &["main.rkt"], &["main_rkt.zo", "keep.rkt"]));
+    assert!(m("elixir.deps", "deps", &["mix.exs"], &["phoenix", "jason"]));
+    assert_eq!(cat.rule("elixir.deps").unwrap().cost, Cost::Redownload);
+    assert!(!m("elixir.build", "deps", &["mix.exs"], &["phoenix"]), "deps moved to elixir.deps");
+    assert!(m("node.cdk-out", "cdk.out", &["cdk.json"], &["manifest.json", "tree.json"]));
+
+    // One Terragrunt rule, and it keeps the local-state review.
+    assert!(cat.rule("terragrunt.cache").is_none());
+    assert_eq!(cat.rule("terraform.terragrunt-cache").unwrap().tier, Some(Tier::Review));
+}
+
+#[test]
+fn browser_caches_split_by_permission() {
+    let cat = catalog::load(&Config::default());
+    for b in ["chrome", "brave", "edge", "arc", "dia", "vivaldi", "opera", "helium", "comet", "chromium", "firefox", "zen", "firefox-forks"] {
+        let open = cat.rule(&format!("browser.{}-cache", b)).unwrap();
+        let gated = cat.rule(&format!("browser.{}-profile-caches", b)).unwrap();
+        assert!(!open.tags.iter().any(|t| t == "needs-permission"), "{} cache must not need permission", b);
+        assert!(gated.tags.iter().any(|t| t == "needs-permission"), "{} profile caches must need permission", b);
+        assert!(!open.running_apps.is_empty() && open.running_apps == gated.running_apps, "{} running_apps", b);
+    }
+    for id in ["browser.safari-cache", "xcode.ios-backups", "app.mail-cache"] {
+        assert!(cat.rule(id).unwrap().tags.iter().any(|t| t == "needs-permission"), "{}", id);
+    }
+}
