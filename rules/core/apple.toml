@@ -53,6 +53,7 @@ stacks = ["xcode", "swift"]
 names = ["*"]
 children_all = ["Build", "Logs"]
 children_any = ["Index.noindex", "ModuleCache.noindex", "SourcePackages", "info.plist", "SDKStatCaches.noindex"]
+children_none = [".git", "*.xcodeproj", "*.xcworkspace", "Package.swift"]
 cost = "rebuild"
 rebuild = "xcodebuild -derivedDataPath <path>"
 warm_days = 14

@@ -200,7 +200,7 @@ fn risky_artifact_matchers() {
     assert!(!m("scala.sbt-project-target", "project", &["build.sbt"], &["build.properties", "plugins.sbt"]));
     assert!(m("racket.compiled", "compiled", &["main.rkt"], &["main_rkt.zo", "main_rkt.dep"]));
     assert!(!m("racket.compiled", "compiled", &["main.rkt"], &["main_rkt.zo", "keep.rkt"]));
-    assert!(m("elixir.deps", "deps", &["mix.exs"], &["phoenix", "jason"]));
+    assert!(m("elixir.deps", "deps", &["mix.exs", "mix.lock"], &["phoenix", "jason"]));
     assert_eq!(cat.rule("elixir.deps").unwrap().cost, Cost::Redownload);
     assert!(!m("elixir.build", "deps", &["mix.exs"], &["phoenix"]), "deps moved to elixir.deps");
     assert!(m("node.cdk-out", "cdk.out", &["cdk.json"], &["manifest.json", "tree.json"]));
@@ -223,4 +223,53 @@ fn browser_caches_split_by_permission() {
     for id in ["browser.safari-cache", "xcode.ios-backups", "app.mail-cache"] {
         assert!(cat.rule(id).unwrap().tags.iter().any(|t| t == "needs-permission"), "{}", id);
     }
+}
+
+#[test]
+fn rule_fixtures_and_core_lint() {
+    let cat = catalog::load(&Config::default());
+    let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let report = poo::contrib::lint_core(&cat, repo, None).unwrap();
+    let errors: Vec<_> = report.findings.iter().filter(|f| f.level == poo::contrib::Level::Error).collect();
+    assert!(errors.is_empty(), "{:#?}", errors);
+    assert!(poo::contrib::read_fixtures(&repo.join("tests/rule-fixtures")).unwrap().len() >= 20);
+}
+
+#[test]
+fn contrib_lint_and_scrub() {
+    use poo::contrib::{lint_spec, replace_word, Level};
+    let cat = catalog::load(&Config::default());
+    let errors = |spec: RuleSpec| lint_spec(&spec, &cat, true, true).into_iter().filter(|f| f.level == Level::Error).map(|f| f.message).collect::<Vec<_>>();
+    let base = || RuleSpec {
+        id: "acme.cache".into(),
+        name: Some("Acme cache".into()),
+        bucket: Some("caches".into()),
+        group: Some("Acme".into()),
+        kind: Some(RuleKind::Path),
+        stacks: Some(vec!["node".into()]),
+        cost: Some(Cost::Rebuild),
+        rebuild: Some("acme build".into()),
+        description: Some("Acme's build cache.".into()),
+        ..Default::default()
+    };
+    assert!(errors(RuleSpec { paths: Some(vec!["~/Library/Caches/acme".into()]), ..base() }).is_empty());
+    for bad in ["/Users/someone/Library/Caches/acme", "~/.ssh/acme", "~/*", "~/.acme", "/opt/acme", "~/dev/app/.env.local"] {
+        assert!(!errors(RuleSpec { paths: Some(vec![bad.into()]), ..base() }).is_empty(), "{} should fail", bad);
+    }
+    assert!(!errors(RuleSpec { description: None, paths: Some(vec!["~/.acme/cache".into()]), ..base() }).is_empty());
+    let art = |names: &[&str], parent: Option<&[&str]>, children: Option<&[&str]>, ignored: Option<bool>| RuleSpec {
+        kind: Some(RuleKind::Artifact),
+        bucket: Some("build".into()),
+        names: Some(names.iter().map(|s| s.to_string()).collect()),
+        parent_any: parent.map(|v| v.iter().map(|s| s.to_string()).collect()),
+        children_any: children.map(|v| v.iter().map(|s| s.to_string()).collect()),
+        ignored,
+        ..base()
+    };
+    assert!(!errors(art(&["build"], None, None, None)).is_empty(), "bare generic name");
+    assert!(!errors(art(&["build"], Some(&["acme.json"]), None, None)).is_empty(), "marker but no proof");
+    assert!(errors(art(&["build"], Some(&["acme.json"]), None, Some(true))).is_empty());
+    assert!(errors(art(&[".acme-cache"], None, None, None)).is_empty(), "specific names need nothing else");
+    assert_eq!(replace_word("Built by mo for inline-chat", "inline-chat", "<project>"), "Built by mo for <project>");
+    assert_eq!(replace_word("inlined code", "inline", "<project>"), "inlined code");
 }

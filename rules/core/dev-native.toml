@@ -111,6 +111,7 @@ tags = ["cpp", "vcpkg", "build-output"]
 stacks = ["cpp", "cmake"]
 names = ["buildtrees", "packages", "downloads"]
 parent_any = [".vcpkg-root"]
+children_any = ["detect_compiler", "tools", "*.tar.gz", "*.zip", "*.tar.xz", "*.7z", "*_x64-*", "*_arm64-*", "*_x86-*", "*_wasm32-*"]
 cost = "rebuild"
 rebuild = "vcpkg install"
 description = "Scratch build trees, staged packages and source downloads inside a vcpkg checkout."

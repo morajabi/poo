@@ -32,6 +32,7 @@ tags = ["rust", "build-output"]
 stacks = ["rust"]
 names = ["*"]
 children_all = [".rustc_info.json"]
+children_none = ["Cargo.toml", ".git", "src"]
 children_any = ["debug", "release", "CACHEDIR.TAG"]
 cost = "rebuild"
 rebuild = "cargo build"

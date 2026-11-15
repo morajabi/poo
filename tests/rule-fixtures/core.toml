@@ -1,0 +1,181 @@
+# Matcher fixtures: folders a rule must match (matches = true) and must leave alone
+# (matches = false). `parent` lists entries next to the folder, `children` entries inside.
+# `cargo test` and `poo mods lint --core` check every one. A new rule with a generic folder
+# name (build, dist, out, deps...) needs at least one of each; see CONTRIBUTING.md.
+
+[[fixture]]
+rule = "docs.mdbook"
+name = "book"
+parent = ["book.toml", "src"]
+children = ["index.html", "searchindex.js"]
+matches = true
+
+[[fixture]]
+rule = "docs.mdbook"
+name = "book"
+parent = ["README.md", "chapters"]
+children = ["chapter1.md"]
+matches = false
+note = "a folder of book sources, no book.toml"
+
+[[fixture]]
+rule = "docs.mkdocs-site"
+name = "site"
+parent = ["mkdocs.yml", "docs"]
+children = ["index.html", "search", "assets"]
+matches = true
+
+[[fixture]]
+rule = "docs.mkdocs-site"
+name = "site"
+parent = ["package.json", "src"]
+children = ["index.html"]
+matches = false
+note = "a web project's site/ source folder"
+
+[[fixture]]
+rule = "elixir.deps"
+name = "deps"
+parent = ["mix.exs", "mix.lock", "lib"]
+children = ["phoenix", "jason", "plug"]
+matches = true
+
+[[fixture]]
+rule = "elixir.deps"
+name = "deps"
+parent = ["mix.exs", "lib"]
+children = ["notes.md"]
+matches = false
+note = "no mix.lock: nothing was fetched, could be anything"
+
+[[fixture]]
+rule = "jvm.intellij-out"
+name = "out"
+parent = ["app.iml", "src", ".idea"]
+children = ["production", "test"]
+matches = true
+
+[[fixture]]
+rule = "jvm.intellij-out"
+name = "out"
+parent = ["package.json"]
+children = ["production"]
+matches = false
+
+[[fixture]]
+rule = "node.electron-builds"
+name = "dist"
+parent = ["package.json", "electron-builder.yml"]
+children = ["mac-arm64", "MyApp-1.0.0-arm64.dmg", "latest-mac.yml"]
+matches = true
+
+[[fixture]]
+rule = "node.electron-builds"
+name = "out"
+parent = ["package.json", "forge.config.js"]
+children = ["make", "MyApp-darwin-arm64"]
+matches = true
+
+[[fixture]]
+rule = "node.electron-builds"
+name = "dist"
+parent = ["package.json"]
+children = ["index.js", "index.d.ts"]
+matches = false
+note = "a library's compiled JavaScript"
+
+[[fixture]]
+rule = "racket.compiled"
+name = "compiled"
+parent = ["main.rkt", "info.rkt"]
+children = ["main_rkt.zo", "main_rkt.dep"]
+matches = true
+
+[[fixture]]
+rule = "racket.compiled"
+name = "compiled"
+parent = ["main.rkt"]
+children = ["main_rkt.zo", "handwritten.rkt"]
+matches = false
+note = "holds sources"
+
+[[fixture]]
+rule = "rn.expo-prebuild"
+name = "ios"
+parent = ["app.json", "package.json", "App.tsx"]
+children = ["Podfile", "MyApp.xcworkspace", "Pods"]
+matches = true
+
+[[fixture]]
+rule = "rn.expo-prebuild"
+name = "ios"
+parent = ["package.json"]
+children = ["Podfile"]
+matches = false
+note = "no Expo config"
+
+[[fixture]]
+rule = "scala.sbt-project-target"
+name = "target"
+parent = ["build.properties", "plugins.sbt"]
+children = ["scala-2.12", "streams", "config-classes"]
+matches = true
+
+[[fixture]]
+rule = "scala.sbt-project-target"
+name = "project"
+parent = ["build.sbt", "src"]
+children = ["build.properties", "plugins.sbt"]
+matches = false
+note = "the sbt project/ folder itself holds the build definition"
+
+[[fixture]]
+rule = "cmake.build"
+name = "build"
+parent = ["CMakeLists.txt", "src"]
+children = ["CMakeCache.txt", "CMakeFiles", "Makefile"]
+matches = true
+
+[[fixture]]
+rule = "cmake.build"
+name = "engine"
+parent = ["CMakeLists.txt"]
+children = ["CMakeCache.txt", "CMakeLists.txt", "src"]
+matches = false
+note = "an in-source build: the folder is the sources"
+
+[[fixture]]
+rule = "gradle.build"
+name = "build"
+parent = ["build.gradle.kts", "src"]
+children = ["tmp", "classes", "intermediates"]
+matches = true
+
+[[fixture]]
+rule = "gradle.build"
+name = "build"
+parent = ["build.gradle"]
+children = ["notes.md"]
+matches = false
+
+[[fixture]]
+rule = "maven.target"
+name = "target"
+parent = ["pom.xml", "src"]
+children = ["classes", "maven-status", "app-1.0.jar"]
+matches = true
+
+[[fixture]]
+rule = "python.venv"
+name = "env"
+parent = ["requirements.txt"]
+children = ["pyvenv.cfg", "bin", "lib"]
+matches = true
+
+[[fixture]]
+rule = "python.venv"
+name = "env"
+parent = ["docker-compose.yml"]
+children = ["production.env"]
+matches = false
+note = "an env/ folder of settings, not a virtualenv"
