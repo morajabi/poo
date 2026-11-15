@@ -82,7 +82,7 @@ jobs:
   # stapled when the secrets exist, ad-hoc signed otherwise.
   app:
     needs: version
-    runs-on: macos-26  # actool crashes compiling the .icon on macos-15 images
+    runs-on: macos-26  # Xcode 26+: build-app.sh refuses an older SDK; actool needs it for the .icon
     outputs:
       signing: ${{ steps.verify.outputs.signing }}
     env:
