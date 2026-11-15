@@ -178,6 +178,14 @@ agent = "opencode"
 path = "~/.sculptor/worktrees"
 agent = "sculptor"
 
+[[worktree_home]]
+path = "~/.claude-squad/worktrees"
+agent = "claude-squad"
+
+[[worktree_home]]
+path = "~/.config/container-use/worktrees"
+agent = "container-use"
+
 # ---------------------------------------------------------------------------
 # Guards veto cleaning right before anything is deleted.
 # ---------------------------------------------------------------------------
@@ -322,6 +330,31 @@ id = "elm"
 name = "Elm"
 markers = ["elm.json"]
 
+[[stack]]
+id = "electron"
+name = "Electron"
+markers = ["electron-builder.yml", "electron-builder.json", "electron-builder.json5", "forge.config.js", "forge.config.ts", "forge.config.cjs", "electron.vite.config.ts", "electron.vite.config.mjs"]
+
+[[stack]]
+id = "tauri"
+name = "Tauri"
+markers = ["tauri.conf.json", "Tauri.toml"]
+
+[[stack]]
+id = "cdk"
+name = "AWS CDK"
+markers = ["cdk.json"]
+
+[[stack]]
+id = "kubernetes"
+name = "Kubernetes / Helm"
+markers = ["Chart.yaml", "skaffold.yaml", "Tiltfile", "kustomization.yaml"]
+
+[[stack]]
+id = "pulumi"
+name = "Pulumi"
+markers = ["Pulumi.yaml"]
+
 # ---------------------------------------------------------------------------
 # Launchers: how "Ask your agent" hands a prompt to a coding agent or AI app.
 # {prompt} is the brief poo writes; terminal launchers run in the item's folder.
@@ -375,3 +408,51 @@ kind = "url"
 url = "claude://claude.ai/new?q={prompt}"
 detect_app = ["Claude.app"]
 order = 60
+
+[[launcher]]
+id = "cursor-agent"
+name = "Cursor CLI"
+kind = "terminal"
+command = ["cursor-agent", "{prompt}"]
+detect = ["cursor-agent"]
+order = 70
+
+[[launcher]]
+id = "copilot"
+name = "GitHub Copilot CLI"
+kind = "terminal"
+command = ["copilot", "-i", "{prompt}"]
+detect = ["copilot"]
+order = 80
+
+[[launcher]]
+id = "qwen"
+name = "Qwen Code"
+kind = "terminal"
+command = ["qwen", "-i", "{prompt}"]
+detect = ["qwen"]
+order = 90
+
+[[launcher]]
+id = "droid"
+name = "Factory Droid"
+kind = "terminal"
+command = ["droid", "{prompt}"]
+detect = ["droid"]
+order = 100
+
+[[launcher]]
+id = "goose"
+name = "Goose"
+kind = "terminal"
+command = ["goose", "run", "--text", "{prompt}", "--interactive"]
+detect = ["goose"]
+order = 110
+
+[[launcher]]
+id = "kiro-cli"
+name = "Kiro CLI"
+kind = "terminal"
+command = ["kiro-cli", "chat", "{prompt}"]
+detect = ["kiro-cli"]
+order = 120
