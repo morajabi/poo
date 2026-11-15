@@ -245,7 +245,7 @@ pub fn agent_done(agent: &str, cwd: Option<String>, detached: bool) -> Result<()
     let report = crate::scan::scan(
         &ctx.cfg,
         &ctx.cat,
-        &ScanOptions { roots: Some(vec![wt.clone()]), no_providers: true, roots_only: true, on_progress: None },
+        &ScanOptions { roots: Some(vec![wt.clone()]), no_providers: true, roots_only: true, full: false, on_progress: None },
     );
     let prefix = format!("{}/", wt.to_string_lossy());
     let items: Vec<_> = report

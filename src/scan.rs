@@ -34,13 +34,15 @@ pub struct ScanOptions {
     pub no_providers: bool,
     /// Skip global path rules.
     pub roots_only: bool,
+    /// Walk everything even when the index could update incrementally.
+    pub full: bool,
     pub on_progress: Option<Box<dyn Fn(&Progress) + Send + Sync>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FoundProject {
     pub path: PathBuf,
-    pub kind: &'static str,
+    pub kind: String,
     pub repo: Option<PathBuf>,
     pub branch: Option<String>,
     pub head: Option<String>,
@@ -69,6 +71,8 @@ struct Walker<'a> {
     homes: Vec<(PathBuf, String)>,
     dirs: AtomicUsize,
     current: &'a Mutex<String>,
+    /// Projects already in the index (incremental scans).
+    known_projects: HashSet<PathBuf>,
 }
 
 const DATA_NAMES: &[&str] = &[
@@ -85,7 +89,7 @@ impl<'a> Walker<'a> {
         let dotgit = entries.iter().find(|e| e.name == ".git")?;
         let mut proj = FoundProject {
             path: dir.to_path_buf(),
-            kind: "repo",
+            kind: "repo".into(),
             repo: None,
             branch: None,
             head: None,
@@ -108,9 +112,9 @@ impl<'a> Walker<'a> {
             match git::git_dir(dir) {
                 Some(gd) if gd.exists() => {
                     if gd.to_string_lossy().contains("/modules/") {
-                        proj.kind = "submodule";
+                        proj.kind = "submodule".into();
                     } else {
-                        proj.kind = "worktree";
+                        proj.kind = "worktree".into();
                         let common = std::fs::read_to_string(gd.join("commondir"))
                             .ok()
                             .map(|c| {
@@ -130,7 +134,7 @@ impl<'a> Walker<'a> {
                         }
                     }
                 }
-                _ => proj.kind = "orphan",
+                _ => proj.kind = "orphan".into(),
             }
         }
         let ignored = if self.ignored_rule.is_some() && proj.kind != "orphan" {
@@ -175,7 +179,7 @@ impl<'a> Walker<'a> {
             if !stacks.is_empty() {
                 self.projects.lock().unwrap().push(FoundProject {
                     path: dir.to_path_buf(),
-                    kind: "folder",
+                    kind: "folder".into(),
                     repo: None,
                     branch: None,
                     head: None,
@@ -225,6 +229,7 @@ impl<'a> Walker<'a> {
                     rule: rule.id.clone(),
                     sized: Some((s, children)),
                     project: proj.as_ref().map(|p| p.path.clone()),
+                    origin: "walk".into(),
                     ..Default::default()
                 });
                 continue;
@@ -250,6 +255,7 @@ impl<'a> Walker<'a> {
                             sized: Some((Sized { bytes: b, files: 0, newest: n }, vec![])),
                             project: proj.as_ref().map(|p| p.path.clone()),
                             disjoint: true,
+                            origin: "ignored".into(),
                             ..Default::default()
                         };
                         let lname = e.name.to_lowercase();
@@ -283,6 +289,46 @@ impl<'a> Walker<'a> {
         (own, newest)
     }
 
+    /// Incremental: look at one changed folder for new build folders or new checkouts,
+    /// without descending into unchanged subtrees.
+    fn visit_shallow(&self, dir: &Path, known: &HashSet<PathBuf>, proj: Option<Arc<ProjCtx>>) {
+        let Some(dev) = crate::fsutil::dev_of(dir) else { return };
+        let entries = read_entries(dir);
+        let entry_names = names(&entries);
+        if entry_names.iter().any(|n| n == ".git") && !self.known_projects.contains(dir) {
+            self.visit(dir, &entries, 0, None, dev);
+            return;
+        }
+        for e in &entries {
+            if !e.is_dir || e.is_symlink || e.dev != dev || e.name == ".git" || self.excluded(&e.path) || known.contains(&e.path) {
+                continue;
+            }
+            let child = read_entries(&e.path);
+            let child_names = names(&child);
+            if child_names.iter().any(|n| n == ".git") {
+                if !self.known_projects.contains(&e.path) {
+                    self.visit(&e.path, &child, 0, None, dev);
+                }
+                continue;
+            }
+            let is_ignored = proj.as_ref().map_or(false, |p| p.ignored.contains(&e.path));
+            if let Some(rule) = self.rules.iter().find(|r| (!r.ignored || is_ignored) && r.matches_artifact(&e.name, &e.path, &entry_names, &child_names)) {
+                let (mut s, children) = self.ctx.size_entries(&child, dev, &HashSet::new());
+                s.bytes += e.alloc;
+                s.newest = s.newest.max(e.mtime);
+                self.items.lock().unwrap().push(Raw {
+                    path: e.path.clone(),
+                    name: self.label(&e.path, &proj),
+                    rule: rule.id.clone(),
+                    sized: Some((s, children)),
+                    project: proj.as_ref().map(|p| p.path.clone()),
+                    origin: "walk".into(),
+                    ..Default::default()
+                });
+            }
+        }
+    }
+
     fn walk_root(&self, root: &Path) {
         let Some(dev) = crate::fsutil::dev_of(root) else { return };
         let entries = read_entries(root);
@@ -304,8 +350,16 @@ fn dedupe_roots(mut roots: Vec<PathBuf>) -> Vec<PathBuf> {
 
 /// Expands every enabled path rule into candidate paths. Exact paths beat `each` children.
 fn path_candidates(cat: &Catalog) -> Vec<(PathBuf, &Rule, bool)> {
+    let rules: Vec<&Rule> = cat.enabled_rules().filter(|r| r.kind == RuleKind::Path).collect();
+    // Rules expand in parallel; collecting keeps catalog order, which the dedupe below relies on.
+    let per_rule: Vec<Vec<(PathBuf, &Rule, bool)>> = rules.par_iter().map(|rule| rule_candidates(rule)).collect();
+    let found: Vec<(PathBuf, &Rule, bool)> = per_rule.into_iter().flatten().collect();
+    dedupe_candidates(found)
+}
+
+fn rule_candidates(rule: &Rule) -> Vec<(PathBuf, &Rule, bool)> {
     let mut found: Vec<(PathBuf, &Rule, bool)> = vec![];
-    for rule in cat.enabled_rules().filter(|r| r.kind == RuleKind::Path) {
+    {
         for p in &rule.paths {
             let pattern = expand(p);
             let matches = if has_glob(&pattern.to_string_lossy()) {
@@ -347,6 +401,10 @@ fn path_candidates(cat: &Catalog) -> Vec<(PathBuf, &Rule, bool)> {
             }
         }
     }
+    found
+}
+
+fn dedupe_candidates<'a>(found: Vec<(PathBuf, &'a Rule, bool)>) -> Vec<(PathBuf, &'a Rule, bool)> {
     // Same path claimed twice: an exact rule wins over a generic `each` expansion.
     let mut best: HashMap<PathBuf, usize> = HashMap::new();
     for (i, (p, _, each)) in found.iter().enumerate() {
@@ -369,18 +427,12 @@ fn rule_with_provider<'a>(cat: &'a Catalog, provider: &str) -> Vec<&'a Rule> {
 
 pub fn scan(cfg: &Config, cat: &Catalog, opts: &ScanOptions) -> Report {
     let started = Instant::now();
-    let ctx = SizeCtx::default();
+    let ctx = SizeCtx::recording(HashMap::new());
     let phase = Mutex::new(String::from("starting"));
     let current = Mutex::new(String::new());
     let item_count = AtomicUsize::new(0);
     let mut warnings: Vec<String> = cat.errors.iter().map(|e| format!("mod error: {}", e)).collect();
-    let gated = cat.rules.iter().filter(|r| r.needs_permission && !r.enabled).count();
-    if gated > 0 && !crate::util::has_full_disk_access() {
-        warnings.push(format!(
-            "{} rules (browser profiles, Mail, Messages, app containers) are off until poo has Full Disk Access: System Settings > Privacy & Security > Full Disk Access",
-            gated
-        ));
-    }
+    warnings.extend(access_warnings(cat));
 
     let (cfg_roots, detected) = cfg.effective_roots();
     let mut roots: Vec<PathBuf> = opts.roots.clone().unwrap_or(cfg_roots);
@@ -405,6 +457,8 @@ pub fn scan(cfg: &Config, cat: &Catalog, opts: &ScanOptions) -> Report {
 
     let done = std::sync::atomic::AtomicBool::new(false);
     let procs_list: Vec<Proc> = procs::list();
+    // Journal position before walking: changes during the walk replay next time.
+    let event_id = crate::fsevents::current_id();
 
     let report_progress = |final_tick: bool| {
         if let Some(cb) = &opts.on_progress {
@@ -442,22 +496,10 @@ pub fn scan(cfg: &Config, cat: &Catalog, opts: &ScanOptions) -> Report {
         };
         let mut provider_items: Vec<Raw> = vec![];
         if !opts.no_providers {
-            for r in rule_with_provider(cat, "xcode-derived-data") {
-                provider_items.extend(providers::xcode_derived_data(r));
-            }
-            for r in rule_with_provider(cat, "versions") {
-                provider_items.extend(providers::versions(r));
-            }
-            let leftovers = rule_with_provider(cat, "app-leftovers");
-            if !leftovers.is_empty() {
-                let installed = providers::installed_bundle_ids();
-                for r in leftovers {
-                    provider_items.extend(providers::app_leftovers(r, &installed));
-                }
-            }
-            for r in rule_with_provider(cat, "simulator-devices") {
-                provider_items.extend(providers::simulator_devices(r, devices_json.as_ref()));
-            }
+            provider_items.extend(cheap_providers(cat, devices_json.as_ref()));
+        }
+        if !opts.no_providers {
+            provider_items.extend(app_leftover_items(cat));
         }
         // A provider item is more specific than a generic path rule for the same folder.
         let provider_paths: HashSet<PathBuf> = provider_items.iter().filter(|r| !r.is_virtual).map(|r| r.path.clone()).collect();
@@ -489,6 +531,7 @@ pub fn scan(cfg: &Config, cat: &Catalog, opts: &ScanOptions) -> Report {
             homes: homes.clone(),
             dirs: AtomicUsize::new(0),
             current: &current,
+            known_projects: HashSet::new(),
         };
 
         *phase.lock().unwrap() = "scanning".into();
@@ -496,27 +539,10 @@ pub fn scan(cfg: &Config, cat: &Catalog, opts: &ScanOptions) -> Report {
         let no_providers = opts.no_providers;
         let slow_providers = scope.spawn(move || {
             let devices_json = dj;
-            let mut out: Vec<Raw> = vec![];
-            let mut warn = vec![];
             if no_providers {
-                return (out, warn);
+                return (vec![], vec![]);
             }
-            for r in rule_with_provider(cat, "simulator-runtimes") {
-                out.extend(providers::simulator_runtimes(r, devices_json.as_ref()));
-            }
-            for r in rule_with_provider(cat, "docker") {
-                out.extend(providers::docker(r));
-            }
-            for r in rule_with_provider(cat, "homebrew") {
-                out.extend(providers::homebrew(r));
-            }
-            for r in rule_with_provider(cat, "exec") {
-                match providers::exec(r) {
-                    Ok(items) => out.extend(items),
-                    Err(e) => warn.push(format!("rule `{}`: {}", r.id, e)),
-                }
-            }
-            (out, warn)
+            slow_providers(cat, devices_json.as_ref())
         });
 
         // Size global candidates and provider dirs while roots are walked.
@@ -540,6 +566,7 @@ pub fn scan(cfg: &Config, cat: &Catalog, opts: &ScanOptions) -> Report {
                             rule: rule.id.clone(),
                             sized: Some((s, children)),
                             disjoint: true,
+                            origin: "global".into(),
                             ..Default::default()
                         })
                     })
@@ -585,6 +612,21 @@ pub fn scan(cfg: &Config, cat: &Catalog, opts: &ScanOptions) -> Report {
         if let Some(rule) = rule_with_provider(cat, "git-worktrees").into_iter().next() {
             let wts = worktree_items(rule, &found_projects, &raws, &ctx, cfg);
             raws.extend(wts);
+        }
+        // Save what this scan saw, so the next one only re-measures what changed.
+        if opts.roots.is_none() && !opts.no_providers && !opts.roots_only {
+            save_index(&Index {
+                version: INDEX_VERSION,
+                fingerprint: fingerprint(cfg, cat, &roots),
+                event_id,
+                full_at: now(),
+                updated_at: now(),
+                roots: roots.clone(),
+                raws: raws.clone(),
+                projects: found_projects.clone(),
+                slow_at: now(),
+                dirs: std::mem::take(&mut *ctx.big.lock().unwrap()),
+            });
         }
         done.store(true, Ordering::Relaxed);
     });
@@ -632,6 +674,7 @@ fn worktree_items(rule: &Rule, projects: &[FoundProject], raws: &[Raw], ctx: &Si
                 path: p.path.clone(),
                 name: label,
                 rule: rule.id.clone(),
+                origin: "worktree".into(),
                 sized: Some((s, children)),
                 last_used: p.last_activity,
                 project: Some(p.path.clone()),
@@ -1119,7 +1162,7 @@ fn build_report(
             Project {
                 path: key.clone(),
                 name: fp.path.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default(),
-                kind: fp.kind.to_string(),
+                kind: fp.kind.clone(),
                 repo: fp.repo.as_ref().map(|r| r.to_string_lossy().to_string()),
                 agent: fp.agent.clone(),
                 branch: fp.branch.clone(),
@@ -1257,4 +1300,569 @@ pub fn load_report() -> Option<Report> {
     let data = std::fs::read(report_path()).ok()?;
     let r: Report = serde_json::from_slice(&data).ok()?;
     (r.schema == SCHEMA).then_some(r)
+}
+
+// ---------------------------------------------------------------------------
+// Providers, split by cost so incremental scans can reuse the slow ones.
+// ---------------------------------------------------------------------------
+
+fn cheap_providers(cat: &Catalog, devices_json: Option<&Value>) -> Vec<Raw> {
+    let mut out = cheap_providers_except_simulators(cat);
+    for r in rule_with_provider(cat, "simulator-devices") {
+        out.extend(providers::simulator_devices(r, devices_json));
+    }
+    for r in out.iter_mut() {
+        r.origin = "provider".into();
+    }
+    out
+}
+
+fn cheap_providers_except_simulators(cat: &Catalog) -> Vec<Raw> {
+    let mut out = vec![];
+    for r in rule_with_provider(cat, "xcode-derived-data") {
+        out.extend(providers::xcode_derived_data(r));
+    }
+    for r in rule_with_provider(cat, "versions") {
+        out.extend(providers::versions(r));
+    }
+    for r in out.iter_mut() {
+        r.origin = "provider".into();
+    }
+    out
+}
+
+/// Leftovers of removed apps. Slow to list, but they claim their paths before path rules do.
+fn app_leftover_items(cat: &Catalog) -> Vec<Raw> {
+    let mut out = vec![];
+    let leftovers = rule_with_provider(cat, "app-leftovers");
+    if !leftovers.is_empty() {
+        let installed = providers::installed_bundle_ids();
+        for r in leftovers {
+            out.extend(providers::app_leftovers(r, &installed));
+        }
+    }
+    for r in out.iter_mut() {
+        r.origin = "slow".into();
+    }
+    out
+}
+
+/// Docker, Homebrew, simulator runtimes and exec rules: shell out, so they are reused for a while.
+fn slow_providers(cat: &Catalog, devices_json: Option<&Value>) -> (Vec<Raw>, Vec<String>) {
+    let mut out: Vec<Raw> = vec![];
+    let mut warn = vec![];
+    for r in rule_with_provider(cat, "simulator-runtimes") {
+        out.extend(providers::simulator_runtimes(r, devices_json));
+    }
+    for r in rule_with_provider(cat, "docker") {
+        out.extend(providers::docker(r));
+    }
+    for r in rule_with_provider(cat, "homebrew") {
+        out.extend(providers::homebrew(r));
+    }
+    for r in rule_with_provider(cat, "exec") {
+        match providers::exec(r) {
+            Ok(items) => out.extend(items),
+            Err(e) => warn.push(format!("rule `{}`: {}", r.id, e)),
+        }
+    }
+    for r in out.iter_mut() {
+        r.origin = "slow".into();
+    }
+    (out, warn)
+}
+
+// ---------------------------------------------------------------------------
+// Scan index and incremental rescans
+// ---------------------------------------------------------------------------
+
+const INDEX_VERSION: u32 = 1;
+/// Slow providers (Docker, Homebrew, app leftovers, runtimes) are reused this long.
+const SLOW_TTL: i64 = 15 * 60;
+/// A full walk at least this often catches anything the journal cannot tell.
+const FULL_EVERY: i64 = 24 * 3600;
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct Index {
+    pub version: u32,
+    pub fingerprint: String,
+    pub event_id: u64,
+    pub full_at: i64,
+    pub updated_at: i64,
+    pub roots: Vec<PathBuf>,
+    pub raws: Vec<Raw>,
+    pub projects: Vec<FoundProject>,
+    pub slow_at: i64,
+    /// Sizes of big folders, so rescans re-measure only changed branches.
+    #[serde(default)]
+    pub dirs: Vec<(PathBuf, Sized)>,
+}
+
+fn index_path() -> PathBuf {
+    state_dir().join("index.json")
+}
+
+pub fn save_index(idx: &Index) {
+    let p = index_path();
+    let _ = std::fs::create_dir_all(p.parent().unwrap());
+    let tmp = p.with_extension(format!("json.tmp-{}", std::process::id()));
+    if let Ok(data) = serde_json::to_vec(idx) {
+        if std::fs::write(&tmp, data).is_ok() {
+            let _ = std::fs::rename(tmp, p);
+        }
+    }
+}
+
+pub fn load_index() -> Option<Index> {
+    serde_json::from_slice(&std::fs::read(index_path()).ok()?).ok()
+}
+
+/// Drops cleaned paths from the index so the next incremental scan does not resurrect them.
+pub fn forget_in_index(paths: &[String]) {
+    if paths.is_empty() {
+        return;
+    }
+    if let Some(mut idx) = load_index() {
+        let gone = |r: &Raw| {
+            let p = r.path.to_string_lossy();
+            paths.iter().any(|g| p == g.as_str() || p.starts_with(&format!("{}/", g)))
+        };
+        if idx.raws.iter().any(|r| r.origin == "slow" && gone(r)) {
+            idx.slow_at = 0;
+        }
+        idx.raws.retain(|r| !gone(r));
+        save_index(&idx);
+    }
+}
+
+/// Changes to rules, roots or scan settings invalidate the index.
+fn fingerprint(cfg: &Config, cat: &Catalog, roots: &[PathBuf]) -> String {
+    let rules: Vec<(&str, bool, &RuleSpec)> = cat.rules.iter().map(|r| (r.id.as_str(), r.enabled, &r.spec)).collect();
+    let data = serde_json::json!({
+        "v": crate::VERSION,
+        "rules": rules,
+        "roots": roots,
+        "homes": cat.worktree_homes,
+        "depth": cfg.scan.max_depth,
+        "exclude": cfg.scan.exclude,
+        "backup": cfg.backup.config_files,
+    });
+    crate::util::short_hash(&data.to_string())
+}
+
+fn access_warnings(cat: &Catalog) -> Vec<String> {
+    let gated = cat.rules.iter().filter(|r| r.needs_permission && !r.enabled).count();
+    if gated > 0 && !crate::util::has_full_disk_access() {
+        return vec![format!(
+            "{} rules (browser profiles, Mail, Messages, app containers) are off until poo has Full Disk Access: System Settings > Privacy & Security > Full Disk Access",
+            gated
+        )];
+    }
+    vec![]
+}
+
+/// Where a default scan walks: configured (or detected) roots, mod roots and agent worktree
+/// homes, canonical and without nesting. The bool says the roots were detected.
+pub fn scan_roots(cfg: &Config, cat: &Catalog) -> (Vec<PathBuf>, Vec<(PathBuf, String)>, bool) {
+    let (mut roots, detected) = cfg.effective_roots();
+    roots.extend(cat.roots.iter().map(|r| expand(r)).filter(|p| p.is_dir()));
+    let homes: Vec<(PathBuf, String)> = cat
+        .worktree_homes
+        .iter()
+        .map(|h| (expand(&h.path), h.agent.clone()))
+        .filter(|(p, _)| p.is_dir())
+        .collect();
+    roots.extend(homes.iter().map(|(p, _)| p.clone()));
+    let roots = dedupe_roots(roots.into_iter().filter_map(|r| std::fs::canonicalize(&r).ok()).collect());
+    (roots, homes, detected)
+}
+
+/// Folders the file-change journal is read for.
+pub fn watch_roots(roots: &[PathBuf]) -> Vec<PathBuf> {
+    let mut w = vec![home()];
+    if let Ok(t) = std::env::var("TMPDIR") {
+        if let Ok(c) = std::fs::canonicalize(t) {
+            w.push(c);
+        }
+    }
+    for r in roots {
+        if !r.starts_with(home()) {
+            w.push(r.clone());
+        }
+    }
+    w
+}
+
+/// FSEvents reports /private/var/...; poo may know the same folder as /var/...
+pub fn path_forms(p: &Path) -> Vec<PathBuf> {
+    let s = p.to_string_lossy();
+    let mut v = vec![p.to_path_buf()];
+    for (a, b) in [("/private/var/", "/var/"), ("/private/tmp/", "/tmp/")] {
+        if let Some(rest) = s.strip_prefix(a) {
+            v.push(PathBuf::from(format!("{}{}", b, rest)));
+        }
+    }
+    v
+}
+
+pub fn nearest_known(p: &Path, known: &HashSet<PathBuf>) -> Option<PathBuf> {
+    for form in path_forms(p) {
+        for a in form.ancestors() {
+            if known.contains(a) {
+                return Some(a.to_path_buf());
+            }
+        }
+    }
+    None
+}
+
+/// Rescans using the index and the FSEvents journal. None when a full scan is needed.
+pub fn scan_incremental(cfg: &Config, cat: &Catalog, opts: &ScanOptions) -> Option<Report> {
+    if opts.roots.is_some() || opts.no_providers || opts.roots_only {
+        return None;
+    }
+    let started = Instant::now();
+    let idx = load_index()?;
+    if idx.version != INDEX_VERSION || now() - idx.full_at > FULL_EVERY {
+        return None;
+    }
+    // Same roots and rules as when the index was built.
+    let (roots, homes, detected) = scan_roots(cfg, cat);
+    if fingerprint(cfg, cat, &roots) != idx.fingerprint {
+        return None;
+    }
+    trace(&started, "load");
+    let new_id = crate::fsevents::current_id();
+    let changes = crate::fsevents::changes_since(&watch_roots(&roots), idx.event_id, std::time::Duration::from_secs(20))?;
+    if changes.lost {
+        return None;
+    }
+    trace(&started, "replay");
+    let state = state_dir();
+    let changed: Vec<PathBuf> = changes.paths.into_iter().filter(|p| !p.starts_with(&state)).collect();
+    if changes.rescan_dirs.iter().any(|d| roots.iter().any(|r| d.starts_with(r) || r.starts_with(d))) {
+        return None;
+    }
+    if let Some(cb) = &opts.on_progress {
+        cb(&Progress { phase: "updating".into(), detail: format!("{} changed folders", changed.len()), files: 0, bytes: 0, items: idx.raws.len(), elapsed_ms: started.elapsed().as_millis() as u64 });
+    }
+
+    let ctx = SizeCtx::recording(idx.dirs.iter().cloned().collect());
+    let old_dirs = idx.dirs;
+    let mut raws = idx.raws;
+    let mut projects = idx.projects;
+    // Gone items drop out. A removed folder shows up as a change in one of its ancestors,
+    // so only items below a changed folder need a look.
+    let changed_set: HashSet<PathBuf> = changed.iter().flat_map(|c| path_forms(c)).collect();
+    let maybe_gone: Vec<bool> = raws
+        .par_iter()
+        .map(|r| !r.is_virtual && r.path.ancestors().any(|a| changed_set.contains(a)) && std::fs::symlink_metadata(&r.path).is_err())
+        .collect();
+    let mut gone_iter = maybe_gone.into_iter();
+    raws.retain(|_| !gone_iter.next().unwrap_or(false));
+    trace(&started, "retain gone");
+    let known: HashSet<PathBuf> = raws.iter().filter(|r| !r.is_virtual).map(|r| r.path.clone()).collect();
+    let project_paths: HashSet<PathBuf> = projects.iter().map(|p| p.path.clone()).collect();
+
+    // Folders the journal could not itemize (outside dev roots): measure what is inside afresh.
+    let rescan: Vec<PathBuf> = changes.rescan_dirs.iter().flat_map(|d| path_forms(d)).collect();
+    let fresh: HashSet<PathBuf> = known.iter().filter(|k| rescan.iter().any(|d| k.starts_with(d) || d.starts_with(k))).cloned().collect();
+    // Changes inside an item make it dirty; others are structural.
+    let mut dirty: HashSet<PathBuf> = fresh.clone();
+    let mut outside: Vec<PathBuf> = vec![];
+    for c in &changed {
+        match nearest_known(c, &known) {
+            Some(k) => {
+                dirty.insert(k);
+            }
+            None => outside.push(c.clone()),
+        }
+    }
+
+    if std::env::var_os("POO_TRACE").is_some() {
+        for d in &dirty {
+            let b = raws.iter().find(|r| &r.path == d).and_then(|r| r.sized.as_ref()).map_or(0, |s| s.0.bytes);
+            eprintln!("dirty {} {}", crate::util::bytes(b), d.display());
+        }
+    }
+    // Re-measure dirty items, excluding other items nested inside them.
+    let descendants = |p: &Path| -> HashSet<PathBuf> { known.iter().filter(|o| o.as_path() != p && o.starts_with(p)).cloned().collect() };
+    trace(&started, "dirty sets");
+    let mut changed_in: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
+    for c in &changed {
+        if let Some(k) = nearest_known(c, &known) {
+            let form = path_forms(c).into_iter().find(|f| f.starts_with(&k)).unwrap_or_else(|| c.clone());
+            changed_in.entry(k).or_default().push(form);
+        }
+    }
+    raws.par_iter_mut().for_each(|r| {
+        if r.is_virtual || !dirty.contains(&r.path) || r.origin == "worktree" {
+            return;
+        }
+        let below: Vec<&Path> = changed_in.get(&r.path).map(|v| v.iter().map(|p| p.as_path()).collect()).unwrap_or_default();
+        let t = Instant::now();
+        let sized = if fresh.contains(&r.path) {
+            ctx.size_path(&r.path, &descendants(&r.path))
+        } else {
+            ctx.size_path_delta(&r.path, &descendants(&r.path), &below)
+        };
+        if std::env::var_os("POO_TRACE").is_some() {
+            eprintln!("resized {:>5} ms  {} changed  {}", t.elapsed().as_millis(), below.len(), r.path.display());
+        }
+        if let Some(s) = sized {
+            r.sized = Some(s);
+            r.last_used = None;
+        }
+    });
+
+    trace(&started, "resize");
+    // Structural changes in dev roots: new build folders, new checkouts.
+    let current = Mutex::new(String::new());
+    let mut gb = globset::GlobSetBuilder::new();
+    for x in &cfg.scan.exclude {
+        if let Ok(g) = globset::Glob::new(&expand(x).to_string_lossy()) {
+            gb.add(g);
+        }
+    }
+    let mut exclude: HashSet<PathBuf> = known.clone();
+    exclude.insert(home().join("Library"));
+    exclude.insert(home().join(".Trash"));
+    let walker = Walker {
+        cat,
+        rules: cat.enabled_rules().filter(|r| r.kind == RuleKind::Artifact).collect(),
+        ignored_rule: rule_with_provider(cat, "git-ignored").into_iter().next(),
+        ctx: &ctx,
+        exclude,
+        exclude_globs: gb.build().unwrap_or_else(|_| globset::GlobSet::empty()),
+        max_depth: cfg.scan.max_depth,
+        items: Mutex::new(vec![]),
+        projects: Mutex::new(vec![]),
+        known_worktrees: Mutex::new(HashSet::new()),
+        homes: homes.clone(),
+        dirs: AtomicUsize::new(0),
+        current: &current,
+        known_projects: project_paths.clone(),
+    };
+    let mut proj_sorted: Vec<PathBuf> = project_paths.iter().cloned().collect();
+    proj_sorted.sort_by_key(|p| std::cmp::Reverse(p.as_os_str().len()));
+    let mut ctx_cache: HashMap<PathBuf, Arc<ProjCtx>> = HashMap::new();
+    let mut touched_projects: HashMap<PathBuf, (i64, bool)> = HashMap::new();
+    let mut seen_dirs: HashSet<PathBuf> = HashSet::new();
+    for d in &outside {
+        let d = path_forms(d).into_iter().find(|f| roots.iter().any(|r| f.starts_with(r))).unwrap_or_else(|| d.clone());
+        if !roots.iter().any(|r| d.starts_with(r)) || !seen_dirs.insert(d.clone()) {
+            continue;
+        }
+        let proj = proj_sorted.iter().find(|p| d.starts_with(p)).cloned();
+        if let Some(p) = &proj {
+            let in_git = d.strip_prefix(p).map_or(false, |rel| rel.components().next().map_or(false, |c| c.as_os_str() == ".git"));
+            let e = touched_projects.entry(p.clone()).or_insert((0, false));
+            e.0 = e.0.max(crate::fsutil::mtime(&d).unwrap_or(0));
+            e.1 |= in_git;
+            if in_git {
+                continue;
+            }
+        }
+        if !d.is_dir() {
+            continue;
+        }
+        let pctx = proj.map(|p| {
+            ctx_cache
+                .entry(p.clone())
+                .or_insert_with(|| {
+                    let ignored = if walker.ignored_rule.is_some() { git::ignored_dirs(&p).into_iter().collect() } else { HashSet::new() };
+                    Arc::new(ProjCtx { path: p.clone(), ignored })
+                })
+                .clone()
+        });
+        walker.visit_shallow(&d, &known, pctx);
+    }
+    let new_raws = walker.items.into_inner().unwrap();
+    let new_projects = walker.projects.into_inner().unwrap();
+    // Several changed folders can lead to the same new checkout: keep the first sighting.
+    let mut added: HashSet<PathBuf> = HashSet::new();
+    for r in new_raws {
+        if !known.contains(&r.path) && added.insert(r.path.clone()) {
+            raws.push(r);
+        }
+    }
+    let mut added: HashSet<PathBuf> = HashSet::new();
+    for p in new_projects {
+        if !project_paths.contains(&p.path) && added.insert(p.path.clone()) {
+            projects.push(p);
+        }
+    }
+    for p in projects.iter_mut() {
+        if let Some((t, git_touched)) = touched_projects.get(&p.path) {
+            let git_t = if *git_touched { git::last_activity(&p.path) } else { None };
+            p.last_activity = Some(p.last_activity.unwrap_or(0).max(*t).max(git_t.unwrap_or(0)));
+        }
+    }
+
+    trace(&started, "structural");
+    // Slow providers: reuse until their TTL runs out.
+    // simctl is slow to ask: only when simulators changed on disk, or with the slow providers.
+    let refresh_slow = now() - idx.slow_at > SLOW_TTL;
+    let sim_root = home().join("Library/Developer/CoreSimulator");
+    let sim_rules: HashSet<String> = rule_with_provider(cat, "simulator-devices").iter().map(|r| r.id.clone()).collect();
+    let refresh_sims = !sim_rules.is_empty() && (refresh_slow || changed.iter().any(|c| c.starts_with(&sim_root)));
+    let needs_simctl = refresh_sims || (refresh_slow && !rule_with_provider(cat, "simulator-runtimes").is_empty());
+    let devices_json = if needs_simctl { providers::simctl_devices() } else { None };
+    let mut slow_at = idx.slow_at;
+    let mut warnings: Vec<String> = cat.errors.iter().map(|e| format!("mod error: {}", e)).collect();
+    if refresh_slow {
+        let old_slow: HashMap<(String, PathBuf), Raw> = raws.iter().filter(|r| r.origin == "slow").map(|r| ((r.rule.clone(), r.path.clone()), r.clone())).collect();
+        let (mut slow, warn) = slow_providers(cat, devices_json.as_ref());
+        slow.extend(app_leftover_items(cat));
+        let slow: Vec<Raw> = slow
+            .into_par_iter()
+            .map(|mut r| {
+                if r.sized.is_none() && !r.is_virtual {
+                    match old_slow.get(&(r.rule.clone(), r.path.clone())) {
+                        Some(old) if !dirty.contains(&r.path) => r.sized = old.sized.clone(),
+                        _ => r.sized = ctx.size_path(&r.path, &HashSet::new()),
+                    }
+                }
+                r
+            })
+            .collect();
+        raws.retain(|r| r.origin != "slow");
+        raws.extend(slow);
+        warnings.extend(warn);
+        slow_at = now();
+    }
+
+    trace(&started, "slow");
+    // Global locations: cheap to list again; reuse sizes of unchanged ones.
+    let cheap = if refresh_sims {
+        cheap_providers(cat, devices_json.as_ref())
+    } else {
+        let mut v = cheap_providers_except_simulators(cat);
+        v.extend(raws.iter().filter(|r| r.origin == "provider" && sim_rules.contains(&r.rule)).cloned());
+        v
+    };
+    trace(&started, "cheap providers");
+    let mut provider_paths: HashSet<PathBuf> = cheap.iter().filter(|r| !r.is_virtual).map(|r| r.path.clone()).collect();
+    provider_paths.extend(raws.iter().filter(|r| r.origin == "slow" && !r.is_virtual).map(|r| r.path.clone()));
+    let candidates: Vec<_> = path_candidates(cat).into_iter().filter(|(p, _, _)| !provider_paths.contains(p)).collect();
+    let mut claimed: HashSet<PathBuf> = candidates.iter().map(|(p, _, _)| p.clone()).collect();
+    claimed.extend(provider_paths.iter().cloned());
+    let old_global: HashMap<PathBuf, Raw> = raws.iter().filter(|r| r.origin == "global").map(|r| (r.path.clone(), r.clone())).collect();
+    let old_provider: HashMap<(String, PathBuf), Raw> = raws.iter().filter(|r| r.origin == "provider").map(|r| ((r.rule.clone(), r.path.clone()), r.clone())).collect();
+    raws.retain(|r| r.origin != "global" && r.origin != "provider");
+    let all_claimed: Vec<PathBuf> = claimed.iter().cloned().collect();
+    trace(&started, "candidates");
+    let globals: Vec<Raw> = candidates
+        .par_iter()
+        .filter_map(|(path, rule, _)| {
+            if let Some(old) = old_global.get(path) {
+                if old.rule == rule.id {
+                    return Some(old.clone());
+                }
+            }
+            let excl: HashSet<PathBuf> = all_claimed.iter().filter(|o| *o != path && o.starts_with(path)).cloned().collect();
+            let (s, children) = ctx.size_path(path, &excl)?;
+            Some(Raw { path: path.clone(), name: path_label(path, rule), rule: rule.id.clone(), sized: Some((s, children)), disjoint: true, origin: "global".into(), ..Default::default() })
+        })
+        .collect();
+    raws.extend(globals);
+    let providers_now: Vec<Raw> = cheap
+        .into_par_iter()
+        .map(|mut r| {
+            if r.sized.is_none() && !r.is_virtual {
+                match old_provider.get(&(r.rule.clone(), r.path.clone())) {
+                    Some(old) if old.sized.is_some() => r.sized = old.sized.clone(),
+                    _ => r.sized = ctx.size_path(&r.path, &HashSet::new()),
+                }
+            }
+            r
+        })
+        .collect();
+    raws.extend(providers_now);
+
+
+    trace(&started, "globals");
+    // Worktrees: recompute the ones with changes inside, refresh nested sizes of the rest.
+    let wt_rule = rule_with_provider(cat, "git-worktrees").into_iter().next();
+    let existing_wt: HashSet<PathBuf> = raws.iter().filter(|r| r.origin == "worktree").map(|r| r.path.clone()).collect();
+    let need: Vec<FoundProject> = projects
+        .iter()
+        .filter(|p| p.kind == "worktree" || p.kind == "orphan")
+        .filter(|p| !existing_wt.contains(&p.path) || dirty.contains(&p.path) || touched_projects.contains_key(&p.path))
+        .cloned()
+        .collect();
+    if let Some(rule) = wt_rule {
+        let need_paths: HashSet<PathBuf> = need.iter().map(|p| p.path.clone()).collect();
+        raws.retain(|r| !(r.origin == "worktree" && need_paths.contains(&r.path)));
+        let non_wt: Vec<Raw> = raws.iter().filter(|r| r.origin != "worktree").cloned().collect();
+        let fresh = worktree_items(rule, &need, &non_wt, &ctx, cfg);
+        raws.extend(fresh);
+        let nested_sizes: Vec<(PathBuf, u64)> = raws.iter().filter(|r| r.origin != "worktree" && !r.is_virtual).map(|r| (r.path.clone(), r.sized.as_ref().map_or(0, |s| s.0.bytes))).collect();
+        for r in raws.iter_mut().filter(|r| r.origin == "worktree") {
+            r.nested_bytes = nested_sizes.iter().filter(|(p, _)| p.starts_with(&r.path) && p != &r.path).map(|(_, b)| b).sum();
+        }
+    }
+    // Worktrees that are gone.
+    raws.retain(|r| r.origin != "worktree" || r.path.exists());
+    projects.retain(|p| p.path.exists());
+
+    trace(&started, "worktrees");
+    warnings.extend(access_warnings(cat));
+    if detected {
+        warnings.push("no roots configured; using detected folders (run `poo roots add <path>`)".into());
+    }
+    let remeasured: HashSet<PathBuf> = dirty.iter().cloned().collect();
+    let live: HashSet<PathBuf> = raws.iter().filter(|r| !r.is_virtual).map(|r| r.path.clone()).collect();
+    let mut dirs: Vec<(PathBuf, Sized)> = old_dirs
+        .into_iter()
+        .filter(|(p, _)| {
+            let mut under_live = false;
+            for a in p.ancestors() {
+                if remeasured.contains(a) {
+                    return false;
+                }
+                under_live |= live.contains(a);
+            }
+            under_live
+        })
+        .collect();
+    dirs.extend(std::mem::take(&mut *ctx.big.lock().unwrap()));
+    dirs.sort_by(|a, b| a.0.cmp(&b.0));
+    dirs.dedup_by(|a, b| a.0 == b.0);
+    save_index(&Index {
+        version: INDEX_VERSION,
+        fingerprint: idx.fingerprint,
+        event_id: new_id,
+        full_at: idx.full_at,
+        updated_at: now(),
+        roots: roots.clone(),
+        raws: raws.clone(),
+        projects: projects.clone(),
+        slow_at,
+        dirs,
+    });
+    trace(&started, "index");
+    let procs_list = procs::list();
+    trace(&started, "procs");
+    let mut report = build_report(cfg, cat, raws, projects, &procs_list, roots, warnings, started);
+    trace(&started, "report");
+    report.warnings.retain(|w| !w.is_empty());
+    Some(report)
+}
+
+/// Incremental when possible, full otherwise.
+pub fn scan_auto(cfg: &Config, cat: &Catalog, opts: &ScanOptions) -> Report {
+    if !opts.full {
+        if let Some(r) = scan_incremental(cfg, cat, opts) {
+            return r;
+        }
+    }
+    scan(cfg, cat, opts)
+}
+
+/// `POO_TRACE=1` prints how long each step of an incremental scan took.
+fn trace(started: &Instant, step: &str) {
+    if std::env::var_os("POO_TRACE").is_some() {
+        eprintln!("trace {:>6} ms  {}", started.elapsed().as_millis(), step);
+    }
 }

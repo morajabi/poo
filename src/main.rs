@@ -65,6 +65,9 @@ enum Cmd {
         /// Stream progress as JSON lines on stderr.
         #[arg(long)]
         progress: bool,
+        /// Walk everything instead of updating from the file-change journal.
+        #[arg(long)]
+        full: bool,
     },
     /// List items.
     Ls {
@@ -238,6 +241,15 @@ enum Cmd {
     Hook {
         #[command(subcommand)]
         cmd: HookCmd,
+    },
+    /// Keep the report current: watch for file changes and update as they happen.
+    Watch {
+        /// Seconds of quiet after a change before updating.
+        #[arg(long, default_value_t = 2.0)]
+        debounce: f64,
+        /// Update at least this often (seconds), even without changes.
+        #[arg(long, default_value_t = 600)]
+        every: u64,
     },
     /// Check poo's setup and environment.
     Doctor,
@@ -762,9 +774,10 @@ fn real_main(cli: Cli) -> R {
                 }
             }
         }
-        Cmd::Scan { root, no_providers, progress } => {
+        Cmd::Scan { root, no_providers, progress, full } => {
             let mut opts = scan_opts(&out, progress);
             opts.no_providers = no_providers;
+            opts.full = full;
             if !root.is_empty() {
                 opts.roots = Some(root.iter().map(|r| poo::util::expand(r)).collect());
             }
@@ -1342,6 +1355,16 @@ fn real_main(cli: Cli) -> R {
                     .open(poo::config::state_dir().join("hooks.log"))
                     .map(|mut f| writeln!(f, "{} {} error: {:#}", poo::util::iso8601(poo::util::now()), agent, e));
             }
+        }
+        Cmd::Watch { debounce, every } => {
+            poo::watch::run(
+                &mut ctx,
+                &poo::watch::WatchOptions {
+                    debounce: std::time::Duration::from_secs_f64(debounce.max(0.2)),
+                    every: std::time::Duration::from_secs(every.max(30)),
+                    json: out.json,
+                },
+            )?;
         }
         Cmd::Doctor => {
             let (roots, detected) = ctx.cfg.effective_roots();

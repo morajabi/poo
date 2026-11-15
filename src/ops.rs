@@ -29,17 +29,26 @@ impl Ctx {
     }
 }
 
-/// Cached report if fresh enough, else a new scan.
+/// The current report. Reads reuse a report from the last few seconds, otherwise update
+/// it from the file-change journal (only what changed is measured again). A full walk
+/// happens on `rescan`, when the journal cannot help, or when the report is too old.
 pub fn report(ctx: &Ctx, rescan: bool, opts: ScanOptions) -> Result<Report> {
-    if !rescan {
-        if let Some(r) = scan::load_report() {
-            let max_age = ctx.cfg.scan.cache_minutes as i64 * 60;
-            if now() - r.scanned_at < max_age && r.version == crate::VERSION {
-                return Ok(r);
-            }
+    let cached = if rescan { None } else { scan::load_report().filter(|r| r.version == crate::VERSION) };
+    if let Some(r) = &cached {
+        if now() - r.scanned_at < ctx.cfg.scan.fresh_seconds as i64 {
+            return Ok(cached.unwrap());
         }
     }
-    let r = scan::scan(&ctx.cfg, &ctx.cat, &opts);
+    let r = if opts.full {
+        scan::scan(&ctx.cfg, &ctx.cat, &opts)
+    } else if let Some(r) = scan::scan_incremental(&ctx.cfg, &ctx.cat, &opts) {
+        r
+    } else {
+        match cached {
+            Some(r) if now() - r.scanned_at < ctx.cfg.scan.cache_minutes as i64 * 60 => return Ok(r),
+            _ => scan::scan(&ctx.cfg, &ctx.cat, &opts),
+        }
+    };
     scan::save_report(&r)?;
     Ok(r)
 }
@@ -151,6 +160,7 @@ pub fn forget_cleaned(ctx: &Ctx, r: &mut Report, res: &crate::clean::CleanResult
     r.disk = crate::fsutil::disk_info(&crate::util::home());
     refresh_plans(ctx, r);
     let _ = scan::save_report(r);
+    scan::forget_in_index(&gone.iter().map(|g| g.to_string()).collect::<Vec<_>>());
 }
 
 pub fn worktrees(r: &Report) -> Value {
