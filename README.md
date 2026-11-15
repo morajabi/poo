@@ -1,5 +1,10 @@
 # poo
 
+[![ci](https://github.com/morajabi/poo/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/morajabi/poo/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/morajabi/poo?sort=semver)](https://github.com/morajabi/poo/releases/latest)
+[![macOS 14+](https://img.shields.io/badge/macOS-14%2B-black?logo=apple)](https://github.com/morajabi/poo/releases/latest/download/Poo.app.zip)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 **Find and safely free the disk space your dev work eats.** A CLI, a macOS menu bar
 app, and an MCP server plus skill so your coding agent can do it for you.
 
@@ -47,6 +52,21 @@ curl -fsSL https://raw.githubusercontent.com/morajabi/poo/main/install.sh | sh
 # with the menu bar app:
 curl -fsSL https://raw.githubusercontent.com/morajabi/poo/main/install.sh | POO_APP=1 sh
 ```
+
+Or download the latest release directly (these links always point at the newest one):
+
+| | |
+|---|---|
+| **Poo.app** (macOS 14+, Apple silicon and Intel, CLI included) | [Poo.app.zip](https://github.com/morajabi/poo/releases/latest/download/Poo.app.zip) |
+| CLI, macOS Apple silicon | [poo-aarch64-apple-darwin.tar.gz](https://github.com/morajabi/poo/releases/latest/download/poo-aarch64-apple-darwin.tar.gz) |
+| CLI, macOS Intel | [poo-x86_64-apple-darwin.tar.gz](https://github.com/morajabi/poo/releases/latest/download/poo-x86_64-apple-darwin.tar.gz) |
+| CLI, Linux x86_64 | [poo-x86_64-unknown-linux-gnu.tar.gz](https://github.com/morajabi/poo/releases/latest/download/poo-x86_64-unknown-linux-gnu.tar.gz) |
+| CLI, Linux arm64 | [poo-aarch64-unknown-linux-gnu.tar.gz](https://github.com/morajabi/poo/releases/latest/download/poo-aarch64-unknown-linux-gnu.tar.gz) |
+| Checksums | [SHA256SUMS](https://github.com/morajabi/poo/releases/latest/download/SHA256SUMS) |
+
+The app and macOS binaries are signed with a Developer ID and notarized by Apple when
+the release was built with signing secrets (the release notes and the workflow summary
+say which). All releases: [github.com/morajabi/poo/releases](https://github.com/morajabi/poo/releases).
 
 Then `poo setup` to pick your dev folders. Homebrew formula and cask are coming
 (`packaging/homebrew`).
@@ -247,6 +267,7 @@ release still publishes, with less in it.
 | `APPLE_ID` | Apple ID email used for notarization | Not notarized |
 | `APPLE_TEAM_ID` | 10-character team id | |
 | `APPLE_APP_PASSWORD` | App-specific password from appleid.apple.com | |
+| `APPLE_API_KEY_P8` / `APPLE_API_KEY_ID` / `APPLE_API_ISSUER` | Instead of the three above: an App Store Connect API key (`.p8`, base64), its key id and issuer id | |
 
 **Sparkle key**, once. `generate_keys` comes with Sparkle (after `swift build` in
 `app/`):
@@ -264,17 +285,37 @@ updates"); back it up, because losing it means shipped apps can only update agai
 through a Developer ID signed build. The public key does not need to be stored
 anywhere: the release derives it from the secret (`scripts/sparkle.sh pubkey`).
 
-**Developer ID** (optional): export the "Developer ID Application" certificate with its
-key from Keychain Access as a `.p12`, then
+**Developer ID signing and notarization** (optional; signs Poo.app, its bundled CLI
+and the macOS CLI binaries, notarizes both and staples the app):
+
+1. In Keychain Access > login > My Certificates, right-click "Developer ID Application:
+   Your Name (TEAMID)" and Export as `cert.p12` with a password. (No certificate yet:
+   Xcode > Settings > Accounts > Manage Certificates > + > Developer ID Application.)
+2. Notarization credentials, either:
+   - an app-specific password: appleid.apple.com > Sign-In and Security > App-Specific
+     Passwords, plus your Apple ID email and team id; or
+   - an App Store Connect API key: App Store Connect > Users and Access > Integrations >
+     Team Keys, role Developer; download `AuthKey_<id>.p8` and note the key id and issuer id.
+3. Store them:
 
 ```sh
 base64 -i cert.p12 | gh secret set MACOS_CERT_P12
-gh secret set MACOS_CERT_PASSWORD
+gh secret set MACOS_CERT_PASSWORD             # the export password
 gh secret set MACOS_SIGN_IDENTITY --body "Developer ID Application: Your Name (TEAMID)"
-gh secret set APPLE_ID
-gh secret set APPLE_TEAM_ID
-gh secret set APPLE_APP_PASSWORD
+# app-specific password route
+gh secret set APPLE_ID --body "you@example.com"
+gh secret set APPLE_TEAM_ID --body "TEAMID"
+gh secret set APPLE_APP_PASSWORD             # xxxx-xxxx-xxxx-xxxx
+# or the API key route
+base64 -i AuthKey_ABC123.p8 | gh secret set APPLE_API_KEY_P8
+gh secret set APPLE_API_KEY_ID --body "ABC123"
+gh secret set APPLE_API_ISSUER --body "<issuer uuid>"
+rm cert.p12
 ```
+
+Locally, `SIGN_IDENTITY="Developer ID Application: ..." ./scripts/build-app.sh` signs,
+and `NOTARY_PROFILE=<profile> scripts/notarize.sh dist/Poo.app.zip` notarizes with a
+profile saved by `xcrun notarytool store-credentials`.
 
 **Ad-hoc signed apps and Sparkle.** Sparkle 2 accepts an update when its EdDSA
 signature verifies against the running app's key and the new app's code signature is
