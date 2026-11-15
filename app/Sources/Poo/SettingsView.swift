@@ -7,6 +7,7 @@ struct SettingsView: View {
     var body: some View {
         TabView {
             GeneralSettings().tabItem { Label("General", systemImage: "gearshape") }
+            SafetySettings().tabItem { Label("Safety & backups", systemImage: "checkmark.shield") }
             AutomationSettings().tabItem { Label("Automation", systemImage: "clock.arrow.2.circlepath") }
             BucketSettings().tabItem { Label("Buckets", systemImage: "square.stack.3d.up") }
             RuleSettings().tabItem { Label("Rules", systemImage: "list.bullet.rectangle") }
@@ -241,8 +242,9 @@ struct AutomationSettings: View {
 
     var body: some View {
         Form {
+            GuardSection()
             Section {
-                ForEach(store.presets) { p in
+                ForEach(store.presets.filter { $0.id != "guard" }) { p in
                     let existing = store.schedules.first { $0.id == p.id }
                     Toggle(isOn: Binding(get: { existing?.schedule.enabled ?? false }, set: { on in
                         Task {
@@ -327,6 +329,7 @@ struct AgentSettings: View {
                 }
                 Button("Install for all detected agents") { Task { await store.configure(["integration", "install", "all"]) } }
             }
+            HooksSection()
             Section("Let your agent configure Poo") {
                 Text(Self.setupPrompt).font(.callout).textSelection(.enabled)
                 Button(copied ? "Copied" : "Copy prompt") {
@@ -337,6 +340,7 @@ struct AgentSettings: View {
             }
         }
         .formStyle(.grouped)
+        .task { await store.loadHooks() }
     }
 }
 
@@ -382,5 +386,204 @@ extension Color {
     var hexString: String? {
         guard let c = NSColor(self).usingColorSpace(.sRGB) else { return nil }
         return String(format: "#%02X%02X%02X", Int(c.redComponent * 255), Int(c.greenComponent * 255), Int(c.blueComponent * 255))
+    }
+}
+
+// MARK: - Safety & backups
+
+struct SafetySettings: View {
+    @Environment(Store.self) private var store
+
+    private var cfg: BackupConfig { store.backupConfig ?? BackupConfig() }
+
+    var body: some View {
+        Form {
+            if store.backupConfig == nil {
+                Section {
+                    Label("These settings need a newer poo command-line tool. Defaults are shown.", systemImage: "info.circle")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+            }
+            Section {
+                toggle("config_files", cfg.config_files ?? true,
+                       "Copy small ignored files like .env and Local.xcconfig before removing a worktree",
+                       "They are easy to lose and hard to recreate. Copies go to Backups.")
+                Picker(selection: Binding(get: { cfg.max_file_bytes ?? 1_000_000 }, set: { set("max_file_bytes", "\($0)") })) {
+                    Text("1 MB").tag(UInt64(1_000_000))
+                    Text("5 MB").tag(UInt64(5_000_000))
+                    Text("10 MB").tag(UInt64(10_000_000))
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Largest file to copy")
+                        Text("Bigger ignored files are usually build output or data that can be regenerated.").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .disabled(cfg.config_files == false)
+
+                toggle("stash_dirty", cfg.stash_dirty ?? true,
+                       "Stash uncommitted work before a forced worktree removal",
+                       "Find it later with git stash list in the main checkout.")
+                toggle("rescue_branches", cfg.rescue_branches ?? true,
+                       "Save detached commits to a poo/ branch",
+                       "Commits not on any branch would otherwise be lost when the worktree goes.")
+            } header: {
+                Text("Before cleaning")
+            }
+            Section("Deleting") {
+                toggle("use_trash", cfg.use_trash ?? false,
+                       "Move deleted folders to the Trash instead of deleting",
+                       "Safer, but the space only comes back when you empty the Trash.")
+            }
+            Section("Keeping backups") {
+                Picker(selection: Binding(get: { cfg.max_backup_bytes ?? 2_000_000_000 }, set: { set("max_backup_bytes", "\($0)") })) {
+                    Text("500 MB").tag(UInt64(500_000_000))
+                    Text("2 GB").tag(UInt64(2_000_000_000))
+                    Text("10 GB").tag(UInt64(10_000_000_000))
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Backup budget")
+                        Text("When backups grow past this, Poo drops the oldest file backups first.").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+
+                Picker(selection: Binding(get: { cfg.auto_prune_days ?? 90 }, set: { set("auto_prune_days", "\($0)") })) {
+                    Text("Never").tag(0)
+                    Text("30 days").tag(30)
+                    Text("90 days").tag(90)
+                    Text("180 days").tag(180)
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Prune backups after")
+                        Text("Never keeps every backup until you prune it in Backups.").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+
+                toggle("auto_prune_git", cfg.auto_prune_git ?? false,
+                       "Also drop poo's stashes and rescue branches after that many days",
+                       "Off keeps them in git until you delete them yourself.")
+                    .disabled((cfg.auto_prune_days ?? 90) == 0)
+            }
+        }
+        .formStyle(.grouped)
+        .disabled(store.backupConfig == nil)
+        .task { await store.loadBackupConfig() }
+    }
+
+    private func set(_ key: String, _ value: String) {
+        Task { await store.setBackup(key, value) }
+    }
+
+    private func toggle(_ key: String, _ on: Bool, _ title: String, _ detail: String) -> some View {
+        Toggle(isOn: Binding(get: { on }, set: { set(key, $0 ? "true" : "false") })) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                Text(detail).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func help(_ s: String) -> some View {
+        Text(s).font(.caption).foregroundStyle(.secondary)
+    }
+}
+
+// MARK: - Low-disk guard
+
+struct GuardSection: View {
+    @Environment(Store.self) private var store
+    @State private var below = "20G"
+    @State private var target = "50G"
+
+    private var entry: ScheduleEntry? { store.schedules.first { $0.id == "guard" } }
+
+    var body: some View {
+        Section {
+            Toggle(isOn: Binding(get: { entry?.schedule.enabled ?? false }, set: { on in
+                Task {
+                    if entry == nil {
+                        await store.setGuard(below: below, target: target, enabled: on)
+                    } else {
+                        await store.configure(["schedule", on ? "enable" : "disable", "guard"])
+                    }
+                }
+            })) {
+                Text("Clean up when the disk runs low")
+            }
+            HStack(spacing: 6) {
+                Text("When free space drops below")
+                sizePicker($below, ["10G", "20G", "30G", "50G"], current: entry?.schedule.when_free_below)
+                Text(", clean what's not in use until")
+                sizePicker($target, ["30G", "50G", "75G", "100G"], current: entry?.schedule.target_free)
+                Text("is free.")
+            }
+            .disabled(entry?.schedule.enabled == false)
+            if let l = entry?.last_run {
+                Text("Last ran \(Fmt.ago(Date(timeIntervalSince1970: TimeInterval(l.at)))): \(l.status), freed \(Fmt.bytes(l.freed_bytes))")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Low-disk guard")
+        } footer: {
+            Text("Checks every minute while Poo runs (and every 30 minutes in the background). Only cleans items nothing is using, oldest and cheapest first.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .onAppear {
+            if let b = entry?.schedule.when_free_below { below = b }
+            if let t = entry?.schedule.target_free { target = t }
+        }
+    }
+
+    private func sizePicker(_ value: Binding<String>, _ options: [String], current: String?) -> some View {
+        Picker("", selection: Binding(get: { value.wrappedValue }, set: { new in
+            value.wrappedValue = new
+            Task { await store.setGuard(below: below, target: target, enabled: entry?.schedule.enabled ?? true) }
+        })) {
+            ForEach(Array(Set(options + [value.wrappedValue])).sorted { (LowDiskGuard.parseThreshold($0, total: 1_000_000_000_000) ?? 0) < (LowDiskGuard.parseThreshold($1, total: 1_000_000_000_000) ?? 0) }, id: \.self) { o in
+                Text(o.hasSuffix("G") ? o.dropLast() + " GB" : o).tag(o)
+            }
+        }
+        .labelsHidden()
+        .fixedSize()
+    }
+}
+
+// MARK: - Agent hooks
+
+struct HooksSection: View {
+    @Environment(Store.self) private var store
+
+    var body: some View {
+        Section {
+            if let h = store.hooks {
+                ForEach(h.targets.filter { $0.detected ?? true }) { t in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(t.name)
+                            if let f = t.file { Text(f).font(.caption).foregroundStyle(.secondary) }
+                        }
+                        Spacer()
+                        if t.installed == true {
+                            Label("Installed", systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(.caption)
+                        }
+                        Button(t.installed == true ? "Remove" : "Install") {
+                            Task { await store.setHook(t.id, installed: t.installed != true) }
+                        }
+                    }
+                }
+                Picker("Clean up", selection: Binding(get: { h.on_agent_done ?? "landed" }, set: { v in Task { await store.setHooksMode(v) } })) {
+                    Text("Only when the worktree's work landed in main").tag("landed")
+                    Text("Whenever an agent session ends in a worktree").tag("always")
+                    Text("Off").tag("off")
+                }
+            } else {
+                Text(store.hooksAvailable ? "Loading…" : "Agent hooks need a newer poo command-line tool.")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Clean up after agents")
+        } footer: {
+            Text("Optional. When an agent finishes in a worktree, Poo cleans that worktree's build output. It never touches the code.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
     }
 }

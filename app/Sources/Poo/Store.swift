@@ -16,6 +16,16 @@ final class Store {
     var roots: RootsInfo?
     var schedules: [ScheduleEntry] = []
     var presets: [SchedulePreset] = []
+    var backups: BackupList?
+    /// False when the CLI does not know `poo backups` yet.
+    var backupsAvailable = true
+    var backupConfig: BackupConfig?
+    var backupNote: String?
+    var hooks: HookStatus?
+    var hooksAvailable = true
+    /// Free space is below the low-disk guard's threshold.
+    var lowDisk = false
+    @ObservationIgnored private var diskGuard: LowDiskGuard?
 
     /// Item ids the user ticked in the window.
     var selection: Set<String> = []
@@ -24,6 +34,8 @@ final class Store {
         // First frame from the cached report; rescan in the background when stale.
         report = PooCLI.cachedReport()
         Task { await refreshIfStale() }
+        diskGuard = LowDiskGuard(store: self)
+        diskGuard?.start()
     }
 
     var freeText: String {
@@ -74,13 +86,12 @@ final class Store {
         }
     }
 
-    func clean(ids: [String], mode: CleanMode = .standard) async {
+    func clean(ids: [String], mode: CleanMode = .safe) async {
         guard !ids.isEmpty else { return }
         busy = true
         defer { busy = false }
         var args = ["clean"] + ids + ["--yes"]
-        if mode == .force { args.append("--force") }
-        if mode == .danger { args.append("--danger") }
+        if let flag = mode.flag { args.append(flag) }
         await runClean(args)
     }
 
@@ -104,6 +115,97 @@ final class Store {
         // The CLI already removed cleaned items from the cached report.
         report = PooCLI.cachedReport() ?? report
         selection.removeAll()
+    }
+
+    func toggle(_ id: String) {
+        if selection.contains(id) { selection.remove(id) } else { selection.insert(id) }
+    }
+
+    func select(_ items: [Item], _ on: Bool) {
+        let ids = items.filter(\.isCleanable).map(\.id)
+        if on { selection.formUnion(ids) } else { selection.subtract(ids) }
+    }
+
+    // MARK: Backups (made by the CLI before it removes worktrees, stashes, branches)
+
+    func loadBackups() async {
+        do {
+            backups = try await PooCLI.json(BackupList.self, ["backups", "ls"])
+            backupsAvailable = true
+        } catch {
+            backups = nil
+            backupsAvailable = false
+        }
+    }
+
+    func pruneBackups(ids: [String]) async {
+        guard !ids.isEmpty else { return }
+        await backupCommand(["backups", "prune"] + ids + ["--yes"], done: "Pruned \(ids.count) backup\(ids.count == 1 ? "" : "s")")
+    }
+
+    func pruneBackups(olderThanDays days: Int) async {
+        await backupCommand(["backups", "prune", "--older-than", "\(days)d", "--yes"], done: "Pruned backups older than \(days) days")
+    }
+
+    func restoreBackup(_ id: String) async {
+        await backupCommand(["backups", "restore", id, "--yes"], done: "Restored backup \(id)")
+    }
+
+    private func backupCommand(_ args: [String], done: String) async {
+        busy = true
+        defer { busy = false }
+        do {
+            _ = try await PooCLI.run(args)
+            backupNote = done
+        } catch {
+            self.error = error.localizedDescription
+        }
+        await loadBackups()
+    }
+
+    func loadBackupConfig() async {
+        backupConfig = try? await PooCLI.json(BackupConfig.self, ["config", "get", "backup"])
+    }
+
+    func setBackup(_ key: String, _ value: String) async {
+        do {
+            _ = try await PooCLI.run(["config", "set", "backup.\(key)", value])
+        } catch {
+            self.error = error.localizedDescription
+        }
+        await loadBackupConfig()
+    }
+
+    // MARK: Agent hooks
+
+    func loadHooks() async {
+        do {
+            hooks = try await PooCLI.json(HookStatus.self, ["hooks", "status"])
+            hooksAvailable = true
+        } catch {
+            hooks = nil
+            hooksAvailable = false
+        }
+    }
+
+    func setHook(_ id: String, installed: Bool) async {
+        await configure(["hooks", installed ? "install" : "uninstall", id])
+        await loadHooks()
+    }
+
+    func setHooksMode(_ value: String) async {
+        await configure(["config", "set", "hooks.on_agent_done", value])
+        await loadHooks()
+    }
+
+    /// Adds or replaces the low-disk guard schedule.
+    func setGuard(below: String, target: String, enabled: Bool) async {
+        if schedules.contains(where: { $0.id == "guard" }) {
+            _ = try? await PooCLI.run(["schedule", "rm", "guard"])
+        }
+        await configure(["schedule", "add", "guard", "--preset", "guard", "--when-free-below", below, "--target-free", target])
+        if !enabled { await configure(["schedule", "disable", "guard"]) }
+        await loadSchedules()
     }
 
     // MARK: Configuration (all through the CLI so config.toml stays the source of truth)

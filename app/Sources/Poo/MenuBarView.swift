@@ -1,87 +1,103 @@
 import SwiftUI
 
+/// The menu bar panel: free space, buckets by size, and a way into the window.
+/// Cleaning happens in the window, where there is room to review it.
 struct MenuBarView: View {
     @Environment(Store.self) private var store
     @Environment(Updater.self) private var updater
     @Environment(Navigation.self) private var nav
     @Environment(\.openWindow) private var openWindow
     @Environment(\.openSettings) private var openSettings
-    @State private var confirming: PlanSummary?
-    @State private var emergencyGB: Double = 20
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 0) {
             header
+                .padding(.horizontal, 14)
+                .padding(.top, 12)
+                .padding(.bottom, 10)
+            Divider()
             if let r = store.report {
-                DiskBar(report: r)
-                HStack(alignment: .center, spacing: 14) {
-                    BucketDonut(buckets: r.visibleBuckets, total: r.total_bytes) { b in
-                        open(.bucket(b.id))
-                    }
-                    .frame(width: 118, height: 118)
-                    VStack(spacing: 5) {
-                        ForEach(r.visibleBuckets.sorted { $0.bytes > $1.bytes }.prefix(6)) { b in
-                            Button { open(.bucket(b.id)) } label: { BucketLegendRow(bucket: b) }
-                                .buttonStyle(.plain)
-                                .font(.callout)
-                        }
-                    }
-                }
-                Divider()
-                plans(r)
-                if let last = store.lastClean, !last.dry_run {
-                    Label("Freed \(Fmt.bytes(last.freed_bytes)) · \(last.cleaned) cleaned, \(last.skipped) skipped", systemImage: "checkmark.circle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.green)
-                }
+                buckets(r)
             } else if store.scanning {
                 scanningView
             } else {
                 ContentUnavailableView("No scan yet", systemImage: "internaldrive", description: Text("Scan to see what takes space."))
-            }
-            if let e = store.error {
-                Text(e).font(.caption).foregroundStyle(.red).lineLimit(3)
-            }
-            if let next = store.schedules.filter({ $0.schedule.enabled }).compactMap({ e in e.next_run.map { (e, $0) } }).min(by: { $0.1 < $1.1 }) {
-                Label("Auto-clean \(next.0.id) \(Fmt.ago(Date(timeIntervalSince1970: TimeInterval(next.1))))\(next.0.last_run.map { " · last freed \(Fmt.bytes($0.freed_bytes))" } ?? "")", systemImage: "clock.arrow.2.circlepath")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 140)
             }
             Divider()
+            VStack(alignment: .leading, spacing: 8) {
+                Button { open(.overview) } label: {
+                    Text("Open Poo").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .keyboardShortcut(.defaultAction)
+                status
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            Divider()
             footer
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
         }
-        .padding(16)
-        .frame(width: 380)
+        .frame(width: 340)
         .task { await store.loadSchedules() }
-        .sheet(item: $confirming) { p in
-            CleanConfirmView(planID: p.id, free: p.id == "emergency" ? UInt64(emergencyGB * 1e9) : nil)
-                .environment(store)
-        }
     }
 
     private var header: some View {
-        HStack {
-            Text("poo").font(.headline)
-            if let r = store.report {
-                Text("scanned \(Fmt.ago(r.scannedAt))").font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            if store.scanning {
-                ProgressView().controlSize(.small)
-                if let p = store.progress {
-                    Text(Fmt.bytes(p.bytes)).font(.caption).monospacedDigit().foregroundStyle(.secondary)
+        HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                if let r = store.report {
+                    Text("\(Fmt.bytes(r.disk.free)) free")
+                        .font(.title3.weight(.semibold))
+                        .monospacedDigit()
+                    HStack(spacing: 4) {
+                        if r.notInUseBytes > 0 {
+                            Text("\(Fmt.bytes(r.notInUseBytes)) not in use")
+                            Text("·").foregroundStyle(.tertiary)
+                        }
+                        Text("scanned \(Fmt.ago(r.scannedAt))").foregroundStyle(.tertiary)
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                } else {
+                    Text("Poo").font(.title3.weight(.semibold))
                 }
+            }
+            Spacer(minLength: 8)
+            if store.scanning {
+                HStack(spacing: 6) {
+                    if let p = store.progress {
+                        Text(Fmt.bytes(p.bytes)).font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                    }
+                    ProgressView().controlSize(.small)
+                }
+                .help("Scanning…")
             } else {
-                Button { Task { await store.scan() } } label: { Image(systemName: "arrow.clockwise") }
-                    .buttonStyle(.borderless)
-                    .help("Rescan")
+                Button { Task { await store.scan() } } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .help("Rescan")
             }
         }
+    }
+
+    private func buckets(_ r: Report) -> some View {
+        VStack(spacing: 1) {
+            ForEach(r.visibleBuckets.sorted { $0.bytes > $1.bytes }) { b in
+                Button { open(.bucket(b.id)) } label: { MenuBucketRow(bucket: b) }
+                    .buttonStyle(MenuRowStyle())
+            }
+        }
+        .padding(.horizontal, 5)
+        .padding(.vertical, 5)
     }
 
     private var scanningView: some View {
         VStack(alignment: .leading, spacing: 6) {
-            ProgressView()
+            ProgressView().controlSize(.small)
             if let p = store.progress {
                 Text("\(p.phase.capitalized)… \(Fmt.bytes(p.bytes)) in \(p.files) files")
                     .font(.callout)
@@ -89,47 +105,41 @@ struct MenuBarView: View {
             }
         }
         .frame(maxWidth: .infinity, minHeight: 120)
+        .padding(.horizontal, 14)
     }
 
     @ViewBuilder
-    private func plans(_ r: Report) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Recommended").font(.subheadline.weight(.semibold))
-            ForEach(r.plans) { p in
-                HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(p.name).font(.callout.weight(.medium))
-                        Text(p.description).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                    }
-                    Spacer()
-                    if p.id == "emergency" {
-                        Stepper(value: $emergencyGB, in: 5...500, step: 5) {
-                            Text("\(Int(emergencyGB)) GB").monospacedDigit().font(.callout)
-                        }
-                        .fixedSize()
-                    } else {
-                        Text(Fmt.bytes(p.bytes)).monospacedDigit().font(.callout)
-                    }
-                    Button("Clean…") { confirming = p }
-                        .disabled(store.busy || (p.id != "emergency" && p.count == 0))
-                }
-            }
+    private var status: some View {
+        if let last = store.lastClean, !last.dry_run {
+            Label("Freed \(Fmt.bytes(last.freed_bytes)) · \(last.cleaned) cleaned", systemImage: "checkmark.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        if let e = store.error {
+            Label(e, systemImage: "exclamationmark.triangle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(3)
+        }
+        if let next = store.schedules.filter({ $0.schedule.enabled }).compactMap({ e in e.next_run.map { (e, $0) } }).min(by: { $0.1 < $1.1 }) {
+            Label("Auto-clean \(next.0.id) \(Fmt.ago(Date(timeIntervalSince1970: TimeInterval(next.1))))\(next.0.last_run.map { " · last freed \(Fmt.bytes($0.freed_bytes))" } ?? "")", systemImage: "clock.arrow.2.circlepath")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
     private var footer: some View {
         HStack {
-            Button("Open Poo") { open(.overview) }
             Button("Settings…") {
                 NSApp.activate(ignoringOtherApps: true)
                 openSettings()
             }
             if updater.available != nil {
                 Button("Update") { Task { await updater.install() } }
-                    .foregroundStyle(.blue)
             }
             Spacer()
             Button("Quit") { NSApp.terminate(nil) }
+                .keyboardShortcut("q")
         }
         .buttonStyle(.borderless)
         .font(.callout)
@@ -142,104 +152,55 @@ struct MenuBarView: View {
     }
 }
 
-/// Shows exactly what a plan or a selection will clean before doing it, with every risk
-/// the chosen mode accepts spelled out.
-struct CleanConfirmView: View {
-    @Environment(Store.self) private var store
-    @Environment(\.dismiss) private var dismiss
-    var planID: String?
-    var free: UInt64?
-    var items: [Item]? = nil
-    @State private var plan: PlanResult?
-    @State private var loading = true
-    @State private var mode: CleanMode = .standard
-    @State private var dangerAck = false
-
-    private var list: [Item] { items ?? plan?.items ?? [] }
-    private var needed: CleanMode { CleanMode.needed(for: list) }
-    private var allowed: [Item] {
-        list.filter { i in (i.risks ?? []).allSatisfy { r in (CleanMode(rawValue: r.level)?.rank ?? 0) <= mode.rank } }
-    }
-    private var total: UInt64 { allowed.reduce(0) { $0 + $1.total_bytes } }
+struct MenuBucketRow: View {
+    var bucket: BucketSummary
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(plan?.name ?? "Clean selected items").font(.title3.weight(.semibold))
-            if let d = plan?.description { Text(d).foregroundStyle(.secondary) }
-            if loading && items == nil {
-                ProgressView().frame(maxWidth: .infinity, minHeight: 200)
-            } else if list.isEmpty {
-                Text("Nothing to clean.").foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 120)
-            } else {
-                List(list) { i in
-                    let blocked = !allowed.contains(i)
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack {
-                            Text(i.name).lineLimit(1).truncationMode(.middle)
-                            Spacer()
-                            TierBadge(tier: i.tier)
-                            Text(Fmt.bytes(i.total_bytes)).monospacedDigit().frame(width: 72, alignment: .trailing)
-                        }
-                        Text(i.reasons.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                        ForEach((i.risks ?? []).filter { $0.level != "standard" }, id: \.tag) { r in
-                            Label(r.message, systemImage: r.level == "danger" ? "exclamationmark.octagon.fill" : "exclamationmark.triangle.fill")
-                                .font(.caption)
-                                .foregroundStyle(r.level == "danger" ? .red : .orange)
-                        }
-                    }
-                    .opacity(blocked ? 0.45 : 1)
-                }
-                .frame(minHeight: 260)
-                if needed != .standard {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Picker("Mode", selection: $mode) {
-                            Text("Standard").tag(CleanMode.standard)
-                            Text("Force").tag(CleanMode.force)
-                            if needed == .danger { Text("Danger").tag(CleanMode.danger) }
-                        }
-                        .pickerStyle(.segmented)
-                        .fixedSize()
-                        Text(modeHelp).font(.caption).foregroundStyle(.secondary)
-                        if mode == .danger {
-                            Toggle("I understand these items may hold work, data or running builds", isOn: $dangerAck)
-                                .toggleStyle(.checkbox).font(.caption)
-                        }
-                    }
+        let unused = bucket.notInUseBytes
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: bucket.symbol)
+                .foregroundStyle(bucket.swiftColor)
+                .font(.body)
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(bucket.name)
+                    .fixedSize(horizontal: false, vertical: true)
+                if unused > 0 {
+                    Text("\(Fmt.bytes(unused)) not in use")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
-            HStack {
-                Text("\(allowed.count) of \(list.count) items · \(Fmt.bytes(total))").foregroundStyle(.secondary)
-                Spacer()
-                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("Clean \(Fmt.bytes(total))", role: .destructive) {
-                    Task {
-                        if items != nil {
-                            await store.clean(ids: allowed.map(\.id), mode: mode)
-                        } else if let planID {
-                            await store.clean(plan: planID, free: free)
-                        }
-                        dismiss()
-                    }
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(allowed.isEmpty || store.busy || (mode == .danger && !dangerAck))
-            }
+            .layoutPriority(1)
+            Spacer(minLength: 6)
+            Text(Fmt.bytes(bucket.bytes))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .fixedSize()
         }
-        .padding(20)
-        .frame(width: 600)
-        .task {
-            if items == nil, let planID {
-                plan = await store.plan(planID, free: free)
-            }
-            loading = false
-        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .contentShape(Rectangle())
+    }
+}
+
+/// Hover highlight like the rows in Control Center and other menu bar panels.
+struct MenuRowStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        MenuRow(configuration: configuration)
     }
 
-    private var modeHelp: String {
-        switch mode {
-        case .standard: return "Items with warnings are skipped. Choose Force to include them."
-        case .force: return "Includes recently used items, checkouts an agent has open, and worktrees with uncommitted work (Poo stashes it first; see git stash list)."
-        case .danger: return "Also running builds, data, protected items and detached commits (saved to a poo/ branch first). Use with care."
+    private struct MenuRow: View {
+        var configuration: Configuration
+        @State private var hovering = false
+
+        var body: some View {
+            configuration.label
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color.primary.opacity(configuration.isPressed ? 0.12 : hovering ? 0.07 : 0))
+                )
+                .onHover { hovering = $0 }
         }
     }
 }

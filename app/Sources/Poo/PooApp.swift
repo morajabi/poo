@@ -38,6 +38,13 @@ struct PooApp: App {
         }
         .windowResizability(.contentSize)
 
+        // `Poo --preview-confirm` shows the review sheet for the `stale` plan in a window (screenshots).
+        Window("Poo Review", id: "confirm-preview") {
+            CleanConfirmView(planID: "stale", free: nil)
+                .environment(store)
+        }
+        .windowResizability(.contentSize)
+
         Settings {
             SettingsView()
                 .environment(store)
@@ -51,14 +58,60 @@ struct PooApp: App {
 @Observable
 final class Navigation {
     var section: Section? = .overview
+    /// Browse filters live here so other views can deep-link into Browse.
+    var browse = BrowseFilter()
 
     enum Section: Hashable {
         case overview
-        case bucket(String)
+        case browse
         case projects
         case worktrees
-        case history
+        case backups
+        case bucket(String)
     }
+
+    /// Opens Browse narrowed to a bucket, group or status.
+    func browse(bucket: String? = nil, group: String? = nil, statuses: Set<ItemStatus> = []) {
+        browse.bucket = bucket
+        browse.group = group
+        browse.statuses = statuses
+        browse.query = ""
+        section = .browse
+    }
+}
+
+struct BrowseFilter: Equatable {
+    enum Grouping: String, CaseIterable, Identifiable {
+        case type, project, status, none
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .type: return "Type"
+            case .project: return "Project"
+            case .status: return "Status"
+            case .none: return "None"
+            }
+        }
+    }
+
+    enum Sorting: String, CaseIterable, Identifiable {
+        case size, lastUsed, name
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .size: return "Size"
+            case .lastUsed: return "Last used"
+            case .name: return "Name"
+            }
+        }
+    }
+
+    var grouping: Grouping = .type
+    var sorting: Sorting = .size
+    var query = ""
+    var statuses: Set<ItemStatus> = []
+    var bucket: String?
+    var group: String?
 }
 
 struct MenuBarLabel: View {
@@ -68,6 +121,10 @@ struct MenuBarLabel: View {
     var body: some View {
         HStack(spacing: 3) {
             Image(systemName: store.scanning ? "arrow.triangle.2.circlepath" : "internaldrive")
+            if store.lowDisk {
+                Image(systemName: "exclamationmark.circle")
+                    .help("Free space is below the low-disk guard's threshold")
+            }
             if let r = store.report {
                 Text(Fmt.bytes(r.disk.free))
                     .monospacedDigit()
@@ -79,6 +136,10 @@ struct MenuBarLabel: View {
             let firstLaunch = !UserDefaults.standard.bool(forKey: "launchedBefore")
             if CommandLine.arguments.contains("--preview-menu") {
                 openWindow(id: "menu-preview")
+                NSApp.activate(ignoringOtherApps: true)
+            }
+            if CommandLine.arguments.contains("--preview-confirm") {
+                openWindow(id: "confirm-preview")
                 NSApp.activate(ignoringOtherApps: true)
             }
             if CommandLine.arguments.contains("--window") || firstLaunch {

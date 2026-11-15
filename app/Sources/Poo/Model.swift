@@ -7,33 +7,82 @@ enum Tier: String, Codable, CaseIterable, Identifiable {
     case junk, cold, idle, warm, hot, review, protected
     var id: String { rawValue }
 
-    var label: String { rawValue.capitalized }
+    var label: String {
+        switch self {
+        case .junk: return "Junk"
+        case .cold: return "Unused"
+        case .idle: return "Idle"
+        case .warm: return "In use"
+        case .hot: return "Active now"
+        case .review: return "Check first"
+        case .protected: return "Kept"
+        }
+    }
 
+    /// Calm colors: cleanable tiers share a soft green/teal family, in-use tiers are neutral.
     var color: Color {
         switch self {
-        case .junk: return .yellow
+        case .junk: return Color(red: 0.20, green: 0.62, blue: 0.50)
         case .cold: return .teal
-        case .idle: return .cyan
-        case .warm: return .purple
-        case .hot: return .red
-        case .review: return .blue
-        case .protected: return .green
+        case .idle: return Color(red: 0.30, green: 0.62, blue: 0.62)
+        case .warm, .hot, .protected: return .secondary
+        case .review: return Color(red: 0.33, green: 0.52, blue: 0.85)
+        }
+    }
+
+    var symbol: String? {
+        switch self {
+        case .protected: return "lock.fill"
+        case .hot: return "bolt.fill"
+        default: return nil
         }
     }
 
     var explanation: String {
         switch self {
-        case .junk: return "Nothing to rebuild"
-        case .cold: return "Unused for days, orphaned, or its work already landed"
-        case .idle: return "Nothing is using it right now; costs a rebuild if you return"
-        case .warm: return "In active use; costs a rebuild or redownload"
-        case .hot: return "In use right now"
-        case .review: return "Needs a human look"
-        case .protected: return "Never cleaned automatically"
+        case .junk: return "Leftovers nothing needs. Nothing to rebuild."
+        case .cold: return "Unused for days, orphaned, or its work already landed. Safe to clean."
+        case .idle: return "Nothing is using it right now. Costs a rebuild if you come back."
+        case .warm: return "You are working with this. Poo leaves it alone unless you include items in use."
+        case .hot: return "A build or app is using this right now. Poo leaves it alone."
+        case .review: return "Poo isn't sure about this one. Take a look before cleaning."
+        case .protected: return "Kept on purpose. Poo never cleans it on its own."
+        }
+    }
+
+    var status: ItemStatus {
+        switch self {
+        case .junk, .cold, .idle: return .notInUse
+        case .warm, .hot: return .inUse
+        case .review, .protected: return .needsLook
         }
     }
 
     var rank: Int { Tier.allCases.firstIndex(of: self) ?? 0 }
+}
+
+/// The three plain-language states the app shows instead of seven tiers.
+enum ItemStatus: String, CaseIterable, Identifiable, Hashable {
+    case notInUse, inUse, needsLook
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .notInUse: return "Not in use"
+        case .inUse: return "In use"
+        case .needsLook: return "Needs a look"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .notInUse: return "moon.zzz"
+        case .inUse: return "hammer"
+        case .needsLook: return "eye"
+        }
+    }
+
+    var tiers: [Tier] { Tier.allCases.filter { $0.status == self } }
 }
 
 struct DiskInfo: Codable, Hashable {
@@ -65,6 +114,8 @@ struct BucketSummary: Codable, Hashable, Identifiable {
 
     var swiftColor: Color { Color(hex: color) }
     func bytes(for tier: Tier) -> UInt64 { tiers[tier.rawValue] ?? 0 }
+    func bytes(for status: ItemStatus) -> UInt64 { status.tiers.reduce(0) { $0 + bytes(for: $1) } }
+    var notInUseBytes: UInt64 { bytes(for: .notInUse) }
 }
 
 struct PlanSummary: Codable, Hashable, Identifiable {
@@ -85,17 +136,54 @@ struct Risk: Codable, Hashable {
     var tag: String
     var level: String
     var message: String
+
+    var mode: CleanMode? { CleanMode(level: level) }
+    var isWarning: Bool { (mode ?? .safe) != .safe }
+    var isDangerous: Bool { mode == .dangerous }
 }
 
+/// How much risk a clean may take; mirrors the CLI's risk levels.
 enum CleanMode: String, CaseIterable, Identifiable {
-    case standard, force, danger
+    case safe, inUse = "in-use", dangerous
     var id: String { rawValue }
     var rank: Int { CleanMode.allCases.firstIndex(of: self) ?? 0 }
+
+    /// Accepts the old level names too ("standard", "force", "danger").
+    init?(level: String) {
+        switch level {
+        case "safe", "standard": self = .safe
+        case "in-use", "force": self = .inUse
+        case "dangerous", "danger": self = .dangerous
+        default: return nil
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .safe: return "Only safe items"
+        case .inUse: return "Include items in use"
+        case .dangerous: return "Dangerously include protected"
+        }
+    }
+
+    var help: String {
+        switch self {
+        case .safe: return "Cleans only what nothing is using. Anything with a warning is skipped."
+        case .inUse: return "Also cleans recently used items and checkouts an agent has open; uncommitted work is stashed first."
+        case .dangerous: return "Also running builds, data and protected items; detached commits are saved to a poo/ branch first."
+        }
+    }
+
+    var flag: String? {
+        switch self {
+        case .safe: return nil
+        case .inUse: return "--include-in-use"
+        case .dangerous: return "--dangerously-include-protected"
+        }
+    }
+
     static func needed(for items: [Item]) -> CleanMode {
-        let levels = items.flatMap { $0.risks ?? [] }.map(\.level)
-        if levels.contains("danger") { return .danger }
-        if levels.contains("force") { return .force }
-        return .standard
+        items.flatMap { $0.risks ?? [] }.compactMap(\.mode).max { $0.rank < $1.rank } ?? .safe
     }
 }
 
@@ -126,7 +214,11 @@ struct Item: Codable, Hashable, Identifiable {
     var action: ItemAction
     var risks: [Risk]?
     var children: [Child]?
+    /// What poo does before or while cleaning this item (backups, stashes, Trash).
+    var safeguards: [String]?
 
+    var status: ItemStatus { tier.status }
+    var isCleanable: Bool { action.kind != "none" }
     var isVirtual: Bool { path.contains("://") }
     var lastUsedDate: Date? { last_used.map { Date(timeIntervalSince1970: TimeInterval($0)) } }
     var isWorktree: Bool { action.kind == "worktree-remove" }
@@ -170,6 +262,10 @@ struct Report: Codable {
 
     var scannedAt: Date { Date(timeIntervalSince1970: TimeInterval(scanned_at)) }
     var visibleBuckets: [BucketSummary] { buckets.filter { !$0.hidden && $0.count > 0 } }
+    /// Bytes nothing is using right now (junk, cold and idle) across visible buckets.
+    var notInUseBytes: UInt64 { visibleBuckets.reduce(0) { $0 + $1.notInUseBytes } }
+    func bytes(for status: ItemStatus) -> UInt64 { visibleBuckets.reduce(0) { $0 + $1.bytes(for: status) } }
+    func plan(_ id: String) -> PlanSummary? { plans.first { $0.id == id } }
 }
 
 struct ScanProgress: Codable {
@@ -316,6 +412,76 @@ struct IntegrationStatus: Codable {
 struct RootsInfo: Codable {
     var roots: [String]
     var detected: Bool
+}
+
+struct Backup: Codable, Identifiable, Hashable {
+    var id: String
+    var at: Int64
+    var kind: String
+    var label: String?
+    var source: String?
+    var item: String?
+    var path: String?
+    var repo: String?
+    var ref: String?
+    var files: UInt64?
+    var bytes: UInt64?
+    var exists: Bool?
+
+    var date: Date { Date(timeIntervalSince1970: TimeInterval(at)) }
+    var title: String { label ?? source.map { URL(fileURLWithPath: $0).lastPathComponent } ?? id }
+
+    var symbol: String {
+        switch kind {
+        case "files": return "doc.on.doc"
+        case "stash": return "tray.and.arrow.down"
+        case "branch": return "arrow.triangle.branch"
+        default: return "archivebox"
+        }
+    }
+
+    var kindLabel: String {
+        switch kind {
+        case "files": return "Config files"
+        case "stash": return "Stash"
+        case "branch": return "Branch"
+        default: return kind.capitalized
+        }
+    }
+}
+
+struct BackupList: Codable {
+    var backups: [Backup]
+    var total_bytes: UInt64?
+    var dir: String?
+    var budget_bytes: UInt64?
+    var auto_prune_days: Int?
+}
+
+/// `[backup]` in config.toml. Defaults mirror the CLI's.
+struct BackupConfig: Codable, Equatable {
+    var config_files: Bool? = true
+    var max_file_bytes: UInt64? = 1_000_000
+    var max_total_bytes: UInt64? = 50_000_000
+    var max_backup_bytes: UInt64? = 2_000_000_000
+    var stash_dirty: Bool? = true
+    var rescue_branches: Bool? = true
+    var use_trash: Bool? = false
+    var auto_prune_days: Int? = 90
+    var auto_prune_git: Bool? = false
+}
+
+struct HookTarget: Codable, Identifiable, Hashable {
+    var id: String
+    var name: String
+    var detected: Bool?
+    var installed: Bool?
+    var file: String?
+}
+
+struct HookStatus: Codable {
+    var targets: [HookTarget]
+    var on_agent_done: String?
 }
 
 // MARK: - Formatting
