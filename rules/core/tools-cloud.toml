@@ -1,0 +1,213 @@
+# Cloud, infrastructure and CI command-line tools.
+# Only caches, logs and downloads: credential folders (~/.aws, ~/.kube, gcloud's
+# credential databases, tokens in ~/.fly and ~/.azure) are never listed, and the safety
+# floor refuses ~/.aws and ~/.kube anyway.
+
+[[rule]]
+id = "gcloud.logs"
+name = "gcloud logs"
+bucket = "junk"
+group = "Logs"
+kind = "path"
+paths = ["~/.config/gcloud/logs"]
+cost = "none"
+contents = true
+tags = ["cloud", "gcloud", "logs"]
+stacks = ["cloud", "gcp"]
+description = "One log file per gcloud command, kept for 30 days by default."
+
+[[rule]]
+id = "gcloud.component-backups"
+name = "gcloud component backups"
+bucket = "caches"
+group = "Cloud CLIs"
+kind = "path"
+paths = [
+  "~/google-cloud-sdk/.install/.backup",
+  "~/google-cloud-sdk/.install/.download",
+  "/opt/homebrew/Caskroom/gcloud-cli/*/google-cloud-sdk/.install/.backup",
+  "/opt/homebrew/Caskroom/google-cloud-sdk/*/google-cloud-sdk/.install/.backup",
+]
+system = true
+cost = "none"
+min_age_days = 1
+tags = ["cloud", "gcloud", "old-versions", "staging"]
+stacks = ["cloud", "gcp"]
+description = "The copy of the previous Cloud SDK that `gcloud components update` keeps for rollback, and its download staging."
+
+[[rule]]
+id = "azure.logs"
+name = "Azure CLI logs"
+bucket = "junk"
+group = "Logs"
+kind = "path"
+paths = ["~/.azure/logs", "~/.azure/telemetry"]
+cost = "none"
+contents = true
+tags = ["cloud", "azure", "logs"]
+stacks = ["cloud", "azure"]
+description = "Command logs and queued telemetry of the Azure CLI; tokens in ~/.azure are untouched."
+
+[[rule]]
+id = "firebase.emulators"
+name = "Firebase emulator downloads"
+bucket = "caches"
+group = "Cloud CLIs"
+kind = "path"
+paths = ["~/.cache/firebase/emulators"]
+cost = "redownload"
+warm_days = 30
+rebuild = "firebase emulators:start downloads them again"
+tags = ["cloud", "firebase", "cache"]
+stacks = ["cloud", "firebase"]
+description = "Emulator JARs and binaries the Firebase CLI downloads per version."
+
+[[rule]]
+id = "wrangler.logs"
+name = "Wrangler logs"
+bucket = "junk"
+group = "Logs"
+kind = "path"
+paths = ["~/Library/Preferences/.wrangler/logs", "~/.wrangler/logs", "~/.config/.wrangler/logs"]
+cost = "none"
+contents = true
+tags = ["cloud", "cloudflare", "wrangler", "logs"]
+stacks = ["cloud", "cloudflare"]
+description = "Debug logs Cloudflare's wrangler writes for every command."
+
+[[rule]]
+id = "pulumi.plugins"
+name = "Pulumi plugins"
+bucket = "caches"
+group = "Cloud CLIs"
+kind = "path"
+paths = ["~/.pulumi/plugins"]
+each = true
+cost = "redownload"
+warm_days = 30
+rebuild = "pulumi plugin install (or the next pulumi up)"
+tags = ["cloud", "infra", "pulumi", "plugins", "old-versions"]
+stacks = ["cloud", "pulumi"]
+description = "Provider and language plugins Pulumi downloads, one per version, so upgrades leave old ones behind."
+recommend = "`pulumi plugin rm --all` and the next `pulumi up` fetching what it needs is the tidy way."
+
+[[rule]]
+id = "terraform.xdg-cache"
+name = "Terraform cache folder"
+bucket = "caches"
+group = "Cloud CLIs"
+kind = "path"
+paths = ["~/.cache/terraform"]
+cost = "redownload"
+warm_days = 30
+rebuild = "terraform init"
+tags = ["cloud", "infra", "terraform", "cache"]
+stacks = ["terraform"]
+description = "A provider cache many setups point TF_PLUGIN_CACHE_DIR at."
+
+[[rule]]
+id = "terragrunt.cache"
+name = "Terragrunt caches"
+bucket = "deps"
+group = "Terraform"
+kind = "artifact"
+names = [".terragrunt-cache"]
+cost = "redownload"
+warm_days = 14
+rebuild = "terragrunt init"
+tags = ["cloud", "infra", "terraform", "terragrunt", "cache"]
+stacks = ["terraform"]
+description = "Module and provider copies Terragrunt downloads next to each terragrunt.hcl."
+
+[[rule]]
+id = "packer.cache"
+name = "Packer download cache"
+bucket = "caches"
+group = "Cloud CLIs"
+kind = "artifact"
+names = ["packer_cache"]
+cost = "redownload"
+warm_days = 30
+rebuild = "packer build downloads the ISOs again"
+tags = ["cloud", "infra", "packer", "cache"]
+stacks = ["packer", "vm"]
+description = "ISOs and other downloads Packer caches next to your templates."
+
+[[rule]]
+id = "helm.cache"
+name = "Helm cache"
+bucket = "caches"
+group = "Cloud CLIs"
+kind = "path"
+paths = ["~/Library/Caches/helm", "~/.cache/helm"]
+cost = "redownload"
+warm_days = 30
+rebuild = "helm repo update"
+tags = ["kubernetes", "helm", "cache"]
+stacks = ["kubernetes", "helm"]
+description = "Chart repository indexes and downloaded charts; your repository list stays in Helm's config."
+
+[[rule]]
+id = "k9s.logs"
+name = "k9s logs"
+bucket = "junk"
+group = "Logs"
+kind = "path"
+paths = ["~/Library/Application Support/k9s/k9s.log", "~/.local/state/k9s/k9s.log"]
+cost = "none"
+tags = ["kubernetes", "k9s", "logs"]
+stacks = ["kubernetes"]
+description = "The log file k9s appends to on every run."
+
+[[rule]]
+id = "localstack.volume"
+name = "LocalStack volume"
+bucket = "containers"
+group = "Cloud emulators"
+kind = "path"
+paths = ["~/Library/Caches/localstack/volume", "~/.cache/localstack/volume"]
+cost = "rebuild"
+tier = "review"
+tags = ["cloud", "aws", "localstack", "cache"]
+stacks = ["cloud", "aws", "docker"]
+description = "LocalStack's mounted volume with Lambda layers, caches and, when persistence is on, your emulated AWS state."
+
+[[rule]]
+id = "act.cache"
+name = "act caches"
+bucket = "caches"
+group = "CI tools"
+kind = "path"
+paths = ["~/.cache/act", "~/.cache/actcache"]
+cost = "redownload"
+warm_days = 30
+rebuild = "act clones the actions again on the next run"
+tags = ["ci", "github-actions", "act", "cache"]
+stacks = ["ci", "github"]
+description = "Action repositories and the artifact and cache server data act keeps for local GitHub Actions runs."
+
+[[rule]]
+id = "fly.logs"
+name = "flyctl logs"
+bucket = "junk"
+group = "Logs"
+kind = "path"
+paths = ["~/.fly/logs", "~/.fly/agent-logs"]
+cost = "none"
+contents = true
+tags = ["cloud", "fly", "logs"]
+stacks = ["cloud", "fly"]
+description = "flyctl command and agent logs; the token in ~/.fly/config.yml is untouched."
+
+[[rule]]
+id = "ansible.tmp"
+name = "Ansible temp and Galaxy cache"
+bucket = "caches"
+group = "Cloud CLIs"
+kind = "path"
+paths = ["~/.ansible/tmp", "~/.ansible/galaxy_cache"]
+cost = "redownload"
+warm_days = 30
+tags = ["infra", "ansible", "cache"]
+stacks = ["ansible"]
+description = "Leftover temp files from Ansible runs and the Galaxy API cache; installed collections and roles stay."

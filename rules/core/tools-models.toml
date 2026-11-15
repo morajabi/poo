@@ -1,0 +1,362 @@
+# Local model runners, model weights and the apps that download them.
+# Weights are `redownload` and need a look (`review`): people curate them, and some are
+# fine-tunes or conversions nobody can download again. Hugging Face, torch and whisper
+# caches are in python.toml.
+
+# ---------------------------------------------------------------------------
+# Ollama
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "models.ollama"
+name = "Ollama models"
+bucket = "ai"
+group = "Model weights"
+kind = "path"
+paths = ["~/.ollama/models"]
+cost = "redownload"
+tier = "review"
+action = "none"
+rebuild = "ollama pull <model>"
+tags = ["ai", "models", "ollama"]
+stacks = ["ai", "ollama"]
+description = "Pulled Ollama models, stored as shared blobs; remove specific ones with `ollama rm <model>`."
+recommend = "Run `ollama list` and `ollama rm` what you no longer use; deleting blobs by hand breaks the store."
+
+[[rule]]
+id = "ollama.logs"
+name = "Ollama logs"
+bucket = "junk"
+group = "Logs"
+kind = "path"
+paths = ["~/.ollama/logs"]
+cost = "none"
+contents = true
+tags = ["ai", "models", "ollama", "logs"]
+stacks = ["ai", "ollama"]
+description = "Server and app logs Ollama rotates in ~/.ollama/logs."
+
+[[rule]]
+id = "ollama.app-caches"
+name = "Ollama app caches"
+bucket = "ai"
+group = "AI apps"
+kind = "path"
+paths = ["~/Library/Caches/com.electron.ollama", "~/Library/Caches/ollama"]
+cost = "rebuild"
+running_apps = ["Ollama", "ollama"]
+warm_days = 7
+tags = ["ai", "models", "ollama", "cache"]
+stacks = ["ai", "ollama"]
+description = "Caches of the Ollama menu bar app."
+
+# ---------------------------------------------------------------------------
+# LM Studio
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "models.lmstudio"
+name = "LM Studio models"
+bucket = "ai"
+group = "Model weights"
+kind = "path"
+paths = ["~/.lmstudio/models", "~/.cache/lm-studio/models"]
+each = true
+cost = "redownload"
+tier = "review"
+rebuild = "lms get <model>"
+tags = ["ai", "models", "lmstudio"]
+stacks = ["ai", "lmstudio"]
+description = "Models downloaded by LM Studio, one item per publisher."
+
+[[rule]]
+id = "lmstudio.engines-llama"
+name = "Old LM Studio llama.cpp engines"
+bucket = "ai"
+group = "Model runtimes"
+kind = "provider"
+provider = "versions"
+params.path = "~/.lmstudio/extensions/backends"
+params.pattern = "llama.cpp-*"
+params.keep = 1
+cost = "redownload"
+tier = "review"
+action = "delete"
+rebuild = "LM Studio > Runtime downloads the engine again"
+tags = ["ai", "models", "lmstudio", "runtime", "old-versions"]
+stacks = ["ai", "lmstudio"]
+description = "llama.cpp engine versions LM Studio kept after updating; the newest is the one it selects by default."
+
+[[rule]]
+id = "lmstudio.engines-mlx"
+name = "Old LM Studio MLX engines"
+bucket = "ai"
+group = "Model runtimes"
+kind = "provider"
+provider = "versions"
+params.path = "~/.lmstudio/extensions/backends"
+params.pattern = "mlx-llm-*"
+params.keep = 1
+cost = "redownload"
+tier = "review"
+action = "delete"
+rebuild = "LM Studio > Runtime downloads the engine again"
+tags = ["ai", "models", "lmstudio", "mlx", "runtime", "old-versions"]
+stacks = ["ai", "lmstudio", "mlx"]
+description = "MLX engine versions LM Studio kept after updating; the newest is the one it selects by default."
+
+[[rule]]
+id = "lmstudio.logs"
+name = "LM Studio server logs"
+bucket = "junk"
+group = "Logs"
+kind = "path"
+paths = ["~/.lmstudio/server-logs", "~/.cache/lm-studio/server-logs"]
+cost = "none"
+contents = true
+tags = ["ai", "models", "lmstudio", "logs"]
+stacks = ["ai", "lmstudio"]
+description = "Request logs of LM Studio's local server, one folder per month."
+
+[[rule]]
+id = "lmstudio.app-caches"
+name = "LM Studio app caches"
+bucket = "ai"
+group = "AI apps"
+kind = "path"
+paths = ["~/Library/Caches/ai.elementlabs.lmstudio", "~/Library/Caches/com.lmstudio.lmstudio"]
+cost = "rebuild"
+running_apps = ["LM Studio"]
+warm_days = 7
+tags = ["ai", "models", "lmstudio", "cache"]
+stacks = ["ai", "lmstudio"]
+description = "Caches of the LM Studio app."
+
+# ---------------------------------------------------------------------------
+# Other runners and model apps
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "llamacpp.models"
+name = "llama.cpp downloaded models"
+bucket = "ai"
+group = "Model weights"
+kind = "path"
+paths = ["~/Library/Caches/llama.cpp", "~/.cache/llama.cpp"]
+cost = "redownload"
+tier = "review"
+rebuild = "llama-cli -hf <repo> downloads it again"
+tags = ["ai", "models", "llama-cpp"]
+stacks = ["ai", "llama-cpp"]
+description = "GGUF files llama.cpp tools fetched with -hf or --model-url."
+
+[[rule]]
+id = "models.misc"
+name = "Jan, GPT4All and DiffusionBee models"
+bucket = "ai"
+group = "Model weights"
+kind = "path"
+paths = [
+  "~/Library/Application Support/DiffusionBee",
+  "~/.diffusionbee/downloaded_assets",
+  "~/jan/models",
+  "~/Library/Application Support/Jan/data/models",
+  "~/Library/Application Support/Jan/data/llamacpp/models",
+  "~/.cache/gpt4all",
+  "~/Library/Application Support/nomic.ai/GPT4All",
+]
+cost = "redownload"
+tier = "review"
+running_apps = ["Jan", "GPT4All", "gpt4all", "DiffusionBee"]
+tags = ["ai", "models", "jan", "gpt4all", "diffusionbee"]
+stacks = ["ai"]
+description = "Model folders of DiffusionBee, Jan and GPT4All; GPT4All may also keep saved chats next to its models."
+
+[[rule]]
+id = "msty.models"
+name = "Msty models"
+bucket = "ai"
+group = "Model weights"
+kind = "path"
+paths = ["~/Library/Application Support/Msty/models"]
+cost = "redownload"
+tier = "review"
+running_apps = ["Msty"]
+tags = ["ai", "models", "msty"]
+stacks = ["ai"]
+description = "Local models Msty downloaded through its bundled Ollama."
+
+[[rule]]
+id = "anythingllm.models"
+name = "AnythingLLM models"
+bucket = "ai"
+group = "Model weights"
+kind = "path"
+paths = ["~/Library/Application Support/anythingllm-desktop/storage/models"]
+cost = "redownload"
+tier = "review"
+running_apps = ["AnythingLLM"]
+tags = ["ai", "models", "anythingllm"]
+stacks = ["ai"]
+description = "LLM and embedding models AnythingLLM Desktop downloaded; your workspaces and documents live beside it and are untouched."
+
+[[rule]]
+id = "docker.models"
+name = "Docker Model Runner models"
+bucket = "ai"
+group = "Model weights"
+kind = "path"
+paths = ["~/.docker/models"]
+cost = "redownload"
+tier = "review"
+action = "none"
+rebuild = "docker model pull <model>"
+tags = ["ai", "models", "docker"]
+stacks = ["ai", "docker"]
+description = "Models pulled with `docker model pull`; remove them with `docker model rm` so the store stays consistent."
+
+[[rule]]
+id = "ramalama.models"
+name = "RamaLama models"
+bucket = "ai"
+group = "Model weights"
+kind = "path"
+paths = ["~/.local/share/ramalama"]
+cost = "redownload"
+tier = "review"
+action = "none"
+rebuild = "ramalama pull <model>"
+tags = ["ai", "models", "ramalama"]
+stacks = ["ai"]
+description = "Models pulled with RamaLama; remove them with `ramalama rm` so its store stays consistent."
+
+[[rule]]
+id = "whisper.app-models"
+name = "Whisper app models"
+bucket = "ai"
+group = "Model weights"
+kind = "path"
+paths = ["~/Library/Application Support/MacWhisper/models", "~/Library/Application Support/pywhispercpp/models"]
+cost = "redownload"
+tier = "review"
+running_apps = ["MacWhisper"]
+tags = ["ai", "models", "whisper"]
+stacks = ["ai"]
+description = "Whisper speech models MacWhisper and pywhispercpp downloaded."
+
+[[rule]]
+id = "drawthings.models"
+name = "Draw Things models"
+bucket = "ai"
+group = "Model weights"
+kind = "path"
+paths = ["~/Library/Containers/com.liuliu.draw-things/Data/Documents/Models"]
+enabled = false
+cost = "redownload"
+tier = "review"
+running_apps = ["Draw Things"]
+tags = ["ai", "models", "drawthings", "image", "needs-permission"]
+stacks = ["ai"]
+description = "Stable Diffusion models inside the Draw Things sandbox; off by default because reading another app's container makes macOS ask for permission."
+
+# ---------------------------------------------------------------------------
+# Image generation UIs installed from source
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "comfyui.models"
+name = "ComfyUI models"
+bucket = "ai"
+group = "Model weights"
+kind = "path"
+paths = ["~/ComfyUI/models", "~/Documents/ComfyUI/models", "~/comfy/ComfyUI/models"]
+each = true
+cost = "redownload"
+tier = "review"
+tags = ["ai", "models", "comfyui", "image"]
+stacks = ["ai", "python"]
+description = "Checkpoints, LoRAs, VAEs and other weights in ComfyUI's models folder, one item per type."
+
+[[rule]]
+id = "comfyui.venv"
+name = "ComfyUI Python environments"
+bucket = "ai"
+group = "Model runtimes"
+kind = "path"
+paths = ["~/ComfyUI/venv", "~/ComfyUI/.venv", "~/Documents/ComfyUI/.venv", "~/comfy/ComfyUI/.venv"]
+cost = "redownload"
+warm_days = 30
+rebuild = "pip install -r requirements.txt (ComfyUI Desktop reinstalls it on launch)"
+tags = ["ai", "comfyui", "runtime", "python"]
+stacks = ["ai", "python"]
+description = "Python environments with torch that ComfyUI runs in."
+
+[[rule]]
+id = "sdwebui.models"
+name = "Stable Diffusion web UI models"
+bucket = "ai"
+group = "Model weights"
+kind = "path"
+paths = ["~/stable-diffusion-webui/models", "~/stable-diffusion-webui-forge/models", "~/invokeai/models"]
+each = true
+cost = "redownload"
+tier = "review"
+tags = ["ai", "models", "automatic1111", "invokeai", "image"]
+stacks = ["ai", "python"]
+description = "Model folders of AUTOMATIC1111, Forge and InvokeAI, one item per type."
+
+[[rule]]
+id = "sdwebui.venv"
+name = "Stable Diffusion web UI environments"
+bucket = "ai"
+group = "Model runtimes"
+kind = "path"
+paths = ["~/stable-diffusion-webui/venv", "~/stable-diffusion-webui-forge/venv", "~/invokeai/.venv"]
+cost = "redownload"
+warm_days = 30
+rebuild = "./webui.sh recreates the venv on the next start"
+tags = ["ai", "automatic1111", "invokeai", "runtime", "python"]
+stacks = ["ai", "python"]
+description = "Python environments with torch that AUTOMATIC1111, Forge and InvokeAI run in."
+
+[[rule]]
+id = "pinokio.apps"
+name = "Pinokio apps"
+bucket = "ai"
+group = "Model weights"
+kind = "path"
+paths = ["~/pinokio/api"]
+each = true
+cost = "data"
+tier = "review"
+tags = ["ai", "models", "pinokio"]
+stacks = ["ai"]
+description = "Apps installed through Pinokio with their environments, models and outputs, one item per app."
+
+[[rule]]
+id = "pinokio.cache"
+name = "Pinokio caches"
+bucket = "ai"
+group = "Model runtimes"
+kind = "path"
+paths = ["~/pinokio/cache"]
+cost = "redownload"
+warm_days = 30
+running_apps = ["Pinokio"]
+tags = ["ai", "pinokio", "cache"]
+stacks = ["ai"]
+description = "Shared pip, Hugging Face and download caches Pinokio keeps for its apps."
+
+[[rule]]
+id = "pinokio.bin"
+name = "Pinokio toolchain"
+bucket = "ai"
+group = "Model runtimes"
+kind = "path"
+paths = ["~/pinokio/bin"]
+cost = "redownload"
+tier = "review"
+running_apps = ["Pinokio"]
+tags = ["ai", "pinokio", "runtime"]
+stacks = ["ai"]
+description = "Conda, Python, git and other tools Pinokio installs; app environments link to them, so removing it means reinstalling apps."

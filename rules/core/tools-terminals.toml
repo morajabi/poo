@@ -1,0 +1,248 @@
+# Terminals, launchers, API clients, proxies and database GUIs.
+# Only caches, logs and downloaded runtimes: saved connections, collections, clipboard
+# history, snippets and shell history are never listed as cleanable.
+# Electron caches of these apps (Postman, Insomnia, Bruno...) are covered by
+# system.chromium-app-caches, their staged updates and Raycast/Alfred caches by
+# macos-apps.toml.
+
+# ---------------------------------------------------------------------------
+# Terminals
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "iterm2.caches"
+name = "iTerm2 caches"
+bucket = "system"
+group = "Terminals"
+kind = "path"
+paths = ["~/Library/Caches/com.googlecode.iterm2"]
+cost = "rebuild"
+running_apps = ["iTerm2"]
+warm_days = 14
+tags = ["terminal", "iterm2", "cache"]
+stacks = ["terminal"]
+description = "Caches of iTerm2."
+
+[[rule]]
+id = "iterm2.python-runtimes"
+name = "iTerm2 Python runtimes"
+bucket = "system"
+group = "Terminals"
+kind = "path"
+paths = ["~/Library/Application Support/iTerm2/iterm2env*"]
+cost = "redownload"
+running_apps = ["iTerm2"]
+warm_days = 30
+rebuild = "iTerm2 downloads the runtime again the next time a Python script runs"
+tags = ["terminal", "iterm2", "runtime", "python"]
+stacks = ["terminal"]
+description = "Python runtimes iTerm2 downloads for its scripting API, one per version."
+
+[[rule]]
+id = "iterm2.saved-state"
+name = "iTerm2 restorable sessions"
+bucket = "system"
+group = "Terminals"
+kind = "path"
+paths = ["~/Library/Application Support/iTerm2/SavedState"]
+cost = "data"
+tier = "review"
+running_apps = ["iTerm2"]
+tags = ["terminal", "iterm2", "history"]
+stacks = ["terminal"]
+description = "Window arrangements and scrollback iTerm2 saves to restore sessions, which can grow to gigabytes."
+
+[[rule]]
+id = "ghostty.caches"
+name = "Ghostty caches"
+bucket = "system"
+group = "Terminals"
+kind = "path"
+paths = ["~/Library/Caches/com.mitchellh.ghostty", "~/.cache/ghostty"]
+cost = "rebuild"
+running_apps = ["ghostty"]
+warm_days = 14
+tags = ["terminal", "ghostty", "cache"]
+stacks = ["terminal"]
+description = "Caches of the Ghostty terminal."
+
+[[rule]]
+id = "wezterm.logs"
+name = "WezTerm logs"
+bucket = "junk"
+group = "Logs"
+kind = "path"
+paths = ["~/.local/share/wezterm/*log*.txt"]
+cost = "none"
+min_age_days = 1
+tags = ["terminal", "wezterm", "logs"]
+stacks = ["terminal"]
+description = "Per-process log files the WezTerm GUI and mux server leave in ~/.local/share/wezterm."
+
+[[rule]]
+id = "warp.caches"
+name = "Warp caches"
+bucket = "system"
+group = "Terminals"
+kind = "path"
+paths = ["~/Library/Caches/dev.warp.Warp-Stable", "~/Library/Caches/dev.warp.Warp-Preview"]
+cost = "rebuild"
+running_apps = ["stable", "preview", "Warp"]
+warm_days = 14
+tags = ["terminal", "warp", "ai", "cache"]
+stacks = ["terminal", "ai"]
+description = "Caches of the Warp terminal."
+
+[[rule]]
+id = "warp.data"
+name = "Warp history and state"
+bucket = "system"
+group = "Terminals"
+kind = "path"
+paths = ["~/Library/Application Support/dev.warp.Warp-Stable", "~/Library/Application Support/dev.warp.Warp-Preview"]
+cost = "data"
+action = "none"
+tags = ["terminal", "warp", "ai", "history"]
+stacks = ["terminal", "ai"]
+description = "Warp's database of command blocks, history, AI conversations and settings, shown for its size only."
+
+# ---------------------------------------------------------------------------
+# Launchers and docs
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "raycast.node-runtimes"
+name = "Old Raycast Node runtimes"
+bucket = "system"
+group = "Launchers"
+kind = "provider"
+provider = "versions"
+params.path = "~/Library/Application Support/com.raycast.macos/node/runtime"
+params.pattern = "node-v*"
+params.keep = 1
+cost = "redownload"
+action = "delete"
+tags = ["launcher", "raycast", "runtime", "old-versions"]
+stacks = ["raycast"]
+description = "Node.js runtimes Raycast downloaded for extensions; it only runs the newest one."
+
+[[rule]]
+id = "dash.docsets"
+name = "Dash docsets"
+bucket = "system"
+group = "Dev utilities"
+kind = "path"
+paths = ["~/Library/Application Support/Dash/DocSets", "~/Library/Application Support/Dash/User Contributed"]
+each = true
+cost = "redownload"
+tier = "review"
+running_apps = ["Dash"]
+rebuild = "download the docset again from Dash > Settings > Downloads"
+tags = ["devtools", "dash", "docs"]
+stacks = ["devtools"]
+description = "Offline documentation sets downloaded in Dash, one item per docset."
+
+# ---------------------------------------------------------------------------
+# API clients and proxies
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "postman.logs"
+name = "Postman logs"
+bucket = "junk"
+group = "Logs"
+kind = "path"
+paths = ["~/Library/Application Support/Postman/logs"]
+cost = "none"
+contents = true
+tags = ["devtools", "api-client", "postman", "logs"]
+stacks = ["devtools"]
+description = "Postman's app and renderer logs; collections and environments stay."
+
+[[rule]]
+id = "proxyman.caches"
+name = "Proxyman caches"
+bucket = "system"
+group = "Dev utilities"
+kind = "path"
+paths = ["~/Library/Caches/com.proxyman.NSProxy", "~/Library/Caches/com.proxyman"]
+cost = "rebuild"
+running_apps = ["Proxyman"]
+warm_days = 14
+tags = ["devtools", "proxy", "proxyman", "cache"]
+stacks = ["devtools"]
+description = "Caches of Proxyman; saved sessions and certificates stay."
+
+[[rule]]
+id = "charles.caches"
+name = "Charles caches"
+bucket = "system"
+group = "Dev utilities"
+kind = "path"
+paths = ["~/Library/Caches/com.xk72.Charles", "~/Library/Caches/com.xk72.charles"]
+cost = "rebuild"
+running_apps = ["Charles"]
+warm_days = 14
+tags = ["devtools", "proxy", "charles", "cache"]
+stacks = ["devtools"]
+description = "Caches of the Charles proxy; saved sessions stay."
+
+# ---------------------------------------------------------------------------
+# Database GUIs
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "tableplus.caches"
+name = "TablePlus caches"
+bucket = "system"
+group = "Dev utilities"
+kind = "path"
+paths = ["~/Library/Caches/com.tinyapp.TablePlus"]
+cost = "rebuild"
+running_apps = ["TablePlus"]
+warm_days = 14
+tags = ["devtools", "database", "tableplus", "cache"]
+stacks = ["database"]
+description = "Caches of TablePlus; saved connections and their passwords stay."
+
+[[rule]]
+id = "dbeaver.drivers"
+name = "DBeaver drivers"
+bucket = "caches"
+group = "Dev utilities"
+kind = "path"
+paths = ["~/Library/DBeaverData/drivers"]
+cost = "redownload"
+running_apps = ["dbeaver"]
+warm_days = 30
+rebuild = "DBeaver downloads a driver again the next time you connect"
+tags = ["devtools", "database", "dbeaver", "cache"]
+stacks = ["database", "java"]
+description = "JDBC drivers DBeaver downloaded from Maven; saved connections in the workspace stay."
+
+[[rule]]
+id = "dbeaver.logs"
+name = "DBeaver logs"
+bucket = "junk"
+group = "Logs"
+kind = "path"
+paths = ["~/Library/DBeaverData/workspace6/.metadata/.log", "~/Library/DBeaverData/workspace6/.metadata/dbeaver-debug.log"]
+cost = "none"
+tags = ["devtools", "database", "dbeaver", "logs"]
+stacks = ["database"]
+description = "DBeaver's workspace error log and debug log, which grow without bound."
+
+[[rule]]
+id = "sequel-ace.caches"
+name = "Sequel Ace caches"
+bucket = "system"
+group = "Dev utilities"
+kind = "path"
+paths = ["~/Library/Containers/com.sequel-ace.sequel-ace/Data/Library/Caches"]
+enabled = false
+cost = "rebuild"
+contents = true
+running_apps = ["Sequel Ace"]
+tags = ["devtools", "database", "sequel-ace", "cache", "needs-permission"]
+stacks = ["database"]
+description = "Caches inside the Sequel Ace sandbox; off by default because reading another app's container makes macOS ask for permission, and favorites stay either way."

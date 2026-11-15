@@ -1,4 +1,10 @@
-# Docker, OrbStack, VMs and cloud CLIs.
+# Docker, OrbStack, Podman, local Kubernetes and virtual machines.
+# VM and container disks are `data`: shown so you know where space went, never cleaned.
+# Cloud and infrastructure CLIs live in tools-cloud.toml.
+
+# ---------------------------------------------------------------------------
+# Docker
+# ---------------------------------------------------------------------------
 
 [[rule]]
 id = "docker.engine"
@@ -8,7 +14,9 @@ group = "Docker"
 kind = "provider"
 provider = "docker"
 cost = "rebuild"
-description = "Build cache, unused images and stopped containers reported by `docker system df`. Volumes are shown but never removed."
+tags = ["containers", "docker"]
+stacks = ["docker"]
+description = "Build cache, unused images and stopped containers reported by `docker system df`; volumes are shown but never removed."
 recommend = "Build cache is the safe win. Unused images redownload on next pull. Volumes hold databases: remove them yourself."
 
 [[rule]]
@@ -20,7 +28,42 @@ kind = "path"
 paths = ["~/.docker/buildx/cache"]
 cost = "rebuild"
 warm_days = 14
-description = "Local buildx cache exports."
+rebuild = "the next docker buildx build with a local cache export"
+tags = ["containers", "docker", "cache"]
+stacks = ["docker"]
+description = "Local buildx cache exports (--cache-to type=local)."
+
+[[rule]]
+id = "docker.scout-cache"
+name = "Docker Scout cache"
+bucket = "containers"
+group = "Docker"
+kind = "path"
+paths = ["~/.docker/scout"]
+cost = "redownload"
+warm_days = 30
+tags = ["containers", "docker", "cache"]
+stacks = ["docker"]
+description = "SBOMs and vulnerability data Docker Scout caches per image."
+
+[[rule]]
+id = "docker.desktop-disk"
+name = "Docker Desktop disk image"
+bucket = "containers"
+group = "Docker"
+kind = "path"
+paths = ["~/Library/Containers/com.docker.docker/Data/vms/0/data"]
+enabled = false
+cost = "data"
+action = "none"
+tags = ["containers", "docker", "vm", "disk-image", "needs-permission"]
+stacks = ["docker"]
+description = "Docker.raw, the VM disk holding every image, container and volume; off by default because reading another app's container can make macOS ask for permission, and `Docker` already reports what is inside it."
+recommend = "Shrink it with `docker system prune` or Docker Desktop > Troubleshoot > Clean / Purge data, never by deleting the file."
+
+# ---------------------------------------------------------------------------
+# Virtual machines and container runtimes
+# ---------------------------------------------------------------------------
 
 [[rule]]
 id = "vm.caches"
@@ -28,10 +71,37 @@ name = "VM tool caches"
 bucket = "containers"
 group = "VMs"
 kind = "path"
-paths = ["~/Library/Caches/lima", "~/.vagrant.d/tmp", "~/.vagrant.d/boxes", "~/Library/Caches/com.utmapp.UTM", "~/.tart/cache", "~/.minikube/cache", "~/Library/Caches/colima"]
+paths = [
+  "~/Library/Caches/lima",
+  "~/Library/Caches/colima",
+  "~/Library/Caches/com.utmapp.UTM",
+  "~/Library/Caches/rancher-desktop",
+  "~/.tart/cache",
+  "~/.minikube/cache",
+  "~/.vagrant.d/tmp",
+  "~/.local/share/containers/podman/machine/*/cache",
+]
 cost = "redownload"
 warm_days = 30
-description = "Downloaded images and boxes of Lima, Vagrant, UTM, Tart and minikube. VM disks themselves are not touched."
+tags = ["containers", "vm", "cache"]
+stacks = ["docker", "kubernetes", "vm"]
+description = "Downloaded VM images of Lima, Colima, UTM, Rancher Desktop, Tart, minikube and Podman machines; the VM disks themselves are not touched."
+
+[[rule]]
+id = "vagrant.boxes"
+name = "Vagrant boxes"
+bucket = "containers"
+group = "VMs"
+kind = "path"
+paths = ["~/.vagrant.d/boxes"]
+each = true
+cost = "redownload"
+tier = "review"
+rebuild = "vagrant box add <box>"
+tags = ["containers", "vm", "vagrant", "disk-image"]
+stacks = ["vagrant", "vm"]
+description = "Base boxes Vagrant clones machines from, one item per box; boxes you built yourself cannot be downloaded again."
+recommend = "Prefer `vagrant box prune` to drop outdated versions of boxes you still use."
 
 [[rule]]
 id = "vm.disks"
@@ -39,17 +109,51 @@ name = "VM disks"
 bucket = "containers"
 group = "VMs"
 kind = "path"
-paths = ["~/.orbstack/data", "~/.colima/_lima", "~/.lima", "~/VirtualBox VMs", "~/Parallels"]
+paths = [
+  "~/.orbstack/data",
+  "~/.colima/_lima",
+  "~/.lima",
+  "~/.tart/vms",
+  "~/.minikube/machines",
+  "~/.local/share/containers",
+  "~/.docker/machine/machines",
+  "~/Library/Application Support/rancher-desktop/lima",
+  "~/Library/Application Support/com.apple.container",
+  "~/VirtualBox VMs",
+  "~/Parallels",
+  "~/Virtual Machines.localized",
+  "~/Documents/Virtual Machines.localized",
+]
 cost = "data"
-description = "Virtual machine disks and OrbStack data. Shown so you know the size; manage them in their apps."
+action = "none"
+tags = ["containers", "vm", "disk-image"]
+stacks = ["docker", "kubernetes", "vm"]
+description = "Virtual machine and container runtime disks of OrbStack, Colima, Lima, Tart, minikube, Podman, Rancher Desktop, Apple container, VirtualBox, Parallels and VMware, shown for their size only."
+recommend = "Delete VMs and machines from their own app or CLI (orb delete, colima delete, limactl delete, podman machine rm...)."
 
 [[rule]]
-id = "cloud.cli-caches"
-name = "Cloud CLI caches"
-bucket = "caches"
-group = "Cloud CLIs"
+id = "vm.sandboxed-disks"
+name = "Sandboxed VM disks"
+bucket = "containers"
+group = "VMs"
 kind = "path"
-paths = ["~/.config/gcloud/logs", "~/.azure/logs", "~/.cache/gh", "~/.cache/terraform", "~/.pulumi/plugins", "~/.cache/helm", "~/Library/Caches/helm"]
-cost = "redownload"
-warm_days = 30
-description = "gcloud/azure logs, gh, Helm and Pulumi plugin caches."
+paths = ["~/Library/Containers/com.utmapp.UTM/Data/Documents", "~/Library/Group Containers/HUAQ24HBR6.dev.orbstack/data"]
+enabled = false
+cost = "data"
+action = "none"
+tags = ["containers", "vm", "disk-image", "utm", "orbstack", "needs-permission"]
+stacks = ["vm"]
+description = "UTM virtual machines and OrbStack's group-container data, shown for their size only; off by default because reading another app's container makes macOS ask for permission."
+
+[[rule]]
+id = "vm.logs"
+name = "VM and container runtime logs"
+bucket = "junk"
+group = "Logs"
+kind = "path"
+paths = ["~/.orbstack/log", "~/.minikube/logs"]
+cost = "none"
+contents = true
+tags = ["containers", "vm", "logs"]
+stacks = ["docker", "kubernetes", "vm"]
+description = "Logs OrbStack and minikube keep next to their VM data."

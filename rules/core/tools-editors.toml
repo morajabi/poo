@@ -1,0 +1,497 @@
+# Editors and IDEs outside the VS Code family (that family and Zed are in ai.toml).
+# JetBrains and Android Studio caches and logs per version are in langs.toml; this file
+# adds the settings folders older IDE versions leave behind, Toolbox builds, and the
+# plugin and package caches of terminal editors.
+
+# ---------------------------------------------------------------------------
+# JetBrains: one rule per product so the newest settings folder of each is kept.
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "jetbrains.old-config-intellij"
+name = "Old IntelliJ IDEA settings"
+bucket = "system"
+group = "IDEs"
+kind = "provider"
+provider = "versions"
+params.path = "~/Library/Application Support/JetBrains"
+params.pattern = "IntelliJIdea20*"
+params.keep = 1
+cost = "data"
+tier = "review"
+action = "delete"
+tags = ["ide", "jetbrains", "intellij", "old-versions"]
+stacks = ["jetbrains"]
+description = "IntelliJ IDEA settings, plugins and scratches from versions you upgraded from; the newest folder is the one in use."
+
+[[rule]]
+id = "jetbrains.old-config-intellij-community"
+name = "Old IntelliJ IDEA Community settings"
+bucket = "system"
+group = "IDEs"
+kind = "provider"
+provider = "versions"
+params.path = "~/Library/Application Support/JetBrains"
+params.pattern = "IdeaIC20*"
+params.keep = 1
+cost = "data"
+tier = "review"
+action = "delete"
+tags = ["ide", "jetbrains", "intellij-community", "old-versions"]
+stacks = ["jetbrains"]
+description = "IntelliJ IDEA Community settings, plugins and scratches from versions you upgraded from; the newest folder is the one in use."
+
+[[rule]]
+id = "jetbrains.old-config-pycharm"
+name = "Old PyCharm settings"
+bucket = "system"
+group = "IDEs"
+kind = "provider"
+provider = "versions"
+params.path = "~/Library/Application Support/JetBrains"
+params.pattern = "PyCharm20*"
+params.keep = 1
+cost = "data"
+tier = "review"
+action = "delete"
+tags = ["ide", "jetbrains", "pycharm", "old-versions"]
+stacks = ["jetbrains"]
+description = "PyCharm settings, plugins and scratches from versions you upgraded from; the newest folder is the one in use."
+
+[[rule]]
+id = "jetbrains.old-config-pycharm-community"
+name = "Old PyCharm Community settings"
+bucket = "system"
+group = "IDEs"
+kind = "provider"
+provider = "versions"
+params.path = "~/Library/Application Support/JetBrains"
+params.pattern = "PyCharmCE20*"
+params.keep = 1
+cost = "data"
+tier = "review"
+action = "delete"
+tags = ["ide", "jetbrains", "pycharm-community", "old-versions"]
+stacks = ["jetbrains"]
+description = "PyCharm Community settings, plugins and scratches from versions you upgraded from; the newest folder is the one in use."
+
+[[rule]]
+id = "jetbrains.old-config-webstorm"
+name = "Old WebStorm settings"
+bucket = "system"
+group = "IDEs"
+kind = "provider"
+provider = "versions"
+params.path = "~/Library/Application Support/JetBrains"
+params.pattern = "WebStorm20*"
+params.keep = 1
+cost = "data"
+tier = "review"
+action = "delete"
+tags = ["ide", "jetbrains", "webstorm", "old-versions"]
+stacks = ["jetbrains"]
+description = "WebStorm settings, plugins and scratches from versions you upgraded from; the newest folder is the one in use."
+
+[[rule]]
+id = "jetbrains.old-config-goland"
+name = "Old GoLand settings"
+bucket = "system"
+group = "IDEs"
+kind = "provider"
+provider = "versions"
+params.path = "~/Library/Application Support/JetBrains"
+params.pattern = "GoLand20*"
+params.keep = 1
+cost = "data"
+tier = "review"
+action = "delete"
+tags = ["ide", "jetbrains", "goland", "old-versions"]
+stacks = ["jetbrains"]
+description = "GoLand settings, plugins and scratches from versions you upgraded from; the newest folder is the one in use."
+
+[[rule]]
+id = "jetbrains.old-config-clion"
+name = "Old CLion settings"
+bucket = "system"
+group = "IDEs"
+kind = "provider"
+provider = "versions"
+params.path = "~/Library/Application Support/JetBrains"
+params.pattern = "CLion20*"
+params.keep = 1
+cost = "data"
+tier = "review"
+action = "delete"
+tags = ["ide", "jetbrains", "clion", "old-versions"]
+stacks = ["jetbrains"]
+description = "CLion settings, plugins and scratches from versions you upgraded from; the newest folder is the one in use."
+
+[[rule]]
+id = "jetbrains.old-config-rustrover"
+name = "Old RustRover settings"
+bucket = "system"
+group = "IDEs"
+kind = "provider"
+provider = "versions"
+params.path = "~/Library/Application Support/JetBrains"
+params.pattern = "RustRover20*"
+params.keep = 1
+cost = "data"
+tier = "review"
+action = "delete"
+tags = ["ide", "jetbrains", "rustrover", "old-versions"]
+stacks = ["jetbrains"]
+description = "RustRover settings, plugins and scratches from versions you upgraded from; the newest folder is the one in use."
+
+[[rule]]
+id = "jetbrains.old-config-phpstorm"
+name = "Old PhpStorm settings"
+bucket = "system"
+group = "IDEs"
+kind = "provider"
+provider = "versions"
+params.path = "~/Library/Application Support/JetBrains"
+params.pattern = "PhpStorm20*"
+params.keep = 1
+cost = "data"
+tier = "review"
+action = "delete"
+tags = ["ide", "jetbrains", "phpstorm", "old-versions"]
+stacks = ["jetbrains"]
+description = "PhpStorm settings, plugins and scratches from versions you upgraded from; the newest folder is the one in use."
+
+[[rule]]
+id = "jetbrains.old-config-rider"
+name = "Old Rider settings"
+bucket = "system"
+group = "IDEs"
+kind = "provider"
+provider = "versions"
+params.path = "~/Library/Application Support/JetBrains"
+params.pattern = "Rider20*"
+params.keep = 1
+cost = "data"
+tier = "review"
+action = "delete"
+tags = ["ide", "jetbrains", "rider", "old-versions"]
+stacks = ["jetbrains"]
+description = "Rider settings, plugins and scratches from versions you upgraded from; the newest folder is the one in use."
+
+[[rule]]
+id = "jetbrains.old-config-datagrip"
+name = "Old DataGrip settings"
+bucket = "system"
+group = "IDEs"
+kind = "provider"
+provider = "versions"
+params.path = "~/Library/Application Support/JetBrains"
+params.pattern = "DataGrip20*"
+params.keep = 1
+cost = "data"
+tier = "review"
+action = "delete"
+tags = ["ide", "jetbrains", "datagrip", "old-versions"]
+stacks = ["jetbrains"]
+description = "DataGrip settings, plugins and scratches from versions you upgraded from; the newest folder is the one in use."
+
+[[rule]]
+id = "jetbrains.old-config-rubymine"
+name = "Old RubyMine settings"
+bucket = "system"
+group = "IDEs"
+kind = "provider"
+provider = "versions"
+params.path = "~/Library/Application Support/JetBrains"
+params.pattern = "RubyMine20*"
+params.keep = 1
+cost = "data"
+tier = "review"
+action = "delete"
+tags = ["ide", "jetbrains", "rubymine", "old-versions"]
+stacks = ["jetbrains"]
+description = "RubyMine settings, plugins and scratches from versions you upgraded from; the newest folder is the one in use."
+
+[[rule]]
+id = "jetbrains.old-config-dataspell"
+name = "Old DataSpell settings"
+bucket = "system"
+group = "IDEs"
+kind = "provider"
+provider = "versions"
+params.path = "~/Library/Application Support/JetBrains"
+params.pattern = "DataSpell20*"
+params.keep = 1
+cost = "data"
+tier = "review"
+action = "delete"
+tags = ["ide", "jetbrains", "dataspell", "old-versions"]
+stacks = ["jetbrains"]
+description = "DataSpell settings, plugins and scratches from versions you upgraded from; the newest folder is the one in use."
+
+[[rule]]
+id = "jetbrains.old-config-aqua"
+name = "Old Aqua settings"
+bucket = "system"
+group = "IDEs"
+kind = "provider"
+provider = "versions"
+params.path = "~/Library/Application Support/JetBrains"
+params.pattern = "Aqua20*"
+params.keep = 1
+cost = "data"
+tier = "review"
+action = "delete"
+tags = ["ide", "jetbrains", "aqua", "old-versions"]
+stacks = ["jetbrains"]
+description = "Aqua settings, plugins and scratches from versions you upgraded from; the newest folder is the one in use."
+
+[[rule]]
+id = "jetbrains.old-config-writerside"
+name = "Old Writerside settings"
+bucket = "system"
+group = "IDEs"
+kind = "provider"
+provider = "versions"
+params.path = "~/Library/Application Support/JetBrains"
+params.pattern = "Writerside20*"
+params.keep = 1
+cost = "data"
+tier = "review"
+action = "delete"
+tags = ["ide", "jetbrains", "writerside", "old-versions"]
+stacks = ["jetbrains"]
+description = "Writerside settings, plugins and scratches from versions you upgraded from; the newest folder is the one in use."
+
+[[rule]]
+id = "jetbrains.old-config-appcode"
+name = "Old AppCode settings"
+bucket = "system"
+group = "IDEs"
+kind = "provider"
+provider = "versions"
+params.path = "~/Library/Application Support/JetBrains"
+params.pattern = "AppCode20*"
+params.keep = 1
+cost = "data"
+tier = "review"
+action = "delete"
+tags = ["ide", "jetbrains", "appcode", "old-versions"]
+stacks = ["jetbrains"]
+description = "AppCode settings, plugins and scratches from versions you upgraded from; the newest folder is the one in use."
+
+[[rule]]
+id = "jetbrains.toolbox-builds"
+name = "JetBrains Toolbox IDE builds"
+bucket = "system"
+group = "IDEs"
+kind = "path"
+paths = ["~/Library/Application Support/JetBrains/Toolbox/apps/*/ch-*/[0-9]*"]
+exclude = ["*.plugins", "*.vmoptions", "*.json"]
+cost = "redownload"
+tier = "review"
+rebuild = "Toolbox installs a build again from its version list"
+tags = ["ide", "jetbrains", "toolbox", "old-versions"]
+stacks = ["jetbrains"]
+description = "IDE builds Toolbox App 1.x installed per channel, including previous builds it keeps for rollback; the newest per channel is the one it launches."
+recommend = "Turn off Toolbox > Settings > Keep previous versions, or roll back and uninstall from Toolbox itself."
+
+[[rule]]
+id = "jetbrains.toolbox-downloads"
+name = "JetBrains Toolbox downloads"
+bucket = "junk"
+group = "Installers"
+kind = "path"
+paths = ["~/Library/Application Support/JetBrains/Toolbox/download"]
+cost = "none"
+contents = true
+min_age_days = 1
+tags = ["ide", "jetbrains", "toolbox", "staging"]
+stacks = ["jetbrains"]
+description = "Installer archives Toolbox downloaded before unpacking an IDE."
+
+# ---------------------------------------------------------------------------
+# Android Studio and Eclipse
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "androidstudio.old-config"
+name = "Old Android Studio settings"
+bucket = "system"
+group = "IDEs"
+kind = "provider"
+provider = "versions"
+params.path = "~/Library/Application Support/Google"
+params.pattern = "AndroidStudio20*"
+params.keep = 1
+cost = "data"
+tier = "review"
+action = "delete"
+tags = ["ide", "android-studio", "android", "old-versions"]
+stacks = ["android", "gradle"]
+description = "Android Studio settings and plugins from versions you upgraded from; the newest folder is the one in use."
+
+[[rule]]
+id = "androidstudio.old-preview-config"
+name = "Old Android Studio Preview settings"
+bucket = "system"
+group = "IDEs"
+kind = "provider"
+provider = "versions"
+params.path = "~/Library/Application Support/Google"
+params.pattern = "AndroidStudioPreview*"
+params.keep = 1
+cost = "data"
+tier = "review"
+action = "delete"
+tags = ["ide", "android-studio", "android", "old-versions"]
+stacks = ["android", "gradle"]
+description = "Settings of Android Studio preview builds you moved on from; the newest folder is the one in use."
+
+[[rule]]
+id = "eclipse.p2-pool"
+name = "Eclipse shared bundle pool"
+bucket = "system"
+group = "IDEs"
+kind = "path"
+paths = ["~/.p2/pool"]
+cost = "redownload"
+tier = "review"
+running_apps = ["eclipse", "Eclipse"]
+tags = ["ide", "eclipse", "plugins"]
+stacks = ["java"]
+description = "Plugins shared by Eclipse installs made with the Eclipse Installer; installs that use the pool stop working without it."
+
+# ---------------------------------------------------------------------------
+# Sublime Text and Nova
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "sublime.caches"
+name = "Sublime Text caches"
+bucket = "system"
+group = "Editors"
+kind = "path"
+paths = ["~/Library/Caches/com.sublimetext.4", "~/Library/Caches/com.sublimetext.3", "~/Library/Application Support/Sublime Text/Index", "~/Library/Application Support/Sublime Text 3/Index"]
+cost = "rebuild"
+running_apps = ["sublime_text"]
+warm_days = 14
+rebuild = "Sublime Text re-indexes open folders"
+tags = ["editor", "sublime-text", "cache", "index"]
+stacks = ["sublime"]
+description = "Sublime Text's symbol index and caches; packages and settings stay."
+
+[[rule]]
+id = "nova.caches"
+name = "Nova caches"
+bucket = "system"
+group = "Editors"
+kind = "path"
+paths = ["~/Library/Caches/com.panic.Nova"]
+cost = "rebuild"
+running_apps = ["Nova"]
+warm_days = 14
+tags = ["editor", "nova", "cache"]
+stacks = ["nova"]
+description = "Caches of Panic's Nova editor."
+
+# ---------------------------------------------------------------------------
+# Neovim, Emacs and Helix
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "nvim.cache"
+name = "Neovim cache"
+bucket = "caches"
+group = "Editors"
+kind = "path"
+paths = ["~/.cache/nvim"]
+cost = "rebuild"
+running_apps = ["nvim"]
+warm_days = 14
+tags = ["editor", "neovim", "cache"]
+stacks = ["neovim"]
+description = "Neovim's byte-compiled Lua cache and plugin caches; rebuilt on the next start."
+
+[[rule]]
+id = "nvim.plugins"
+name = "Neovim plugins and tools"
+bucket = "caches"
+group = "Editors"
+kind = "path"
+paths = ["~/.local/share/nvim/lazy", "~/.local/share/nvim/mason", "~/.local/share/nvim/site/pack", "~/.local/state/nvim/lazy"]
+cost = "redownload"
+tier = "review"
+running_apps = ["nvim"]
+rebuild = ":Lazy restore (lazy-lock.json pins versions) and :MasonInstall"
+tags = ["editor", "neovim", "lazyvim", "plugins", "language-server"]
+stacks = ["neovim"]
+description = "Plugins installed by lazy.nvim or packages, and language servers installed by mason.nvim."
+recommend = "Safe when your config pins versions in lazy-lock.json; Neovim reinstalls everything on the next start."
+
+[[rule]]
+id = "nvim.logs"
+name = "Neovim logs"
+bucket = "junk"
+group = "Logs"
+kind = "path"
+paths = ["~/.local/state/nvim/log", "~/.local/state/nvim/lsp.log", "~/.local/state/nvim/mason.log", "~/.local/state/nvim/conform.log"]
+cost = "none"
+tags = ["editor", "neovim", "logs"]
+stacks = ["neovim"]
+description = "Neovim, LSP client, mason and conform logs, which grow without bound."
+
+[[rule]]
+id = "emacs.native-comp"
+name = "Emacs native-compilation caches"
+bucket = "caches"
+group = "Editors"
+kind = "path"
+paths = ["~/.emacs.d/eln-cache", "~/.config/emacs/eln-cache", "~/.emacs.d/.local/cache/eln", "~/.config/emacs/.local/cache/eln"]
+cost = "rebuild"
+running_apps = ["Emacs", "emacs"]
+warm_days = 30
+rebuild = "Emacs recompiles packages natively as it loads them"
+tags = ["editor", "emacs", "cache"]
+stacks = ["emacs"]
+description = "Natively compiled .eln files, one set per Emacs build, so upgrades leave old ones behind."
+
+[[rule]]
+id = "emacs.packages"
+name = "Emacs packages"
+bucket = "caches"
+group = "Editors"
+kind = "path"
+paths = ["~/.emacs.d/elpa", "~/.config/emacs/elpa", "~/.emacs.d/straight", "~/.config/emacs/straight", "~/.emacs.d/elpaca", "~/.config/emacs/elpaca", "~/.config/emacs/.local/straight", "~/.emacs.d/.local/straight"]
+cost = "redownload"
+tier = "review"
+running_apps = ["Emacs", "emacs"]
+rebuild = "package-install, straight or elpaca rebuild them; Doom: doom sync"
+tags = ["editor", "emacs", "doom-emacs", "plugins"]
+stacks = ["emacs"]
+description = "Packages installed by package.el, straight.el, elpaca or Doom Emacs."
+
+[[rule]]
+id = "helix.grammar-sources"
+name = "Helix grammar sources"
+bucket = "caches"
+group = "Editors"
+kind = "path"
+paths = ["~/.config/helix/runtime/grammars/sources"]
+cost = "redownload"
+warm_days = 30
+rebuild = "hx --grammar fetch"
+tags = ["editor", "helix", "cache"]
+stacks = ["helix"]
+description = "Tree-sitter grammar checkouts Helix fetched to build its grammars; the compiled grammars stay."
+
+[[rule]]
+id = "helix.logs"
+name = "Helix log"
+bucket = "junk"
+group = "Logs"
+kind = "path"
+paths = ["~/.cache/helix/helix.log"]
+cost = "none"
+tags = ["editor", "helix", "logs"]
+stacks = ["helix"]
+description = "The log file Helix appends to on every run."

@@ -1,4 +1,4 @@
-# Git worktrees and unexplained ignored folders.
+# Git worktrees, unexplained ignored folders, and git clients and tooling.
 
 [[rule]]
 id = "git.worktrees"
@@ -10,7 +10,9 @@ provider = "git-worktrees"
 cost = "rebuild"
 rebuild = "git worktree add <path> <branch> (the branch and its commits stay)"
 warm_days = 7
-description = "Whole linked worktrees. Removal goes through `git worktree remove`, which refuses uncommitted changes; branches and commits are kept."
+tags = ["git", "worktree", "agent"]
+stacks = ["git"]
+description = "Whole linked worktrees; removal goes through `git worktree remove`, which refuses uncommitted changes, and branches and commits are kept."
 recommend = "Agent worktrees outlive their task. Remove them once the branch is merged or abandoned; build output inside goes with them."
 
 [[rule]]
@@ -23,5 +25,122 @@ provider = "git-ignored"
 params.min_bytes = 100000000
 cost = "rebuild"
 tier = "review"
-description = "Large folders git ignores that no rule recognizes. Never cleaned automatically."
+tags = ["git", "unclassified"]
+stacks = ["git"]
+description = "Large folders git ignores that no rule recognizes; never cleaned automatically."
 recommend = "Look at what produces them and add a rule in a mod (`poo mods new`) so poo can tier them."
+
+# ---------------------------------------------------------------------------
+# GitHub CLI and git clients
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "gh.cache"
+name = "GitHub CLI cache"
+bucket = "caches"
+group = "Git tools"
+kind = "path"
+paths = ["~/.cache/gh"]
+cost = "redownload"
+warm_days = 30
+tags = ["git", "github", "cache"]
+stacks = ["git", "github"]
+description = "API responses and workflow run logs the gh CLI caches."
+
+[[rule]]
+id = "github-desktop.caches"
+name = "GitHub Desktop caches"
+bucket = "system"
+group = "Git clients"
+kind = "path"
+paths = ["~/Library/Caches/com.github.GitHubClient", "~/Library/Application Support/GitHub Desktop/logs"]
+cost = "rebuild"
+running_apps = ["GitHub Desktop"]
+warm_days = 14
+tags = ["git", "github", "github-desktop", "cache", "logs"]
+stacks = ["git", "github"]
+description = "HTTP cache and rotated logs of GitHub Desktop; its repository list and settings are untouched."
+
+[[rule]]
+id = "gitkraken.caches"
+name = "GitKraken caches"
+bucket = "system"
+group = "Git clients"
+kind = "path"
+paths = ["~/Library/Caches/com.axosoft.gitkraken", "~/.gitkraken/logs"]
+cost = "rebuild"
+running_apps = ["GitKraken"]
+warm_days = 14
+tags = ["git", "gitkraken", "cache", "logs"]
+stacks = ["git"]
+description = "Caches and logs of GitKraken; profiles and workspaces in ~/.gitkraken stay."
+
+[[rule]]
+id = "tower.caches"
+name = "Tower caches"
+bucket = "system"
+group = "Git clients"
+kind = "path"
+paths = ["~/Library/Caches/com.fournova.Tower3", "~/Library/Caches/com.fournova.Tower2"]
+cost = "rebuild"
+running_apps = ["Tower"]
+warm_days = 14
+tags = ["git", "tower", "cache"]
+stacks = ["git"]
+description = "Caches of the Tower git client."
+
+[[rule]]
+id = "fork.caches"
+name = "Fork caches"
+bucket = "system"
+group = "Git clients"
+kind = "path"
+paths = ["~/Library/Caches/com.DanPristupov.Fork"]
+cost = "rebuild"
+running_apps = ["Fork"]
+warm_days = 14
+tags = ["git", "fork", "cache"]
+stacks = ["git"]
+description = "Caches of the Fork git client."
+
+[[rule]]
+id = "sourcetree.caches"
+name = "Sourcetree caches"
+bucket = "system"
+group = "Git clients"
+kind = "path"
+paths = ["~/Library/Caches/com.torusknot.SourceTreeNotMAS"]
+cost = "rebuild"
+running_apps = ["Sourcetree"]
+warm_days = 14
+tags = ["git", "sourcetree", "cache"]
+stacks = ["git"]
+description = "Caches of Sourcetree; its bookmarks in Application Support stay."
+
+[[rule]]
+id = "sublime-merge.caches"
+name = "Sublime Merge caches"
+bucket = "system"
+group = "Git clients"
+kind = "path"
+paths = ["~/Library/Caches/com.sublimemerge", "~/Library/Application Support/Sublime Merge/Cache"]
+cost = "rebuild"
+running_apps = ["sublime_merge"]
+warm_days = 14
+tags = ["git", "sublime-merge", "cache"]
+stacks = ["git"]
+description = "Caches of Sublime Merge."
+
+[[rule]]
+id = "gitbutler.caches"
+name = "GitButler caches"
+bucket = "system"
+group = "Git clients"
+kind = "path"
+paths = ["~/Library/Caches/com.gitbutler.app", "~/Library/Logs/com.gitbutler.app"]
+cost = "rebuild"
+running_apps = ["GitButler", "gitbutler-tauri"]
+warm_days = 14
+tags = ["git", "gitbutler", "cache", "logs"]
+stacks = ["git"]
+description = "Caches and logs of the GitButler app; virtual branch data lives in each repository and is untouched."

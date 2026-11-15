@@ -1,4 +1,45 @@
-# Coding agents, AI editors and local models.
+# Coding agents, AI desktop apps and VS Code-family editors.
+# Local models live in tools-models.toml; other editors and IDEs in tools-editors.toml.
+# VS Code-family caches stay here so these exact rules win over the generic Electron
+# cache globs in system.toml (files load in name order and the first exact claim wins).
+
+# ---------------------------------------------------------------------------
+# Agent workspace managers that keep worktrees outside your dev roots.
+# (Claude, Codex, Conductor, Cursor, T3 Code, Superset, Crystal, Vibe Kanban,
+# OpenCode and Sculptor homes are in mod.toml.)
+# ---------------------------------------------------------------------------
+
+[[worktree_home]]
+path = "~/.claude-squad/worktrees"
+agent = "claude-squad"
+
+[[worktree_home]]
+path = "~/.windsurf/worktrees"
+agent = "windsurf"
+
+[[worktree_home]]
+path = "~/.local/share/opencode/worktree"
+agent = "opencode"
+
+[[worktree_home]]
+path = "$TMPDIR/vibe-kanban/worktrees"
+agent = "vibe-kanban"
+
+[[worktree_home]]
+path = "~/.cmux/src"
+agent = "cmux"
+
+[[worktree_home]]
+path = "~/.mux/src"
+agent = "mux"
+
+[[worktree_home]]
+path = "~/.config/container-use/worktrees"
+agent = "container-use"
+
+# ---------------------------------------------------------------------------
+# Claude Code and the Claude app
+# ---------------------------------------------------------------------------
 
 [[rule]]
 id = "claude.cli-versions"
@@ -12,35 +53,25 @@ params.active = ["~/.local/bin/claude"]
 params.keep = 1
 cost = "none"
 action = "delete"
-description = "Claude Code keeps every downloaded version. poo keeps the one ~/.local/bin/claude points to and the newest other one."
+rebuild = "claude install <version>"
+tags = ["ai", "agent", "claude", "old-versions"]
+stacks = ["ai", "claude"]
+description = "Claude Code keeps every downloaded version; poo keeps the one ~/.local/bin/claude points to and the newest other one."
 
 [[rule]]
-id = "cursor.agent-versions"
-name = "Old Cursor Agent versions"
+id = "claude.npm-local-install"
+name = "Legacy Claude Code local install"
 bucket = "ai"
 group = "Agent CLIs"
-kind = "provider"
-provider = "versions"
-params.path = "~/.local/share/cursor-agent/versions"
-params.active = ["~/.local/bin/cursor-agent"]
-params.keep = 1
-cost = "none"
-action = "delete"
-description = "Superseded cursor-agent builds."
-
-[[rule]]
-id = "copilot.cli-versions"
-name = "Old Copilot CLI versions"
-bucket = "ai"
-group = "Agent CLIs"
-kind = "provider"
-provider = "versions"
-params.path = "~/.copilot/pkg/universal"
-params.active = ["~/.local/bin/copilot"]
-params.keep = 1
-cost = "none"
-action = "delete"
-description = "Superseded GitHub Copilot CLI packages."
+kind = "path"
+paths = ["~/.claude/local"]
+cost = "redownload"
+tier = "review"
+rebuild = "claude migrate-installer"
+tags = ["ai", "agent", "claude", "old-versions"]
+stacks = ["ai", "claude"]
+description = "The npm-based install Claude Code used before the native installer, left behind once ~/.local/bin/claude is the native build."
+recommend = "Check `which claude` and your shell aliases first: if they point into ~/.claude/local you still use it."
 
 [[rule]]
 id = "claude.desktop-code-versions"
@@ -54,7 +85,165 @@ params.keep = 2
 cost = "none"
 action = "delete"
 running_apps = ["Claude"]
-description = "Older Claude Code builds the Claude desktop app downloaded."
+rebuild = "the Claude app downloads the version it needs on the next Code session"
+tags = ["ai", "agent", "claude", "old-versions"]
+stacks = ["ai", "claude"]
+description = "Older Claude Code builds the Claude desktop app downloaded; the two newest are kept."
+
+[[rule]]
+id = "claude.transcripts"
+name = "Claude Code transcripts"
+bucket = "ai"
+group = "Agent history"
+kind = "path"
+paths = ["~/.claude/projects"]
+each = true
+cost = "data"
+tier = "review"
+tags = ["ai", "agent", "claude", "history"]
+stacks = ["ai", "claude"]
+description = "Conversation history per project that Claude Code uses for resume and memory; projects you no longer work on can go."
+
+[[rule]]
+id = "claude.file-history"
+name = "Claude Code file history"
+bucket = "ai"
+group = "Agent history"
+kind = "path"
+paths = ["~/.claude/file-history"]
+cost = "data"
+tier = "review"
+tags = ["ai", "agent", "claude", "history"]
+stacks = ["ai", "claude"]
+description = "Snapshots Claude Code keeps so it can rewind edits."
+
+[[rule]]
+id = "claude.scratch"
+name = "Claude Code scratch state"
+bucket = "ai"
+group = "Agent caches"
+kind = "path"
+paths = ["~/.claude/shell-snapshots", "~/.claude/debug", "~/.claude/statsig", "~/.claude/todos", "~/.claude/paste-cache", "~/.claude/telemetry", "~/.claude/session-env", "~/.claude/downloads", "~/.cache/claude/staging"]
+cost = "none"
+contents = true
+min_age_days = 7
+tags = ["ai", "agent", "claude", "cache", "logs"]
+stacks = ["ai", "claude"]
+description = "Shell snapshots, debug logs, todo files, unsent telemetry and update staging from sessions older than a week."
+
+[[rule]]
+id = "claude.mcp-logs"
+name = "Claude Code MCP logs"
+bucket = "junk"
+group = "Logs"
+kind = "path"
+paths = ["~/Library/Caches/claude-cli-nodejs"]
+each = true
+cost = "none"
+tags = ["ai", "agent", "claude", "logs", "mcp"]
+stacks = ["ai", "claude"]
+description = "MCP server logs Claude Code writes per project on every session."
+
+[[rule]]
+id = "claude.plugin-marketplaces"
+name = "Claude Code plugin marketplaces"
+bucket = "ai"
+group = "Agent caches"
+kind = "path"
+paths = ["~/.claude/plugins/marketplaces"]
+each = true
+cost = "redownload"
+tier = "review"
+rebuild = "claude plugin marketplace update"
+tags = ["ai", "agent", "claude", "plugins"]
+stacks = ["ai", "claude"]
+description = "Git clones of the plugin marketplaces you added; Claude Code clones them again on update."
+
+[[rule]]
+id = "claude.plugin-cache"
+name = "Claude Code plugin cache"
+bucket = "ai"
+group = "Agent caches"
+kind = "path"
+paths = ["~/.claude/plugins/cache"]
+each = true
+cost = "redownload"
+tier = "review"
+rebuild = "reinstall the plugin with /plugin"
+tags = ["ai", "agent", "claude", "plugins"]
+stacks = ["ai", "claude"]
+description = "Installed plugin payloads per marketplace, including versions that updates superseded."
+
+[[rule]]
+id = "desktop.claude"
+name = "Claude app caches"
+bucket = "ai"
+group = "AI apps"
+kind = "path"
+paths = [
+  "~/Library/Application Support/Claude/Cache",
+  "~/Library/Application Support/Claude/Code Cache",
+  "~/Library/Application Support/Claude/GPUCache",
+  "~/Library/Application Support/Claude/DawnGraphiteCache",
+  "~/Library/Application Support/Claude/DawnWebGPUCache",
+  "~/Library/Application Support/Claude/GraphiteDawnCache",
+  "~/Library/Application Support/Claude/Shared Dictionary",
+  "~/Library/Application Support/Claude/Crashpad/completed",
+  "~/Library/Application Support/Claude/sentry",
+  "~/Library/Caches/com.anthropic.claudefordesktop",
+]
+cost = "rebuild"
+running_apps = ["Claude"]
+warm_days = 7
+tags = ["ai", "claude", "cache", "electron"]
+stacks = ["ai", "claude"]
+description = "Chromium caches and crash reports of the Claude desktop app."
+
+[[rule]]
+id = "desktop.claude-logs"
+name = "Claude app logs"
+bucket = "junk"
+group = "Logs"
+kind = "path"
+paths = ["~/Library/Logs/Claude"]
+cost = "none"
+contents = true
+tags = ["ai", "claude", "logs", "mcp"]
+stacks = ["ai", "claude"]
+description = "Main and MCP server logs of the Claude desktop app."
+
+[[rule]]
+id = "desktop.claude-vm"
+name = "Claude app VM bundles"
+bucket = "ai"
+group = "AI apps"
+kind = "path"
+paths = ["~/Library/Application Support/Claude/vm_bundles"]
+each = true
+cost = "redownload"
+running_apps = ["Claude"]
+warm_days = 14
+rebuild = "the Claude app downloads the bundle again when it needs a sandbox"
+tags = ["ai", "claude", "vm", "disk-image"]
+stacks = ["ai", "claude"]
+description = "Sandbox VM images the Claude app downloads for code execution."
+
+[[rule]]
+id = "desktop.claude-sessions"
+name = "Claude app agent sessions"
+bucket = "ai"
+group = "Agent history"
+kind = "path"
+paths = ["~/Library/Application Support/Claude/claude-code-sessions", "~/Library/Application Support/Claude/local-agent-mode-sessions"]
+cost = "data"
+tier = "review"
+tags = ["ai", "agent", "claude", "history"]
+stacks = ["ai", "claude"]
+description = "Sessions and transcripts the Claude app keeps for its Code and local agent modes."
+
+# ---------------------------------------------------------------------------
+# Codex CLI and app
+# ---------------------------------------------------------------------------
 
 [[rule]]
 id = "codex.daemon-releases"
@@ -69,42 +258,25 @@ params.keep = 1
 cost = "none"
 action = "delete"
 running_apps = ["Codex", "codex"]
-description = "Superseded Codex app-server daemon releases."
+tags = ["ai", "agent", "codex", "old-versions"]
+stacks = ["ai", "codex"]
+description = "Superseded Codex app-server daemon releases; the current one and the newest other are kept."
 
 [[rule]]
-id = "claude.transcripts"
-name = "Claude Code transcripts"
+id = "codex.artifact-runtimes"
+name = "Old Codex artifact runtimes"
 bucket = "ai"
-group = "Agent history"
-kind = "path"
-paths = ["~/.claude/projects"]
-each = true
-cost = "data"
-tier = "review"
-description = "Conversation history per project. Agents use it for resume and memory. Old projects you no longer work on can go."
-
-[[rule]]
-id = "claude.file-history"
-name = "Claude Code file history"
-bucket = "ai"
-group = "Agent history"
-kind = "path"
-paths = ["~/.claude/file-history"]
-cost = "data"
-tier = "review"
-description = "Snapshots Claude Code keeps so it can rewind edits."
-
-[[rule]]
-id = "claude.scratch"
-name = "Claude Code scratch state"
-bucket = "ai"
-group = "Agent caches"
-kind = "path"
-paths = ["~/.claude/shell-snapshots", "~/.claude/debug", "~/.claude/statsig", "~/.claude/todos", "~/.claude/paste-cache"]
+group = "Agent CLIs"
+kind = "provider"
+provider = "versions"
+params.path = "~/Library/Application Support/Codex/artifact-sessions/runtime-generations"
+params.pattern = "generation-*"
+params.keep = 1
 cost = "none"
-contents = true
-min_age_days = 7
-description = "Shell snapshots, debug logs and todo files from old sessions."
+action = "delete"
+tags = ["ai", "agent", "codex", "old-versions", "runtime"]
+stacks = ["ai", "codex"]
+description = "Runtime generations the Codex app unpacked for artifact sessions; only the newest is in use."
 
 [[rule]]
 id = "codex.sessions"
@@ -115,7 +287,22 @@ kind = "path"
 paths = ["~/.codex/sessions", "~/.codex/archived_sessions"]
 cost = "data"
 tier = "review"
-description = "Codex rollout transcripts."
+tags = ["ai", "agent", "codex", "history"]
+stacks = ["ai", "codex"]
+description = "Codex rollout transcripts that resume and history read."
+
+[[rule]]
+id = "codex.state-dbs"
+name = "Codex databases"
+bucket = "ai"
+group = "Agent history"
+kind = "path"
+paths = ["~/.codex/*.sqlite"]
+cost = "data"
+action = "none"
+tags = ["ai", "agent", "codex", "history"]
+stacks = ["ai", "codex"]
+description = "Codex's thread history, state and log databases, shown for their size and never deleted by poo because Codex keeps them open."
 
 [[rule]]
 id = "codex.logs"
@@ -127,7 +314,9 @@ paths = ["~/.codex/log"]
 cost = "none"
 contents = true
 min_age_days = 7
-description = "Codex CLI logs."
+tags = ["ai", "agent", "codex", "logs"]
+stacks = ["ai", "codex"]
+description = "Codex CLI logs that have not been written for a week; the app's logs in ~/Library/Logs are covered by App logs."
 
 [[rule]]
 id = "codex.runtimes"
@@ -140,7 +329,193 @@ each = true
 cost = "redownload"
 running_apps = ["Codex", "codex"]
 warm_days = 14
+rebuild = "Codex downloads the runtime again on the next run"
+tags = ["ai", "agent", "codex", "runtime"]
+stacks = ["ai", "codex"]
 description = "Sandboxed runtimes Codex downloads."
+
+[[rule]]
+id = "codex.cache"
+name = "Codex caches"
+bucket = "ai"
+group = "Agent caches"
+kind = "path"
+paths = ["~/.codex/cache"]
+cost = "redownload"
+running_apps = ["Codex", "codex"]
+warm_days = 7
+tags = ["ai", "agent", "codex", "cache"]
+stacks = ["ai", "codex"]
+description = "Plugin catalog, app directory and tool caches Codex fetches again."
+
+[[rule]]
+id = "codex.tmp"
+name = "Codex staging folders"
+bucket = "ai"
+group = "Agent caches"
+kind = "path"
+paths = ["~/.codex/.tmp"]
+each = true
+exclude = ["*.lock", "*.sha"]
+cost = "redownload"
+tier = "review"
+min_age_days = 2
+tags = ["ai", "agent", "codex", "staging"]
+stacks = ["ai", "codex"]
+description = "Temporary git clones and the plugin marketplace checkouts Codex syncs under ~/.codex/.tmp; Codex reads the synced checkouts, so delete them only with Codex closed."
+
+[[rule]]
+id = "codex.plugin-cache"
+name = "Codex plugin cache"
+bucket = "ai"
+group = "Agent caches"
+kind = "path"
+paths = ["~/.codex/plugins/cache"]
+each = true
+cost = "redownload"
+tier = "review"
+tags = ["ai", "agent", "codex", "plugins"]
+stacks = ["ai", "codex"]
+description = "Installed Codex plugins per marketplace, including versions updates replaced."
+
+[[rule]]
+id = "codex.plugin-staging"
+name = "Codex plugin install staging"
+bucket = "ai"
+group = "Agent caches"
+kind = "path"
+paths = ["~/.codex/plugins/.remote-plugin-install-staging"]
+cost = "none"
+min_age_days = 1
+tags = ["ai", "agent", "codex", "plugins", "staging"]
+stacks = ["ai", "codex"]
+description = "Plugin downloads Codex staged before installing them; its app updates are covered by Staged Sparkle app updates."
+
+[[rule]]
+id = "desktop.codex"
+name = "Codex app caches"
+bucket = "ai"
+group = "AI apps"
+kind = "path"
+paths = [
+  "~/Library/Caches/com.openai.codex",
+  "~/Library/Caches/Codex",
+  "~/Library/Application Support/Codex/Crashpad/completed",
+  "~/Library/Application Support/Codex/component_crx_cache",
+  "~/Library/Application Support/Codex/GraphiteDawnCache",
+  "~/Library/Application Support/Codex/Code Cache",
+  "~/Library/Application Support/Codex/GPUCache",
+]
+cost = "rebuild"
+running_apps = ["Codex", "ChatGPT", "Codex (Aperitif)"]
+warm_days = 7
+tags = ["ai", "codex", "cache", "electron"]
+stacks = ["ai", "codex"]
+description = "HTTP, component and GPU caches of the Codex desktop app."
+
+[[rule]]
+id = "desktop.ai-apps"
+name = "ChatGPT app caches"
+bucket = "ai"
+group = "AI apps"
+kind = "path"
+paths = ["~/Library/Caches/com.openai.chat", "~/Library/Caches/com.openai.atlas"]
+cost = "rebuild"
+running_apps = ["ChatGPT", "ChatGPT Atlas"]
+warm_days = 7
+tags = ["ai", "chatgpt", "cache"]
+stacks = ["ai", "chatgpt"]
+description = "Caches of the ChatGPT and ChatGPT Atlas apps."
+
+# ---------------------------------------------------------------------------
+# Other coding agents
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "cursor.agent-versions"
+name = "Old Cursor Agent versions"
+bucket = "ai"
+group = "Agent CLIs"
+kind = "provider"
+provider = "versions"
+params.path = "~/.local/share/cursor-agent/versions"
+params.active = ["~/.local/bin/cursor-agent"]
+params.keep = 1
+cost = "none"
+action = "delete"
+tags = ["ai", "agent", "cursor", "old-versions"]
+stacks = ["ai", "cursor"]
+description = "Superseded cursor-agent builds; the active one and the newest other are kept."
+
+[[rule]]
+id = "cursor.agent-history"
+name = "Cursor agent chats"
+bucket = "ai"
+group = "Agent history"
+kind = "path"
+paths = ["~/.cursor/chats", "~/.cursor/projects"]
+each = true
+cost = "data"
+tier = "review"
+tags = ["ai", "agent", "cursor", "history"]
+stacks = ["ai", "cursor"]
+description = "Chats and per-project agent transcripts of Cursor and cursor-agent."
+
+[[rule]]
+id = "cursor.ai-tracking"
+name = "Cursor AI code tracking"
+bucket = "ai"
+group = "Agent history"
+kind = "path"
+paths = ["~/.cursor/ai-tracking"]
+cost = "data"
+tier = "review"
+running_apps = ["Cursor"]
+tags = ["ai", "cursor", "history"]
+stacks = ["ai", "cursor"]
+description = "Cursor's local database of AI-written code attribution, which can grow to gigabytes; Cursor starts a new one when it is gone."
+
+[[rule]]
+id = "copilot.cli-versions"
+name = "Old Copilot CLI versions"
+bucket = "ai"
+group = "Agent CLIs"
+kind = "provider"
+provider = "versions"
+params.path = "~/.copilot/pkg/universal"
+params.active = ["~/.local/bin/copilot"]
+params.keep = 1
+cost = "none"
+action = "delete"
+tags = ["ai", "agent", "copilot", "old-versions"]
+stacks = ["ai", "copilot"]
+description = "Superseded GitHub Copilot CLI packages; the active one and the newest other are kept."
+
+[[rule]]
+id = "copilot.logs"
+name = "Copilot CLI logs"
+bucket = "junk"
+group = "Logs"
+kind = "path"
+paths = ["~/.copilot/logs"]
+cost = "none"
+contents = true
+tags = ["ai", "agent", "copilot", "logs"]
+stacks = ["ai", "copilot"]
+description = "Per-process logs of the GitHub Copilot CLI."
+
+[[rule]]
+id = "copilot.sessions"
+name = "Copilot CLI sessions"
+bucket = "ai"
+group = "Agent history"
+kind = "path"
+paths = ["~/.copilot/session-state", "~/.copilot/history-session-state"]
+cost = "data"
+tier = "review"
+tags = ["ai", "agent", "copilot", "history"]
+stacks = ["ai", "copilot"]
+description = "Saved GitHub Copilot CLI sessions that resume reads."
 
 [[rule]]
 id = "gemini.tmp"
@@ -151,7 +526,36 @@ kind = "path"
 paths = ["~/.gemini/tmp"]
 cost = "data"
 tier = "review"
-description = "Gemini CLI chat checkpoints."
+tags = ["ai", "agent", "gemini", "history"]
+stacks = ["ai", "gemini"]
+description = "Gemini CLI chat checkpoints and per-project logs."
+
+[[rule]]
+id = "gemini.antigravity"
+name = "Antigravity agent data"
+bucket = "ai"
+group = "Agent history"
+kind = "path"
+paths = ["~/.gemini/antigravity"]
+each = true
+cost = "data"
+tier = "review"
+tags = ["ai", "agent", "antigravity", "gemini", "history"]
+stacks = ["ai", "gemini"]
+description = "Antigravity conversations, agent artifacts, browser recordings and code tracking, one item per folder."
+
+[[rule]]
+id = "qwen.tmp"
+name = "Qwen Code checkpoints"
+bucket = "ai"
+group = "Agent history"
+kind = "path"
+paths = ["~/.qwen/tmp"]
+cost = "data"
+tier = "review"
+tags = ["ai", "agent", "qwen", "history"]
+stacks = ["ai", "qwen"]
+description = "Qwen Code chat checkpoints and per-project logs."
 
 [[rule]]
 id = "opencode.cache"
@@ -162,7 +566,242 @@ kind = "path"
 paths = ["~/.cache/opencode"]
 cost = "redownload"
 warm_days = 14
-description = "OpenCode's package and model cache."
+tags = ["ai", "agent", "opencode", "cache"]
+stacks = ["ai", "opencode"]
+description = "OpenCode's package and model metadata cache."
+
+[[rule]]
+id = "opencode.tools"
+name = "OpenCode language servers"
+bucket = "ai"
+group = "Agent caches"
+kind = "path"
+paths = ["~/.local/share/opencode/bin"]
+cost = "redownload"
+running_apps = ["opencode", "OpenCode"]
+warm_days = 30
+rebuild = "OpenCode downloads language servers again when it needs them"
+tags = ["ai", "agent", "opencode", "runtime", "language-server"]
+stacks = ["ai", "opencode"]
+description = "Language servers and tools OpenCode downloads on demand."
+
+[[rule]]
+id = "opencode.logs"
+name = "OpenCode logs"
+bucket = "junk"
+group = "Logs"
+kind = "path"
+paths = ["~/.local/share/opencode/log"]
+cost = "none"
+contents = true
+tags = ["ai", "agent", "opencode", "logs"]
+stacks = ["ai", "opencode"]
+description = "OpenCode's rotating log files."
+
+[[rule]]
+id = "opencode.sessions"
+name = "OpenCode sessions"
+bucket = "ai"
+group = "Agent history"
+kind = "path"
+paths = ["~/.local/share/opencode/storage", "~/.local/share/opencode/snapshot", "~/.local/share/opencode/opencode.db"]
+cost = "data"
+tier = "review"
+tags = ["ai", "agent", "opencode", "history"]
+stacks = ["ai", "opencode"]
+description = "OpenCode sessions, messages and the git snapshots it uses to undo edits."
+
+[[rule]]
+id = "aider.tags-cache"
+name = "Aider repo-map caches"
+bucket = "ai"
+group = "Agent caches"
+kind = "artifact"
+names = [".aider.tags.cache.v*"]
+cost = "rebuild"
+warm_days = 14
+rebuild = "aider rebuilds its repo map on the next run"
+tags = ["ai", "agent", "aider", "cache", "index"]
+stacks = ["ai", "aider"]
+description = "Per-repository tag caches Aider builds for its repo map."
+
+[[rule]]
+id = "aider.caches"
+name = "Aider caches"
+bucket = "ai"
+group = "Agent caches"
+kind = "path"
+paths = ["~/.aider/caches"]
+cost = "redownload"
+warm_days = 14
+tags = ["ai", "agent", "aider", "cache"]
+stacks = ["ai", "aider"]
+description = "Model metadata and other caches Aider keeps in ~/.aider."
+
+[[rule]]
+id = "continue.index"
+name = "Continue codebase index"
+bucket = "ai"
+group = "Agent caches"
+kind = "path"
+paths = ["~/.continue/index"]
+cost = "rebuild"
+warm_days = 30
+rebuild = "Continue re-indexes open workspaces"
+tags = ["ai", "agent", "continue", "index"]
+stacks = ["ai", "continue"]
+description = "Embeddings and search index the Continue extension builds per workspace."
+
+[[rule]]
+id = "continue.sessions"
+name = "Continue sessions"
+bucket = "ai"
+group = "Agent history"
+kind = "path"
+paths = ["~/.continue/sessions"]
+cost = "data"
+tier = "review"
+tags = ["ai", "agent", "continue", "history"]
+stacks = ["ai", "continue"]
+description = "Chat sessions saved by the Continue extension."
+
+[[rule]]
+id = "continue.logs"
+name = "Continue logs"
+bucket = "junk"
+group = "Logs"
+kind = "path"
+paths = ["~/.continue/logs"]
+cost = "none"
+contents = true
+tags = ["ai", "agent", "continue", "logs"]
+stacks = ["ai", "continue"]
+description = "Logs of the Continue extension and CLI."
+
+[[rule]]
+id = "cline.tasks"
+name = "Cline, Roo and Kilo tasks"
+bucket = "ai"
+group = "Agent history"
+kind = "path"
+paths = [
+  "~/Library/Application Support/*/User/globalStorage/saoudrizwan.claude-dev/tasks",
+  "~/Library/Application Support/*/User/globalStorage/saoudrizwan.claude-dev/checkpoints",
+  "~/Library/Application Support/*/User/globalStorage/rooveterinaryinc.roo-cline/tasks",
+  "~/Library/Application Support/*/User/globalStorage/rooveterinaryinc.roo-cline/checkpoints",
+  "~/Library/Application Support/*/User/globalStorage/kilocode.kilo-code/tasks",
+  "~/Library/Application Support/*/User/globalStorage/kilocode.kilo-code/checkpoints",
+]
+cost = "data"
+tier = "review"
+tags = ["ai", "agent", "cline", "roo", "history"]
+stacks = ["ai", "vscode"]
+description = "Task histories and checkpoint repositories of the Cline, Roo Code and Kilo Code extensions in any VS Code-family editor."
+
+[[rule]]
+id = "amp.logs"
+name = "Amp logs"
+bucket = "junk"
+group = "Logs"
+kind = "path"
+paths = ["~/.cache/amp/logs"]
+cost = "none"
+contents = true
+tags = ["ai", "agent", "amp", "logs"]
+stacks = ["ai", "amp"]
+description = "Amp CLI logs."
+
+[[rule]]
+id = "goose.sessions"
+name = "Goose sessions"
+bucket = "ai"
+group = "Agent history"
+kind = "path"
+paths = ["~/.local/share/goose/sessions"]
+cost = "data"
+tier = "review"
+tags = ["ai", "agent", "goose", "history"]
+stacks = ["ai", "goose"]
+description = "Saved Goose sessions."
+
+[[rule]]
+id = "goose.logs"
+name = "Goose logs"
+bucket = "junk"
+group = "Logs"
+kind = "path"
+paths = ["~/.local/state/goose/logs"]
+cost = "none"
+contents = true
+tags = ["ai", "agent", "goose", "logs"]
+stacks = ["ai", "goose"]
+description = "Goose CLI and server logs."
+
+[[rule]]
+id = "factory.sessions"
+name = "Factory Droid sessions"
+bucket = "ai"
+group = "Agent history"
+kind = "path"
+paths = ["~/.factory/sessions"]
+cost = "data"
+tier = "review"
+tags = ["ai", "agent", "factory", "history"]
+stacks = ["ai", "factory"]
+description = "Session transcripts of Factory's droid CLI."
+
+[[rule]]
+id = "hermes.cache"
+name = "Hermes agent caches"
+bucket = "ai"
+group = "Agent caches"
+kind = "path"
+paths = ["~/.hermes/cache", "~/.hermes/audio_cache", "~/.hermes/image_cache"]
+cost = "redownload"
+warm_days = 14
+tags = ["ai", "agent", "hermes", "cache"]
+stacks = ["ai", "hermes"]
+description = "Package, tool discovery and media caches of the Hermes agent."
+
+[[rule]]
+id = "hermes.logs"
+name = "Hermes agent logs"
+bucket = "junk"
+group = "Logs"
+kind = "path"
+paths = ["~/.hermes/logs"]
+cost = "none"
+contents = true
+tags = ["ai", "agent", "hermes", "logs"]
+stacks = ["ai", "hermes"]
+description = "Logs of the Hermes agent and its gateway."
+
+[[rule]]
+id = "hermes.sessions"
+name = "Hermes agent sessions"
+bucket = "ai"
+group = "Agent history"
+kind = "path"
+paths = ["~/.hermes/sessions", "~/.hermes/memories"]
+cost = "data"
+tier = "review"
+tags = ["ai", "agent", "hermes", "history"]
+stacks = ["ai", "hermes"]
+description = "Hermes agent sessions and the memories it keeps between them."
+
+[[rule]]
+id = "openclaw.cache"
+name = "OpenClaw caches"
+bucket = "ai"
+group = "Agent caches"
+kind = "path"
+paths = ["~/Library/Caches/openclaw"]
+cost = "rebuild"
+warm_days = 14
+running_apps = ["openclaw"]
+tags = ["ai", "agent", "openclaw", "cache"]
+stacks = ["ai", "openclaw"]
+description = "Transpile and plugin caches of the OpenClaw gateway."
 
 [[rule]]
 id = "agent.browsers"
@@ -170,10 +809,31 @@ name = "Agent browser profiles"
 bucket = "ai"
 group = "Agent caches"
 kind = "path"
-paths = ["~/.cache/chrome-devtools-mcp", "~/.cache/ms-playwright-mcp", "~/.agent-browser/browsers", "~/.gemini/antigravity-browser-profile"]
+paths = ["~/.cache/chrome-devtools-mcp", "~/.cache/ms-playwright-mcp", "~/.agent-browser/browsers", "~/.gemini/antigravity-browser-profile", "~/.config/browseruse/profiles"]
 cost = "rebuild"
 warm_days = 14
-description = "Browsers and profiles that MCP servers and agents drive."
+tags = ["ai", "agent", "mcp", "browser-profile"]
+stacks = ["ai", "mcp"]
+description = "Browsers and profiles that MCP servers and agents drive; deleting one also signs the agent out of sites it logged into."
+
+[[rule]]
+id = "conductor.caches"
+name = "Conductor app caches"
+bucket = "ai"
+group = "AI apps"
+kind = "path"
+paths = ["~/Library/Caches/com.conductor.app"]
+cost = "rebuild"
+running_apps = ["Conductor"]
+warm_days = 7
+tags = ["ai", "agent", "conductor", "cache"]
+stacks = ["ai", "conductor"]
+description = "HTTP and WebView caches of the Conductor app; its workspaces are worktrees listed under Worktrees."
+
+# ---------------------------------------------------------------------------
+# VS Code family (VS Code, Insiders, VSCodium, Positron, Cursor, Windsurf,
+# Kiro, Trae, Antigravity)
+# ---------------------------------------------------------------------------
 
 [[rule]]
 id = "editor.vscode-caches"
@@ -181,11 +841,94 @@ name = "VS Code caches"
 bucket = "ai"
 group = "Editors"
 kind = "path"
-paths = ["~/Library/Application Support/Code/Cache", "~/Library/Application Support/Code/CachedData", "~/Library/Application Support/Code/CachedExtensionVSIXs", "~/Library/Application Support/Code/Code Cache", "~/Library/Application Support/Code/GPUCache", "~/Library/Application Support/Code/CachedProfilesData", "~/Library/Application Support/Code/logs"]
+paths = [
+  "~/Library/Application Support/Code/Cache",
+  "~/Library/Application Support/Code/CachedData",
+  "~/Library/Application Support/Code/CachedExtensionVSIXs",
+  "~/Library/Application Support/Code/Code Cache",
+  "~/Library/Application Support/Code/GPUCache",
+  "~/Library/Application Support/Code/DawnGraphiteCache",
+  "~/Library/Application Support/Code/DawnWebGPUCache",
+  "~/Library/Application Support/Code/CachedProfilesData",
+  "~/Library/Application Support/Code/Crashpad/completed",
+  "~/Library/Application Support/Code/logs",
+  "~/Library/Caches/com.microsoft.VSCode",
+]
 cost = "rebuild"
 running_apps = ["Code", "Electron"]
 warm_days = 7
-description = "VS Code's Chromium caches, old update payloads and logs."
+tags = ["editor", "vscode", "cache", "logs", "electron"]
+stacks = ["vscode"]
+description = "VS Code's Chromium caches, compiled code caches of old builds, downloaded extension packages and logs."
+
+[[rule]]
+id = "editor.vscode-insiders-caches"
+name = "VS Code Insiders caches"
+bucket = "ai"
+group = "Editors"
+kind = "path"
+paths = [
+  "~/Library/Application Support/Code - Insiders/Cache",
+  "~/Library/Application Support/Code - Insiders/CachedData",
+  "~/Library/Application Support/Code - Insiders/CachedExtensionVSIXs",
+  "~/Library/Application Support/Code - Insiders/Code Cache",
+  "~/Library/Application Support/Code - Insiders/GPUCache",
+  "~/Library/Application Support/Code - Insiders/CachedProfilesData",
+  "~/Library/Application Support/Code - Insiders/Crashpad/completed",
+  "~/Library/Application Support/Code - Insiders/logs",
+  "~/Library/Caches/com.microsoft.VSCodeInsiders",
+]
+cost = "rebuild"
+running_apps = ["Code - Insiders", "Electron"]
+warm_days = 7
+tags = ["editor", "vscode", "cache", "logs", "electron"]
+stacks = ["vscode"]
+description = "VS Code Insiders' Chromium caches, compiled code caches of old builds, downloaded extension packages and logs."
+
+[[rule]]
+id = "editor.vscodium-caches"
+name = "VSCodium caches"
+bucket = "ai"
+group = "Editors"
+kind = "path"
+paths = [
+  "~/Library/Application Support/VSCodium/Cache",
+  "~/Library/Application Support/VSCodium/CachedData",
+  "~/Library/Application Support/VSCodium/CachedExtensionVSIXs",
+  "~/Library/Application Support/VSCodium/Code Cache",
+  "~/Library/Application Support/VSCodium/GPUCache",
+  "~/Library/Application Support/VSCodium/CachedProfilesData",
+  "~/Library/Application Support/VSCodium/logs",
+  "~/Library/Caches/com.vscodium",
+]
+cost = "rebuild"
+running_apps = ["VSCodium", "Electron"]
+warm_days = 7
+tags = ["editor", "vscode", "vscodium", "cache", "logs", "electron"]
+stacks = ["vscode"]
+description = "VSCodium's Chromium caches, compiled code caches of old builds, downloaded extension packages and logs."
+
+[[rule]]
+id = "editor.positron-caches"
+name = "Positron caches"
+bucket = "ai"
+group = "Editors"
+kind = "path"
+paths = [
+  "~/Library/Application Support/Positron/Cache",
+  "~/Library/Application Support/Positron/CachedData",
+  "~/Library/Application Support/Positron/CachedExtensionVSIXs",
+  "~/Library/Application Support/Positron/Code Cache",
+  "~/Library/Application Support/Positron/GPUCache",
+  "~/Library/Application Support/Positron/CachedProfilesData",
+  "~/Library/Application Support/Positron/logs",
+]
+cost = "rebuild"
+running_apps = ["Positron", "Electron"]
+warm_days = 7
+tags = ["editor", "vscode", "positron", "cache", "logs", "electron"]
+stacks = ["vscode", "python", "r"]
+description = "Positron's Chromium caches, compiled code caches of old builds, downloaded extension packages and logs."
 
 [[rule]]
 id = "editor.cursor-caches"
@@ -193,23 +936,129 @@ name = "Cursor caches"
 bucket = "ai"
 group = "Editors"
 kind = "path"
-paths = ["~/Library/Application Support/Cursor/Cache", "~/Library/Application Support/Cursor/CachedData", "~/Library/Application Support/Cursor/CachedExtensionVSIXs", "~/Library/Application Support/Cursor/Code Cache", "~/Library/Application Support/Cursor/GPUCache", "~/Library/Application Support/Cursor/CachedProfilesData", "~/Library/Application Support/Cursor/logs"]
+paths = [
+  "~/Library/Application Support/Cursor/Cache",
+  "~/Library/Application Support/Cursor/CachedData",
+  "~/Library/Application Support/Cursor/CachedExtensionVSIXs",
+  "~/Library/Application Support/Cursor/Code Cache",
+  "~/Library/Application Support/Cursor/GPUCache",
+  "~/Library/Application Support/Cursor/DawnGraphiteCache",
+  "~/Library/Application Support/Cursor/DawnWebGPUCache",
+  "~/Library/Application Support/Cursor/CachedProfilesData",
+  "~/Library/Application Support/Cursor/Crashpad/completed",
+  "~/Library/Application Support/Cursor/logs",
+  "~/Library/Caches/com.todesktop.230313mzl4w4u92",
+]
 cost = "rebuild"
 running_apps = ["Cursor"]
 warm_days = 7
-description = "Cursor's Chromium caches, old update payloads and logs."
+tags = ["ai", "editor", "cursor", "cache", "logs", "electron"]
+stacks = ["ai", "cursor", "vscode"]
+description = "Cursor's Chromium caches, compiled code caches of old builds, downloaded extension packages and logs."
 
 [[rule]]
 id = "editor.windsurf-caches"
-name = "Windsurf and other VS Code forks"
+name = "Windsurf caches"
 bucket = "ai"
 group = "Editors"
 kind = "path"
-paths = ["~/Library/Application Support/Windsurf/Cache", "~/Library/Application Support/Windsurf/CachedData", "~/Library/Application Support/Windsurf/Code Cache", "~/Library/Application Support/Windsurf/logs", "~/Library/Application Support/Kiro/Cache", "~/Library/Application Support/Kiro/CachedData", "~/Library/Application Support/Trae/Cache", "~/Library/Application Support/Trae/CachedData", "~/Library/Application Support/VSCodium/Cache", "~/Library/Application Support/VSCodium/CachedData"]
+paths = [
+  "~/Library/Application Support/Windsurf/Cache",
+  "~/Library/Application Support/Windsurf/CachedData",
+  "~/Library/Application Support/Windsurf/CachedExtensionVSIXs",
+  "~/Library/Application Support/Windsurf/Code Cache",
+  "~/Library/Application Support/Windsurf/GPUCache",
+  "~/Library/Application Support/Windsurf/CachedProfilesData",
+  "~/Library/Application Support/Windsurf/logs",
+  "~/Library/Caches/com.exafunction.windsurf",
+]
 cost = "rebuild"
-running_apps = ["Windsurf", "Kiro", "Trae", "VSCodium"]
+running_apps = ["Windsurf", "Electron"]
 warm_days = 7
-description = "Caches of VS Code forks."
+tags = ["ai", "editor", "windsurf", "cache", "logs", "electron"]
+stacks = ["ai", "windsurf", "vscode"]
+description = "Windsurf's Chromium caches, compiled code caches of old builds, downloaded extension packages and logs."
+
+[[rule]]
+id = "windsurf.agent-data"
+name = "Windsurf Cascade data"
+bucket = "ai"
+group = "Agent history"
+kind = "path"
+paths = ["~/.codeium/windsurf"]
+each = true
+cost = "data"
+tier = "review"
+tags = ["ai", "agent", "windsurf", "history"]
+stacks = ["ai", "windsurf"]
+description = "Cascade conversations, memories, code tracking and indexes Windsurf keeps, one item per folder."
+
+[[rule]]
+id = "editor.kiro-caches"
+name = "Kiro caches"
+bucket = "ai"
+group = "Editors"
+kind = "path"
+paths = [
+  "~/Library/Application Support/Kiro/Cache",
+  "~/Library/Application Support/Kiro/CachedData",
+  "~/Library/Application Support/Kiro/CachedExtensionVSIXs",
+  "~/Library/Application Support/Kiro/Code Cache",
+  "~/Library/Application Support/Kiro/GPUCache",
+  "~/Library/Application Support/Kiro/CachedProfilesData",
+  "~/Library/Application Support/Kiro/logs",
+]
+cost = "rebuild"
+running_apps = ["Kiro", "Electron"]
+warm_days = 7
+tags = ["ai", "editor", "kiro", "cache", "logs", "electron"]
+stacks = ["ai", "kiro", "vscode"]
+description = "Kiro's Chromium caches, compiled code caches of old builds, downloaded extension packages and logs."
+
+[[rule]]
+id = "editor.trae-caches"
+name = "Trae caches"
+bucket = "ai"
+group = "Editors"
+kind = "path"
+paths = [
+  "~/Library/Application Support/Trae/Cache",
+  "~/Library/Application Support/Trae/CachedData",
+  "~/Library/Application Support/Trae/CachedExtensionVSIXs",
+  "~/Library/Application Support/Trae/Code Cache",
+  "~/Library/Application Support/Trae/GPUCache",
+  "~/Library/Application Support/Trae/CachedProfilesData",
+  "~/Library/Application Support/Trae/logs",
+]
+cost = "rebuild"
+running_apps = ["Trae", "Electron"]
+warm_days = 7
+tags = ["ai", "editor", "trae", "cache", "logs", "electron"]
+stacks = ["ai", "trae", "vscode"]
+description = "Trae's Chromium caches, compiled code caches of old builds, downloaded extension packages and logs."
+
+[[rule]]
+id = "editor.antigravity-caches"
+name = "Antigravity caches"
+bucket = "ai"
+group = "Editors"
+kind = "path"
+paths = [
+  "~/Library/Application Support/Antigravity/Cache",
+  "~/Library/Application Support/Antigravity/CachedData",
+  "~/Library/Application Support/Antigravity/CachedExtensionVSIXs",
+  "~/Library/Application Support/Antigravity/Code Cache",
+  "~/Library/Application Support/Antigravity/GPUCache",
+  "~/Library/Application Support/Antigravity/CachedProfilesData",
+  "~/Library/Application Support/Antigravity/logs",
+  "~/Library/Caches/com.google.antigravity",
+]
+cost = "rebuild"
+running_apps = ["Antigravity", "Electron"]
+warm_days = 7
+tags = ["ai", "editor", "antigravity", "cache", "logs", "electron"]
+stacks = ["ai", "gemini", "vscode"]
+description = "Antigravity's Chromium caches, compiled code caches of old builds, downloaded extension packages and logs."
 
 [[rule]]
 id = "editor.workspace-storage"
@@ -217,24 +1066,102 @@ name = "Editor workspace storage"
 bucket = "ai"
 group = "Editors"
 kind = "path"
-paths = ["~/Library/Application Support/Code/User/workspaceStorage", "~/Library/Application Support/Cursor/User/workspaceStorage", "~/Library/Application Support/Windsurf/User/workspaceStorage"]
+paths = [
+  "~/Library/Application Support/Code/User/workspaceStorage",
+  "~/Library/Application Support/Code - Insiders/User/workspaceStorage",
+  "~/Library/Application Support/VSCodium/User/workspaceStorage",
+  "~/Library/Application Support/Positron/User/workspaceStorage",
+  "~/Library/Application Support/Cursor/User/workspaceStorage",
+  "~/Library/Application Support/Windsurf/User/workspaceStorage",
+  "~/Library/Application Support/Kiro/User/workspaceStorage",
+  "~/Library/Application Support/Trae/User/workspaceStorage",
+  "~/Library/Application Support/Antigravity/User/workspaceStorage",
+]
 each = true
 cost = "data"
 tier = "review"
-description = "Per-workspace state, including AI chat history in Cursor. Entries for deleted projects are safe to drop."
+tags = ["ai", "editor", "vscode", "history"]
+stacks = ["vscode"]
+description = "Per-workspace editor state, including AI chat history in Cursor and Copilot; entries for deleted projects are safe to drop."
+
+[[rule]]
+id = "editor.local-history"
+name = "Editor local history"
+bucket = "ai"
+group = "Editors"
+kind = "path"
+paths = [
+  "~/Library/Application Support/Code/User/History",
+  "~/Library/Application Support/Code - Insiders/User/History",
+  "~/Library/Application Support/VSCodium/User/History",
+  "~/Library/Application Support/Positron/User/History",
+  "~/Library/Application Support/Cursor/User/History",
+  "~/Library/Application Support/Windsurf/User/History",
+  "~/Library/Application Support/Kiro/User/History",
+  "~/Library/Application Support/Trae/User/History",
+  "~/Library/Application Support/Antigravity/User/History",
+]
+cost = "data"
+tier = "review"
+tags = ["editor", "vscode", "history"]
+stacks = ["vscode"]
+description = "Local file history (Timeline) VS Code-family editors keep for every saved file."
 
 [[rule]]
 id = "editor.extensions"
 name = "Editor extensions"
 bucket = "ai"
 group = "Editors"
-kind = "path"
-paths = ["~/.vscode/extensions", "~/.cursor/extensions", "~/.windsurf/extensions", "~/.vscode-insiders/extensions"]
-each = true
-exclude = ["extensions.json", ".obsolete"]
+kind = "provider"
+provider = "exec"
+params.timeout = 20
+params.command = ["/bin/sh", "-c", '''
+sep=""
+printf '{"items":['
+for d in "$HOME/.vscode/extensions" "$HOME/.vscode-insiders/extensions" "$HOME/.vscode-oss/extensions" "$HOME/.positron/extensions" "$HOME/.cursor/extensions" "$HOME/.windsurf/extensions" "$HOME/.kiro/extensions" "$HOME/.trae/extensions" "$HOME/.antigravity/extensions"; do
+  [ -d "$d" ] || continue
+  obs=" "
+  [ -f "$d/.obsolete" ] && obs=" $(sed -e 's/[{}"]//g' -e 's/:true//g' -e 's/,/ /g' "$d/.obsolete") "
+  for p in "$d"/*; do
+    [ -d "$p" ] && [ ! -L "$p" ] || continue
+    n=${p##*/}
+    case "$obs" in
+      *" $n "*) printf '%s{"path":"%s","name":"%s (obsolete)","cost":"none","reasons":["listed in .obsolete: the editor already replaced or uninstalled it"]}' "$sep" "$p" "$n" ;;
+      *) printf '%s{"path":"%s","name":"%s","tier":"review"}' "$sep" "$p" "$n" ;;
+    esac
+    sep=","
+  done
+done
+printf ']}'
+''']
 cost = "redownload"
-tier = "review"
-description = "Installed extensions, one per version. Old versions listed in .obsolete linger."
+action = "delete"
+running_apps = ["Code", "Code - Insiders", "VSCodium", "Positron", "Cursor", "Windsurf", "Kiro", "Trae", "Antigravity", "Electron"]
+rebuild = "reinstall the extension from the marketplace"
+tags = ["editor", "vscode", "extensions", "old-versions"]
+stacks = ["vscode"]
+description = "Installed VS Code-family extensions, one per version; versions the editor listed in .obsolete are junk, the rest need a look."
+recommend = "Obsolete versions are safe to delete once the editor is closed; restarting the editor also removes them."
+
+[[rule]]
+id = "vscode.cli-servers"
+name = "Old VS Code tunnel servers"
+bucket = "ai"
+group = "Editors"
+kind = "provider"
+provider = "versions"
+params.path = "~/.vscode/cli/servers"
+params.keep = 1
+cost = "redownload"
+action = "delete"
+rebuild = "the code CLI downloads the server build it needs"
+tags = ["editor", "vscode", "old-versions"]
+stacks = ["vscode"]
+description = "VS Code server builds the `code tunnel` and serve-web CLI downloaded for older releases."
+
+# ---------------------------------------------------------------------------
+# Zed
+# ---------------------------------------------------------------------------
 
 [[rule]]
 id = "editor.zed"
@@ -246,76 +1173,34 @@ paths = ["~/Library/Caches/Zed", "~/Library/Logs/Zed", "~/Library/Application Su
 cost = "rebuild"
 running_apps = ["zed", "Zed"]
 warm_days = 7
-description = "Zed caches and logs. Its db folder is left alone."
+tags = ["editor", "zed", "cache", "logs"]
+stacks = ["zed"]
+description = "Zed caches, logs and its npm cache; Zed's db folder is left alone."
 
 [[rule]]
-id = "desktop.claude"
-name = "Claude app caches"
+id = "zed.downloads"
+name = "Zed language servers"
 bucket = "ai"
-group = "AI apps"
+group = "Editors"
 kind = "path"
-paths = ["~/Library/Application Support/Claude/Cache", "~/Library/Application Support/Claude/Code Cache", "~/Library/Application Support/Claude/GPUCache", "~/Library/Application Support/Claude/DawnGraphiteCache", "~/Library/Application Support/Claude/DawnWebGPUCache", "~/Library/Application Support/Claude/sentry", "~/Library/Caches/com.anthropic.claudefordesktop", "~/Library/Logs/Claude"]
-cost = "rebuild"
-running_apps = ["Claude"]
-warm_days = 7
-description = "Chromium caches and logs of the Claude desktop app."
-
-[[rule]]
-id = "desktop.claude-vm"
-name = "Claude app VM bundles"
-bucket = "ai"
-group = "AI apps"
-kind = "path"
-paths = ["~/Library/Application Support/Claude/vm_bundles"]
-each = true
+paths = ["~/Library/Application Support/Zed/languages", "~/Library/Application Support/Zed/node", "~/Library/Application Support/Zed/extensions/work", "~/Library/Application Support/Zed/copilot"]
 cost = "redownload"
-running_apps = ["Claude"]
-warm_days = 14
-description = "Sandbox VM images the Claude app downloads for code execution."
+running_apps = ["zed", "Zed"]
+warm_days = 30
+rebuild = "Zed downloads language servers and its Node runtime again when a file needs them"
+tags = ["editor", "zed", "runtime", "language-server"]
+stacks = ["zed"]
+description = "Language servers, the Node runtime and extension work folders Zed downloads on demand."
 
 [[rule]]
-id = "desktop.ai-apps"
-name = "ChatGPT, Codex and LM Studio app caches"
+id = "zed.threads"
+name = "Zed agent threads"
 bucket = "ai"
-group = "AI apps"
+group = "Agent history"
 kind = "path"
-paths = ["~/Library/Caches/com.openai.chat", "~/Library/Caches/com.openai.codex", "~/Library/Caches/Codex", "~/Library/Caches/com.lmstudio.lmstudio", "~/Library/Application Support/Codex/Crashpad/completed"]
-cost = "rebuild"
-running_apps = ["ChatGPT", "Codex", "LM Studio"]
-warm_days = 7
-description = "Desktop AI app caches."
-
-[[rule]]
-id = "models.ollama"
-name = "Ollama models"
-bucket = "ai"
-group = "Model weights"
-kind = "path"
-paths = ["~/.ollama/models"]
-cost = "redownload"
+paths = ["~/Library/Application Support/Zed/threads", "~/Library/Application Support/Zed/conversations"]
+cost = "data"
 tier = "review"
-action = "none"
-description = "Pulled Ollama models. Remove specific ones with `ollama rm <model>`."
-
-[[rule]]
-id = "models.lmstudio"
-name = "LM Studio models"
-bucket = "ai"
-group = "Model weights"
-kind = "path"
-paths = ["~/.lmstudio/models", "~/.cache/lm-studio/models"]
-each = true
-cost = "redownload"
-tier = "review"
-description = "Models downloaded by LM Studio, one item per publisher."
-
-[[rule]]
-id = "models.misc"
-name = "Other local AI apps"
-bucket = "ai"
-group = "Model weights"
-kind = "path"
-paths = ["~/Library/Application Support/DiffusionBee", "~/jan/models", "~/Library/Application Support/Jan/data/models", "~/.cache/gpt4all", "~/Library/Application Support/nomic.ai/GPT4All"]
-cost = "redownload"
-tier = "review"
-description = "Model folders of DiffusionBee, Jan and GPT4All."
+tags = ["ai", "agent", "editor", "zed", "history"]
+stacks = ["ai", "zed"]
+description = "Zed's agent threads and saved assistant conversations."
