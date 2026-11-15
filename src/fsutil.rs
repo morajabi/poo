@@ -73,6 +73,12 @@ pub fn answers(dir: &Path) -> bool {
     if let Some(ok) = cache.lock().unwrap().get(dir) {
         return *ok;
     }
+    // Silence is remembered across runs for a while, so later commands skip it at once.
+    if recently_silent(dir) {
+        BLOCKED.lock().unwrap().push(dir.to_path_buf());
+        cache.lock().unwrap().insert(dir.to_path_buf(), false);
+        return false;
+    }
     let (tx, rx) = std::sync::mpsc::channel();
     let p = dir.to_path_buf();
     std::thread::spawn(move || {
@@ -83,6 +89,7 @@ pub fn answers(dir: &Path) -> bool {
         Ok(_) => true,
         Err(_) => {
             BLOCKED.lock().unwrap().push(dir.to_path_buf());
+            remember_silent(dir);
             false
         }
     };
@@ -417,4 +424,33 @@ pub fn mtime(path: &Path) -> Option<i64> {
 
 pub fn dev_of(path: &Path) -> Option<u64> {
     std::fs::symlink_metadata(path).ok().map(|m| m.dev())
+}
+
+const SILENT_FOR: i64 = 15 * 60;
+
+fn silent_file() -> PathBuf {
+    crate::config::state_dir().join("silent-folders.json")
+}
+
+fn load_silent() -> std::collections::HashMap<PathBuf, i64> {
+    std::fs::read(silent_file()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+}
+
+fn recently_silent(dir: &Path) -> bool {
+    load_silent().get(dir).map_or(false, |t| crate::util::now() - t < SILENT_FOR)
+}
+
+fn remember_silent(dir: &Path) {
+    let mut m = load_silent();
+    let now = crate::util::now();
+    m.retain(|_, t| now - *t < SILENT_FOR);
+    m.insert(dir.to_path_buf(), now);
+    let f = silent_file();
+    let _ = std::fs::create_dir_all(f.parent().unwrap());
+    if let Ok(data) = serde_json::to_vec(&m) {
+        let tmp = f.with_extension(format!("json.tmp-{}", std::process::id()));
+        if std::fs::write(&tmp, data).is_ok() {
+            let _ = std::fs::rename(tmp, f);
+        }
+    }
 }
