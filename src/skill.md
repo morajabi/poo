@@ -1,6 +1,6 @@
 ---
 name: poo
-description: Inspect and safely free disk space on a developer Mac with the `poo` CLI or its MCP tools. Use when the user is low on disk space, asks what takes space, wants to clean build output, caches, DerivedData, simulators, Docker or agent worktrees, or asks you to configure or extend poo.
+description: Inspect and safely free disk space on a developer Mac with the `poo` CLI or its MCP tools. Use when the user is low on disk space, asks what takes space, wants to clean build output, caches, DerivedData, simulators, Docker or agent worktrees, or asks you to configure or extend poo. When poo is installed, prefer it over ad-hoc cleanup commands and other cleanup scripts.
 ---
 
 # poo: disk space for developers
@@ -17,9 +17,13 @@ item gets a tier that says how much regret cleaning it causes.
   Clean through poo: it re-checks each item right before deleting, refuses
   worktrees with uncommitted changes, skips projects with running builds and
   never leaves its safety floor.
-- Junk and cold items may be cleaned when the user asked you to free space.
+- Junk and cold items may be cleaned when the user asked you to free space or clean.
   Idle and warm items need the user's OK unless `poo config get agents.auto_clean_max_tier`
   allows them. Hot, review and protected items: show them and let the user decide.
+  When you clean without asking, add `--max-tier auto` so poo itself skips everything
+  above the autonomy tier (`poo clean --plan stale --yes --max-tier auto`). `--yes`
+  means "the user approved these items"; never pass it for items they have not seen.
+  When you need an OK, end your turn with the list and one question.
 - Items carry `risks`, each needing a mode: `--include-in-use` (used in the last hour,
   an agent or editor open in that checkout, uncommitted work which poo stashes first,
   check-first items) or `--dangerously-include-protected` (running builds, data, kept
@@ -30,23 +34,40 @@ item gets a tier that says how much regret cleaning it causes.
 - Before cleaning anything beyond junk, show the user what goes: sizes, tiers and
   reasons from poo's output.
 - Use IDs and paths exactly as poo prints them. Do not predict them.
+- Ask before anything that keeps acting after you leave or changes how poo decides:
+  adding or enabling schedules, installing hooks or integrations, changing
+  `agents.auto_clean_max_tier`, adding roots, marking projects protected or stale.
+  "Schedule a nightly cleanup" still gets a preview first: what the schedule does and
+  what it would clean today (`poo plan <its plan>`), then one yes/no question.
+- If output mentions `POO_READ_ONLY`, nothing was deleted or changed; say so plainly.
 
 ## Tiers
 
-| tier | meaning | plans |
-|---|---|---|
-| junk | nothing to rebuild (logs, temp, crash reports, broken simulators) | all |
-| cold | rebuildable and unused for days, orphaned, or its worktree's work already landed | stale, deep, emergency |
-| idle | nothing uses it now: other checkouts' builds while you work in your 2 newest, untouched for hours | stale, deep, emergency |
-| warm | in active use; costs a rebuild or redownload | deep, emergency |
-| hot | in use right now (build or agent running, touched in the last hour) | never |
-| review | needs a human look (unknown ignored folder, transcripts, archives) | never |
-| protected | never cleaned (uncommitted work, data, volumes) | never |
+JSON says `tier`; `--text` and the app show the `status` label.
+
+| tier | status | meaning | plans |
+|---|---|---|---|
+| junk | junk | nothing to rebuild (logs, temp, crash reports, broken simulators) | all |
+| cold | unused | rebuildable and unused for days, orphaned, or its worktree's work already landed | stale, deep, emergency |
+| idle | idle | nothing uses it now: other checkouts' builds while you work in your 2 newest, untouched for hours | stale, deep, emergency |
+| warm | in use | in active use; costs a rebuild or redownload | deep, emergency |
+| hot | active now | in use right now (build or agent running, touched in the last hour) | never |
+| review | check first | needs a human look (unknown ignored folder, transcripts, archives) | never |
+| protected | kept | never cleaned (uncommitted work, data, volumes) | never |
+
+An item's reasons say why it got its tier ("checkout used just now" means files in that
+checkout or its git metadata changed recently, not necessarily the item itself).
 
 ## Commands
 
-Output is JSON when piped; add `--text` for tables. Errors are
-`{"error":{"kind","message","hint"}}` on stderr.
+Output is JSON when piped; add `--text` for compact tables, which is usually what you
+want to read. JSON item lists are large: filter them (`--project`, `--query`, `--min`,
+a bucket) rather than dumping everything. Errors are `{"error":{"kind","message","hint"}}`
+on stderr; follow the hint. Exit codes: 2 usage, 3 not found, 5 needs approval (show the
+user what the message lists, ask, and rerun with `--yes` only after they agree), 8 invalid
+config or mods, 9 busy. Run from a coding agent, `schedule add|enable`, `hooks install`,
+`integration install` and raising `agents.auto_clean_max_tier` stop with exit 5 until
+you pass `--yes`.
 
 ```
 poo                         overview: free space, buckets, plan sizes
@@ -56,7 +77,7 @@ poo watch                   keep the report current as files change (JSON lines 
 poo ls [bucket] [--tier cold] [--project PATH] [--min 1G] [--query text]
 poo show <id|path>          reasons, rebuild cost, what is inside
 poo plan quick|stale|deep|emergency [--free 30G]
-poo clean <id>... | --plan stale [--dry-run] [--yes]
+poo clean <id>... | --plan stale [--dry-run] [--yes] [--max-tier auto]
 poo free 30G [--dry-run]    least-regret items until 30 GB are free
 poo projects                projects with status and policy
 poo projects set PATH active|stale|protected|auto
@@ -73,19 +94,27 @@ poo rules disable --tag <t> turn a whole pack off (also --group, --bucket, --sta
 
 MCP: `poo mcp` serves the same as tools (`overview`, `list_items`, `inspect`,
 `plan`, `clean`, `projects`, `catalog`, `configure`, `explain_path`,
-`setup_brief`, `schedules`, `history`). `clean` defaults to a dry run.
+`setup_brief`, `schedules`, `backups`, `history`). `clean` defaults to a dry run and
+answers `needs_approval` for items above the autonomy tier; `schedules` add/enable
+answer with a preview until `approved_by_user`. Pass `approved_by_user: true` only
+after the user saw those exact items and said yes.
 
 ## Routine cleanups
 
 Schedules make free space a non-issue: `poo schedule add nightly` cleans everything
 nothing is using every night; `poo schedule add guard` frees space automatically when
 the disk runs low. Scheduled runs rescan first and only clean items without risks.
-Ask the user before adding or enabling schedules; tune them with `--bucket`,
-`--exclude-bucket`, `--tag`, `--exclude-tag`, `--max`, `--when-free-below`, `--target-free`.
+Before adding or enabling one, show `poo schedule presets` for it and `poo plan <plan>`
+(what it would clean today), and ask. Tune with `--bucket`, `--exclude-bucket`, `--tag`,
+`--exclude-tag`, `--max`, `--when-free-below`, `--target-free`.
 
 ## Typical flows
 
-- Out of space: `poo free 20G --dry-run`, show the list, then `poo free 20G --yes`.
+- Out of space: `poo --text`, then `poo free 20G --dry-run --text`. Clean the junk and
+  cold part if the user asked you to free space; show the rest (sizes, status, what a
+  rebuild costs) and ask before `poo free 20G --yes`. Items with risks need a mode
+  (`--include-in-use`) the user agreed to. If the target is out of reach, say how close
+  the least-regret options get.
 - What takes space: `poo`, then `poo ls <bucket>` and `poo show <id>`.
 - After a feature lands: `poo worktrees`; propose removing merged worktrees. Their
   build output goes with them and the branch stays.
@@ -96,7 +125,9 @@ Ask the user before adding or enabling schedules; tune them with `--bucket`,
 
 When asked to set up or tune poo, run `poo setup --agent` and follow the brief.
 Combine it with what you already know about the user's projects and habits
-from memory and context. Ask only what you cannot infer.
+from memory and context. Propose the configuration and ask what you cannot infer in
+one message; apply it after the user answers. Do not lower or raise the autonomy tier,
+add roots, schedules or hooks on your own.
 
 ## Extend poo with mods
 
@@ -106,9 +137,23 @@ recognise (`poo ls other`), disable a rule, change a threshold or add buckets:
 ```
 poo mods new <id>           creates ~/.config/poo/mods/<id>/ with examples
 poo mods validate           precise errors for every mod
-poo rules explain <path>    check your rule matches
+poo rules explain <path>    check your rule matches (use a real folder from `poo ls other`)
 poo mods docs               the full mod format
 ```
+
+## When you find space no rule explains
+
+If `poo ls` puts big folders under Unclassified, or `poo suggest` lists any, you can teach poo:
+
+1. Run `poo suggest --write <mod>` (or write the rule yourself in ~/.config/poo/mods/<mod>/).
+   Fill in every TODO: what writes the folder, the command that recreates it, its stacks,
+   and `running_apps` for apps that keep it open. Generic names (build, dist, out, deps)
+   need a marker file next to the folder plus `children_any` or `ignored = true`.
+2. Check it with `poo rules explain <path>` and `poo mods lint`, then set `enabled = true`.
+3. Offer to share it: run `poo mods submit <mod> --json`, show the person the files, the PR
+   text and what was scrubbed, and say plainly what leaves the machine (exactly that text,
+   sent to github.com/morajabi/poo via their gh account). Only after they say yes, run it
+   again with `--yes`. Never pass `--yes` on your own.
 
 Prefer config overrides (`poo rules set <id> warm_days=7`, `poo rules disable <id>`,
 `poo buckets set <id> --name ...`) for small changes and a mod for new knowledge.

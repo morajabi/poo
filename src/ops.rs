@@ -64,10 +64,8 @@ pub fn overview(r: &Report) -> Value {
         "scanned_at": r.scanned_at,
         "scan_age_seconds": now() - r.scanned_at,
         "total_bytes": r.total_bytes,
-        "report_only_bytes": r.report_only_bytes,
-        "growth": r.growth.clone().or_else(|| crate::growth::summary(r)),
         "buckets": r.buckets.iter().map(|b| json!({
-            "id": b.id, "name": b.name, "bytes": b.bytes, "count": b.count, "hidden": b.hidden, "report_only": b.report_only,
+            "id": b.id, "name": b.name, "bytes": b.bytes, "count": b.count, "hidden": b.hidden,
             "color": b.color, "symbol": b.symbol, "tiers": b.tiers,
             "groups": b.groups.iter().take(8).collect::<Vec<_>>(),
         })).collect::<Vec<_>>(),
@@ -81,10 +79,9 @@ pub fn overview(r: &Report) -> Value {
 pub fn compact(i: &Item) -> Value {
     json!({
         "id": i.id, "name": i.name, "path": i.path, "bytes": i.bytes, "total_bytes": i.total_bytes,
-        "tier": i.tier, "cost": i.cost, "bucket": i.bucket, "group": i.group,
+        "tier": i.tier, "status": i.tier.label(), "risks": i.risks, "cost": i.cost, "bucket": i.bucket, "group": i.group,
         "last_used": i.last_used, "reasons": i.reasons, "rule": i.rule,
         "project": i.project, "agent": i.agent,
-        "report_only": i.report_only, "recommend": i.recommend,
     })
 }
 
@@ -112,27 +109,10 @@ pub fn find_item<'a>(r: &'a Report, key: &str) -> Option<&'a Item> {
     r.items.iter().find(|i| i.path == ps)
 }
 
-/// Asked to clean something poo only reports on (snapshots, purgeable space, media...).
-#[derive(Debug)]
-pub struct ReportOnlyError(pub String);
-
-impl std::fmt::Display for ReportOnlyError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl std::error::Error for ReportOnlyError {}
-
-/// The items to clean for these ids or paths. Report-only items are refused here, so the
-/// CLI, the app and MCP all say the same thing.
 pub fn resolve_ids(r: &Report, keys: &[String]) -> Result<Vec<Item>> {
     let mut out = vec![];
     for k in keys {
         match find_item(r, k) {
-            Some(i) if i.report_only => {
-                return Err(ReportOnlyError(format!("{} is report-only: {}", i.name, crate::clean::report_only_message(i))).into())
-            }
             Some(i) => out.push(i.clone()),
             None => bail!("no item `{}` in the last scan (run `poo scan` or check `poo ls`)", k),
         }
@@ -376,7 +356,6 @@ pub fn set_bucket(ctx: &Ctx, id: &str, e: BucketEdit, create: bool) -> Result<Co
         symbol: e.symbol,
         description: e.description,
         hidden: e.hidden,
-        ..Default::default()
     };
     let exists = ctx.cat.bucket(id).is_some();
     if create {

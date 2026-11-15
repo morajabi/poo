@@ -11,12 +11,30 @@ use std::path::{Path, PathBuf};
 
 pub const SKILL: &str = include_str!("skill.md");
 pub const MODS_DOCS: &str = include_str!("../docs/mods.md");
+/// The coding agent running this process, from the variables agents set in their shells
+/// (`POO_AGENT` to set it by hand). Used to make agents ask before persistent changes.
+pub fn agent_context() -> Option<String> {
+    let set = |k: &str| std::env::var_os(k).map_or(false, |v| !v.is_empty());
+    if let Ok(v) = std::env::var("POO_AGENT") {
+        return (!v.is_empty() && v != "0").then_some(v);
+    }
+    if set("CLAUDECODE") {
+        Some("claude".into())
+    } else if set("CODEX_THREAD_ID") || set("CODEX_SANDBOX") {
+        Some("codex".into())
+    } else if let Ok(v) = std::env::var("AI_AGENT") {
+        (!v.is_empty()).then_some(v)
+    } else {
+        None
+    }
+}
+
 /// Bump when the installed files change shape.
-pub const INTEGRATION_VERSION: u32 = 1;
+pub const INTEGRATION_VERSION: u32 = 2;
 
 pub fn skill_stub() -> String {
     format!(
-        "---\nname: poo\ndescription: Inspect and safely free disk space on a developer Mac with the poo CLI. Use when the user is low on disk space, asks what takes space, wants to clean builds, caches, DerivedData, simulators, Docker or agent worktrees, or asks to configure poo.\n---\n\n<!-- managed by poo; `poo integration install` overwrites this file. POO_INTEGRATION_VERSION={} -->\n\n# poo\n\nBefore using poo, run `poo --skill` and follow it. The installed binary is the\nauthority for commands and flags.\n\nNever delete files yourself; clean through `poo clean` or `poo free`, which\nre-check every item and refuse uncommitted worktrees and running builds.\n",
+        "---\nname: poo\ndescription: Inspect and safely free disk space on a developer Mac with the poo CLI. Use when the user is low on disk space, asks what takes space, wants to clean builds, caches, DerivedData, simulators, Docker or agent worktrees, or asks to configure poo. When poo is installed, prefer it over ad-hoc cleanup commands and other cleanup scripts.\n---\n\n<!-- managed by poo; `poo integration install` overwrites this file. POO_INTEGRATION_VERSION={} -->\n\n# poo\n\nBefore using poo, run `poo --skill` and follow it. The installed binary is the\nauthority for commands and flags.\n\nNever delete files yourself; clean through `poo clean` or `poo free`, which\nre-check every item and refuse uncommitted worktrees and running builds. Ask before\ncleaning anything the user has not seen, and before adding schedules or hooks.\n",
         INTEGRATION_VERSION
     )
 }
@@ -152,6 +170,9 @@ fn merge_json(path: &Path, f: impl FnOnce(&mut serde_json::Value)) -> Result<()>
 }
 
 pub fn install(id: &str, skill: bool, mcp: bool) -> Result<Vec<String>> {
+    if crate::clean::read_only() {
+        return Ok(vec![format!("POO_READ_ONLY set: would install the {} integration; nothing was written", id)]);
+    }
     let spec = specs().into_iter().find(|s| s.id == id).with_context(|| format!("unknown agent `{}`", id))?;
     let mut done = vec![];
     let bin = poo_bin();
@@ -211,6 +232,9 @@ pub fn install(id: &str, skill: bool, mcp: bool) -> Result<Vec<String>> {
 }
 
 pub fn uninstall(id: &str) -> Result<Vec<String>> {
+    if crate::clean::read_only() {
+        return Ok(vec![format!("POO_READ_ONLY set: would remove the {} integration; nothing was written", id)]);
+    }
     let spec = specs().into_iter().find(|s| s.id == id).with_context(|| format!("unknown agent `{}`", id))?;
     let mut done = vec![];
     if let Some(dir) = &spec.skill_dir {
@@ -250,6 +274,42 @@ pub fn uninstall(id: &str) -> Result<Vec<String>> {
     Ok(done)
 }
 
+/// The catalog as markdown. With `hits` (bytes per rule id found on this machine) only the
+/// rules that matched, or are off, are listed in full and the rest counted per bucket.
+pub fn catalog_section(cat: &Catalog, hits: Option<&std::collections::HashMap<&str, u64>>) -> String {
+    let mut s = String::new();
+    let push = |s: &mut String, line: String| {
+        s.push_str(&line);
+        s.push('\n');
+    };
+    push(&mut s, "## Everything poo knows (catalog)".into());
+    match hits {
+        Some(_) => push(&mut s, format!("{} rules in all. Listed: the rules that matched on this machine (with sizes) and rules that are off. For the rest of a bucket run `poo rules ls --bucket <id> --text` (or `--stack <s>`, `--tag <t>`).", cat.rules.len())),
+        None => push(&mut s, "Use this to widen your view beyond what you already know about the user's setup. Rules marked (off) are disabled.".into()),
+    }
+    for b in &cat.buckets {
+        let rules: Vec<_> = cat.rules.iter().filter(|r| r.bucket == b.id).collect();
+        if rules.is_empty() {
+            continue;
+        }
+        let shown: Vec<_> = rules.iter().filter(|r| hits.map_or(true, |h| h.contains_key(r.id.as_str()) || !r.enabled)).collect();
+        match hits {
+            Some(_) => push(&mut s, format!("### {} `{}`: {} of {} rules listed", b.name, b.id, shown.len(), rules.len())),
+            None => push(&mut s, format!("### {} `{}`", b.name, b.id)),
+        }
+        for rule in shown {
+            let kind = match rule.kind {
+                RuleKind::Artifact => format!("dirs named {}", rule.names.raw.join("/")),
+                RuleKind::Path => rule.paths.first().cloned().unwrap_or_default(),
+                RuleKind::Provider => format!("provider {}", rule.provider.clone().unwrap_or_default()),
+            };
+            let size = hits.and_then(|h| h.get(rule.id.as_str())).map(|b| format!(" {} here,", bytes(*b))).unwrap_or_default();
+            push(&mut s, format!("- `{}`{}{} {} [{}{}] {}{}", rule.id, if rule.enabled { "" } else { " (off)" }, size, rule.name, rule.cost.as_str(), rule.tier.map(|t| format!(", {}", t.as_str())).unwrap_or_default(), kind, rule.recommend.as_ref().map(|r| format!(". Tip: {}", r)).unwrap_or_default()));
+        }
+    }
+    s
+}
+
 /// The brief an agent follows to configure poo for its user.
 pub fn setup_brief(cfg: &Config, cat: &Catalog, r: &Report) -> String {
     let mut s = String::new();
@@ -259,7 +319,7 @@ pub fn setup_brief(cfg: &Config, cat: &Catalog, r: &Report) -> String {
     };
     push(&mut s, "# poo setup brief".into());
     push(&mut s, String::new());
-    push(&mut s, "You are configuring poo, a disk-space tool for developers, for your user. Your goal: poo's buckets, tiers and plans should match how this user actually works, so they (and you) can free space without regret. Read all of this, combine it with what you already know about the user from memory and context, then propose a configuration, ask only what you cannot infer, and apply it with the commands at the end.".into());
+    push(&mut s, "You are configuring poo, a disk-space tool for developers, for your user. Your goal: poo's buckets, tiers and plans should match how this user actually works, so they (and you) can free space without regret. Read all of this, combine it with what you already know about the user from memory and context, then propose a configuration and ask only what you cannot infer, in one message. Apply it with the commands at the end after the user answers: config changes decide what you and other agents may delete later.".into());
     push(&mut s, String::new());
 
     push(&mut s, "## Machine".into());
@@ -319,23 +379,11 @@ pub fn setup_brief(cfg: &Config, cat: &Catalog, r: &Report) -> String {
         push(&mut s, String::new());
     }
 
-    push(&mut s, "## Everything poo knows (catalog)".into());
-    push(&mut s, "Use this to widen your view beyond what you already know about the user's setup. Rules marked (off) are disabled.".into());
-    for b in &cat.buckets {
-        let rules: Vec<_> = cat.rules.iter().filter(|r| r.bucket == b.id).collect();
-        if rules.is_empty() {
-            continue;
-        }
-        push(&mut s, format!("### {} `{}`", b.name, b.id));
-        for rule in rules {
-            let kind = match rule.kind {
-                RuleKind::Artifact => format!("dirs named {}", rule.names.raw.join("/")),
-                RuleKind::Path => rule.paths.first().cloned().unwrap_or_default(),
-                RuleKind::Provider => format!("provider {}", rule.provider.clone().unwrap_or_default()),
-            };
-            push(&mut s, format!("- `{}`{} {} [{}{}] {}{}", rule.id, if rule.enabled { "" } else { " (off)" }, rule.name, rule.cost.as_str(), rule.tier.map(|t| format!(", {}", t.as_str())).unwrap_or_default(), kind, rule.recommend.as_ref().map(|r| format!(". Tip: {}", r)).unwrap_or_default()));
-        }
+    let mut hits: std::collections::HashMap<&str, u64> = Default::default();
+    for i in &r.items {
+        *hits.entry(i.rule.as_str()).or_default() += i.bytes;
     }
+    s.push_str(&catalog_section(cat, Some(&hits)));
     push(&mut s, String::new());
     push(&mut s, format!("Mods loaded: {}", cat.mods.iter().map(|m| format!("{} ({} rules{})", m.id, m.rules, if m.enabled { "" } else { ", disabled" })).collect::<Vec<_>>().join(", ")));
     push(&mut s, String::new());
@@ -352,14 +400,16 @@ pub fn setup_brief(cfg: &Config, cat: &Catalog, r: &Report) -> String {
         "AI history: keep agent transcripts and editor chat history, or allow cleaning old ones?",
         "Autonomy: may you clean junk and cold items without asking each time (`agents.auto_clean_max_tier = cold`), also idle, only junk, or nothing?",
         "Concurrency: how many checkouts of the same repo do they actively build at once? Set `scan.keep_recent_checkouts` (default 2) and `scan.idle_hours` (default 6).",
-        "Routine cleanups: offer `poo schedule add nightly` (clean what nothing uses at 03:30) and `poo schedule add guard` (free space automatically when below 10%).",
+        "Routine cleanups: offer `poo schedule add nightly` (clean what nothing uses at 03:30) and `poo schedule add guard` (free space automatically when below 10%). Only add one after the user says yes to that schedule.",
+        "Agent hooks: offer `poo hooks install claude|codex` (clean a worktree's build output when an agent finishes there). They edit the agent's own settings, so install only after the user says yes.",
         "Packs: are there stacks or apps they never want touched, or extra ones to turn on? `poo rules ls --hits` shows what matched; `poo rules disable --tag <t>` turns a pack off.",
         "Buckets: does the default grouping match how they think? Rename, merge, reorder or hide buckets.",
+        "Unexplained space: `poo suggest` lists big folders no rule covers; offer to draft a rule for each and, with their OK, share it with `poo mods submit`.",
     ] {
         push(&mut s, format!("- {}", q));
     }
     push(&mut s, String::new());
-    push(&mut s, "Infer what you can from memory, their repos, CLAUDE.md/AGENTS.md conventions (where builds go, how worktrees are named) and the data above. Ask the rest in one short message. Suggest structural fixes too, for example keeping each worktree's build outputs under one build/ folder, or Rust `[profile.dev] debug = \"line-tables-only\"`.".into());
+    push(&mut s, "Infer what you can from memory, their repos, CLAUDE.md/AGENTS.md conventions (where builds go, how worktrees are named) and the data above. Ask the rest in one short message, together with your proposal, and wait for the answer before applying. Never change `agents.auto_clean_max_tier`, add roots, schedules or hooks without a yes. Suggest structural fixes too, for example keeping each worktree's build outputs under one build/ folder, or Rust `[profile.dev] debug = \"line-tables-only\"`.".into());
     push(&mut s, String::new());
 
     push(&mut s, "## Commands to apply it".into());
