@@ -57,6 +57,9 @@ pub fn names(entries: &[Entry]) -> Vec<String> {
 /// branches that changed.
 pub const MEMO_MIN_BYTES: u64 = 32_000_000;
 
+// Ages (`Sized::newest`) come from files only. A folder's own mtime changes when anything
+// inside is added or removed, including by a cleanup, which is not use.
+
 /// Shared state for one scan: hardlink dedupe, progress counters and cancellation.
 #[derive(Default)]
 pub struct SizeCtx {
@@ -141,7 +144,6 @@ impl SizeCtx {
             .map(|d| {
                 let mut s = self.size_dir(&d.path, dev, exclude);
                 s.bytes += d.alloc;
-                s.newest = s.newest.max(d.mtime);
                 self.remember(&d.path, s);
                 (d.name.clone(), s)
             })
@@ -195,8 +197,7 @@ impl SizeCtx {
                             self.size_entries_delta(&read_entries(&d.path), dev, exclude, &below).0
                         };
                         s.bytes += d.alloc;
-                        s.newest = s.newest.max(d.mtime);
-                        s
+                                s
                     }
                 };
                 self.remember(&d.path, s);
@@ -221,7 +222,6 @@ impl SizeCtx {
         let entries = read_entries(path);
         let (mut s, children) = self.size_entries_delta(&entries, md.dev(), exclude, changed);
         s.bytes += md.blocks() * 512;
-        s.newest = s.newest.max(md.mtime());
         Some((s, children))
     }
 
@@ -235,7 +235,6 @@ impl SizeCtx {
             let entries = read_entries(path);
             let (mut s, children) = self.size_entries(&entries, md.dev(), exclude);
             s.bytes += md.blocks() * 512;
-            s.newest = s.newest.max(md.mtime());
             Some((s, children))
         } else {
             let e = Entry {

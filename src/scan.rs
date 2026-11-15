@@ -222,7 +222,6 @@ impl<'a> Walker<'a> {
             if let Some(rule) = matched {
                 let (mut s, children) = self.ctx.size_entries(&child, dev, &HashSet::new());
                 s.bytes += e.alloc;
-                s.newest = s.newest.max(e.mtime);
                 self.items.lock().unwrap().push(Raw {
                     path: e.path.clone(),
                     name: self.label(&e.path, &proj),
@@ -315,7 +314,6 @@ impl<'a> Walker<'a> {
             if let Some(rule) = self.rules.iter().find(|r| (!r.ignored || is_ignored) && r.matches_artifact(&e.name, &e.path, &entry_names, &child_names)) {
                 let (mut s, children) = self.ctx.size_entries(&child, dev, &HashSet::new());
                 s.bytes += e.alloc;
-                s.newest = s.newest.max(e.mtime);
                 self.items.lock().unwrap().push(Raw {
                     path: e.path.clone(),
                     name: self.label(&e.path, &proj),
@@ -511,6 +509,9 @@ pub fn scan(cfg: &Config, cat: &Catalog, opts: &ScanOptions) -> Report {
         let mut exclude: HashSet<PathBuf> = claimed.clone();
         exclude.insert(home().join("Library"));
         exclude.insert(home().join(".Trash"));
+        // OrbStack mounts container and VM filesystems here: slow to walk, and their space is
+        // already counted in its disk image.
+        exclude.insert(home().join("OrbStack"));
         let mut gb = globset::GlobSetBuilder::new();
         for x in &cfg.scan.exclude {
             if let Ok(g) = globset::Glob::new(&expand(x).to_string_lossy()) {
@@ -1376,7 +1377,7 @@ fn slow_providers(cat: &Catalog, devices_json: Option<&Value>) -> (Vec<Raw>, Vec
 // Scan index and incremental rescans
 // ---------------------------------------------------------------------------
 
-const INDEX_VERSION: u32 = 1;
+const INDEX_VERSION: u32 = 2;
 /// Slow providers (Docker, Homebrew, app leftovers, runtimes) are reused this long.
 const SLOW_TTL: i64 = 15 * 60;
 /// A full walk at least this often catches anything the journal cannot tell.
