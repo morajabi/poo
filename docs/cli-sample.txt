@@ -1,0 +1,38 @@
+$ poo --text
+poo  92.5 GB free of 494 GB  █████████████···  81% used   updated just now
+     other 156 GB  ·  dev in use 243 GB  ·  not in use 2.62 GB
+     found: bazel · bun · claude · cmake · codex · docker · fastlane · go · homebrew · nix · node · pnpm · python · rub…
+
+Areas
+                              size                            not in use   items
+  Build output             80.5 GB  ██████████████▋·········      114 MB      27
+  Xcode & Apple SDKs        132 GB  ████████████████████████     3.83 MB      21
+  Worktrees                1.38 GB  ▎·······················      119 MB      13
+  Dependencies             8.13 GB  █▌······················           –       5
+  Package & tool caches    14.4 GB  ██▋·····················           –      17
+  AI tools & models        5.34 GB  █·······················           –      44
+  Apps & system caches     1.83 GB  ▍·······················           –      14
+  Logs, temp & trash       1.27 MB  ························     1.27 MB       1
+  Elsewhere on this Mac    2.89 GB  ▌·······················     2.39 GB       4
+  Unclassified             2.47 GB  ▌·······················           –       9
+                            246 GB
+
+Plans
+  quick           1.27 MB    1 items  Logs, temp files, crash reports and broken simulators. Nothing to rebuild.
+  stale            238 MB    5 items  Everything nothing is using right now: old or orphaned builds, landed worktrees, …
+  deep             131 GB   63 items  Also builds and caches you used recently. Expect rebuilds and redownloads on your…
+  emergency             –    0 items  Out of space: frees the least regrettable items first until the target is met.
+
+poo interactive   ls [area] items   show <id> details   plan stale preview   clean --plan stale   free 20G
+
+$ poo plan stale --text
+Not in use  238 MB  5 items
+Everything nothing is using right now: old or orphaned builds, landed worktrees, and builds of checkouts you moved on from. No data is touched; you rebuild only if you go back.
+
+id                 size              status            used  name                                  area / group
+af000c54be10     118 MB  ██████████  unused          4h ago  review-search/atlas                   worktrees / Worktrees
+a78b6b0c75c4     114 MB  █████████▋  unused          2h ago  harbor/apple/App/.build               build / Swift
+fc729110ed0b    3.83 MB  ▍·········  idle           10d ago  ~/Library/Caches/com.apple.dt.Xcode   xcode / Xcode caches
+7cb800dfea91    1.27 MB  ▏·········  junk           16m ago  -Users-you                            junk / Logs
+ec7524183965     721 KB  ··········  unused          4h ago  bump-sync                             worktrees / Worktrees
+5 items · 238 MB · 238 MB not in use
