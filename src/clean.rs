@@ -772,9 +772,9 @@ pub fn admit_static(item: &Item, cat: &Catalog, mode: RiskLevel, max_tier: Optio
                 Tier::Hot => "in use right now".to_string(),
                 Tier::Review => "marked check first".to_string(),
                 Tier::Protected => "kept".to_string(),
-                t => format!("`{}`", t.label()),
+                t => format!("{} is above this run's limit ({})", t.label(), limit.label()),
             };
-            return Err(format!("{} (this run stops at `{}`); add --include-in-use to clean it anyway", what, limit.label()));
+            return Err(format!("{}; add --include-in-use to clean it anyway", what));
         }
     }
     for r in &item.risks {
