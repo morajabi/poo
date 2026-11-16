@@ -31,6 +31,12 @@ final class Updater: NSObject {
 
     @ObservationIgnored private var controller: SPUStandardUpdaterController!
     @ObservationIgnored private var observation: NSKeyValueObservation?
+    /// Installs a downloaded update and relaunches. A menu bar app rarely quits, so this
+    /// runs as soon as Poo is idle instead of waiting for a quit.
+    @ObservationIgnored private var installNow: (() -> Void)?
+    @ObservationIgnored private var idleTimer: Timer?
+    /// Whether Poo is idle enough to relaunch (no window open, nothing scanning or cleaning).
+    @ObservationIgnored var isIdle: () -> Bool = { true }
 
     var currentVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
@@ -62,14 +68,42 @@ final class Updater: NSObject {
         controller.checkForUpdates(nil)
     }
 
-    /// Kept for the menu bar's Update button.
-    func install() async { checkForUpdates() }
+    /// The menu bar's Update button: installs a downloaded update now, or shows Sparkle's flow.
+    func install() async {
+        if let installNow {
+            self.installNow = nil
+            installNow()
+        } else {
+            checkForUpdates()
+        }
+    }
+
+    fileprivate func installWhenIdle(_ block: @escaping () -> Void) {
+        installNow = block
+        idleTimer?.invalidate()
+        idleTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] t in
+            Task { @MainActor in
+                guard let self, let run = self.installNow else { t.invalidate(); return }
+                let windowOpen = NSApp.windows.contains { $0.isVisible && $0.styleMask.contains(.titled) }
+                guard !windowOpen, !NSApp.isActive, self.isIdle() else { return }
+                t.invalidate()
+                self.installNow = nil
+                run()
+            }
+        }
+    }
 }
 
 extension Updater: SPUUpdaterDelegate {
-    nonisolated func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+    /// The update is downloaded and would wait for a quit: install it once Poo is idle.
+    nonisolated func updater(_ updater: SPUUpdater, willInstallUpdateOnQuit item: SUAppcastItem, immediateInstallationBlock: @escaping () -> Void) -> Bool {
         let v = item.displayVersionString
-        Task { @MainActor in self.available = v }
+        nonisolated(unsafe) let block = immediateInstallationBlock
+        Task { @MainActor in
+            self.available = v
+            self.installWhenIdle(block)
+        }
+        return true
     }
 
     nonisolated func updaterDidNotFindUpdate(_ updater: SPUUpdater) {

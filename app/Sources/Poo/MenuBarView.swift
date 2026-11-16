@@ -61,7 +61,10 @@ struct MenuBarView: View {
                 .padding(.vertical, 8)
         }
         .frame(width: 320)
-        .onAppear { store.live?.panelOpened() }
+        .onAppear {
+            store.live?.panelOpened()
+            updater.isIdle = { [store] in !store.busy && !store.scanning && store.menuSession == nil }
+        }
         .task {
             await store.loadSchedules()
             await store.loadHistory()
@@ -201,6 +204,7 @@ struct MenuBarView: View {
                 .keyboardShortcut("o")
             if updater.available != nil {
                 Button("Update") { Task { await updater.install() } }
+                    .help("Poo \(updater.available ?? "") is ready. Installs and relaunches.")
             }
             Spacer()
             refreshButton
