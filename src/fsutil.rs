@@ -25,15 +25,32 @@ pub struct Entry {
 /// Folders macOS guards with a consent prompt. Until someone answers, the first read of
 /// one blocks: forever, if nobody is at the Mac. Each is probed once, off-thread, with a
 /// timeout; a folder that does not answer is skipped for the rest of the run.
-fn guarded_roots() -> &'static [PathBuf] {
-    static ROOTS: std::sync::OnceLock<Vec<PathBuf>> = std::sync::OnceLock::new();
+fn guarded_roots() -> &'static (Vec<PathBuf>, Vec<PathBuf>) {
+    static ROOTS: std::sync::OnceLock<(Vec<PathBuf>, Vec<PathBuf>)> = std::sync::OnceLock::new();
     ROOTS.get_or_init(|| {
         let h = crate::util::home();
-        ["Desktop", "Documents", "Downloads", "Library/Mobile Documents", "Library/CloudStorage"]
+        // Probed as a whole.
+        let whole = [
+            "Desktop", "Documents", "Downloads", "Movies", "Music", "Pictures",
+            "Library/Mobile Documents", "Library/CloudStorage", "Library/Mail", "Library/Messages",
+            "Library/Safari", "Library/Biome", "Library/Accounts", "Library/Cookies",
+            "Library/Calendars", "Library/HomeKit", "Library/Reminders", "Library/Suggestions",
+            "Library/IdentityServices", "Library/Metadata/CoreSpotlight", "Library/PersonalizationPortrait",
+            "Library/Application Support/AddressBook", "Library/Application Support/CallHistoryDB",
+            "Library/Application Support/Knowledge", "Library/Application Support/MobileSync",
+            "Library/Application Support/FileProvider", "Library/Application Support/com.apple.TCC",
+            "Library/Caches/com.apple.Music", "Library/Caches/com.apple.Safari",
+        ]
+        .iter()
+        .map(|p| h.join(p))
+        .collect();
+        // Probed per child: each app's container, each volume.
+        let per_child = ["Library/Containers", "Library/Group Containers", "Library/Daemon Containers"]
             .iter()
             .map(|p| h.join(p))
             .chain(std::iter::once(PathBuf::from("/Volumes")))
-            .collect()
+            .collect();
+        (whole, per_child)
     })
 }
 
@@ -47,20 +64,33 @@ pub fn blocked_folders() -> Vec<PathBuf> {
     v
 }
 
+/// The folder whose answer decides whether reading `path` might block, if any.
+fn guard_point(path: &Path) -> Option<PathBuf> {
+    let (whole, per_child) = guarded_roots();
+    if let Some(parent) = per_child.iter().find(|r| path.starts_with(r)) {
+        let child = path.strip_prefix(parent).ok()?.components().next()?;
+        return Some(parent.join(child));
+    }
+    whole.iter().find(|r| path.starts_with(r)).cloned()
+}
+
 /// False when `path` is inside a guarded folder that does not answer (a pending privacy
 /// prompt, a hung network volume or cloud provider).
 pub fn readable_without_blocking(path: &Path) -> bool {
-    let Some(root) = guarded_roots().iter().find(|r| path.starts_with(r)) else { return true };
-    // /Volumes/<name> is probed per volume.
-    let probe = if root.as_os_str() == "/Volumes" {
-        match path.strip_prefix(root).ok().and_then(|r| r.components().next()) {
-            Some(c) => root.join(c),
-            None => return true,
-        }
-    } else {
-        root.clone()
-    };
-    answers(&probe)
+    match guard_point(path) {
+        Some(g) => answers(&g),
+        None => true,
+    }
+}
+
+/// Probes the guard points of many paths at once (one shared 3s wait, not one per folder)
+/// and returns which paths are safe to read.
+pub fn readable_many(paths: &[PathBuf]) -> Vec<bool> {
+    let mut points: Vec<PathBuf> = paths.iter().filter_map(|p| guard_point(p)).collect();
+    points.sort();
+    points.dedup();
+    probe_many(&points);
+    paths.iter().map(|p| readable_without_blocking(p)).collect()
 }
 
 /// Whether listing `dir` returns within a few seconds. macOS blocks the first read of
@@ -68,33 +98,74 @@ pub fn readable_without_blocking(path: &Path) -> bool {
 /// someone answers a prompt. Probed once per folder per run, off-thread; a folder that
 /// does not answer is skipped and reported, never waited on.
 pub fn answers(dir: &Path) -> bool {
+    probe_many(std::slice::from_ref(&dir.to_path_buf()));
+    probe_cache().lock().unwrap().get(dir).copied().unwrap_or(true)
+}
+
+fn probe_cache() -> &'static Mutex<std::collections::HashMap<PathBuf, bool>> {
     static CACHE: std::sync::OnceLock<Mutex<std::collections::HashMap<PathBuf, bool>>> = std::sync::OnceLock::new();
-    let cache = CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()));
-    if let Some(ok) = cache.lock().unwrap().get(dir) {
-        return *ok;
+    CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+/// Probes folders not yet known, all at once, within one shared deadline.
+fn probe_many(dirs: &[PathBuf]) {
+    let cache = probe_cache();
+    let silent = load_silent();
+    let now = crate::util::now();
+    let mut todo = vec![];
+    {
+        let mut c = cache.lock().unwrap();
+        for d in dirs {
+            if c.contains_key(d) {
+                continue;
+            }
+            // Silence is remembered across runs for a while, so later commands skip it at once.
+            if silent.get(d).map_or(false, |t| now - t < SILENT_FOR) {
+                c.insert(d.clone(), false);
+                BLOCKED.lock().unwrap().push(d.clone());
+                continue;
+            }
+            todo.push(d.clone());
+        }
     }
-    // Silence is remembered across runs for a while, so later commands skip it at once.
-    if recently_silent(dir) {
-        BLOCKED.lock().unwrap().push(dir.to_path_buf());
-        cache.lock().unwrap().insert(dir.to_path_buf(), false);
-        return false;
+    if todo.is_empty() {
+        return;
     }
     let (tx, rx) = std::sync::mpsc::channel();
-    let p = dir.to_path_buf();
-    std::thread::spawn(move || {
-        // An error (missing, no permission) answers too: only silence is a problem.
-        let _ = tx.send(std::fs::read_dir(&p).map(|mut d| d.next()).ok());
-    });
-    let ok = match rx.recv_timeout(std::time::Duration::from_secs(3)) {
-        Ok(_) => true,
-        Err(_) => {
-            BLOCKED.lock().unwrap().push(dir.to_path_buf());
-            remember_silent(dir);
-            false
+    for (i, d) in todo.iter().enumerate() {
+        let tx = tx.clone();
+        let d = d.clone();
+        std::thread::spawn(move || {
+            // An error (missing, no permission) answers too: only silence is a problem.
+            let _ = std::fs::read_dir(&d).map(|mut it| it.next());
+            let _ = tx.send(i);
+        });
+    }
+    drop(tx);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    let mut answered = vec![false; todo.len()];
+    while let Some(left) = deadline.checked_duration_since(std::time::Instant::now()) {
+        match rx.recv_timeout(left) {
+            Ok(i) => answered[i] = true,
+            Err(_) => break,
         }
-    };
-    cache.lock().unwrap().insert(dir.to_path_buf(), ok);
-    ok
+        if answered.iter().all(|a| *a) {
+            break;
+        }
+    }
+    let mut silent_now = vec![];
+    let mut c = cache.lock().unwrap();
+    for (d, ok) in todo.into_iter().zip(answered) {
+        if !ok {
+            BLOCKED.lock().unwrap().push(d.clone());
+            silent_now.push(d.clone());
+        }
+        c.insert(d, ok);
+    }
+    drop(c);
+    if !silent_now.is_empty() {
+        remember_silent(&silent_now);
+    }
 }
 
 pub fn read_entries(dir: &Path) -> Vec<Entry> {
@@ -371,8 +442,9 @@ pub fn expand_glob(pattern: &Path) -> Vec<PathBuf> {
         if has_glob(&c) {
             let Ok(g) = globset::Glob::new(&c) else { return vec![] };
             let m = g.compile_matcher();
-            for base in &current {
-                if !readable_without_blocking(base) {
+            let ok = readable_many(&current);
+            for (base, ok) in current.iter().zip(ok) {
+                if !ok {
                     continue;
                 }
                 let Ok(rd) = std::fs::read_dir(base) else { continue };
@@ -386,7 +458,7 @@ pub fn expand_glob(pattern: &Path) -> Vec<PathBuf> {
         } else {
             for base in &current {
                 let p = base.join(c.as_ref());
-                if readable_without_blocking(&p) && std::fs::symlink_metadata(&p).is_ok() {
+                if std::fs::symlink_metadata(&p).is_ok() {
                     next.push(p);
                 }
             }
@@ -396,6 +468,9 @@ pub fn expand_glob(pattern: &Path) -> Vec<PathBuf> {
             break;
         }
     }
+    // Whatever is read next (sized, listed) must answer: probe all matches at once.
+    let ok = readable_many(&current);
+    let mut current: Vec<PathBuf> = current.into_iter().zip(ok).filter(|(_, ok)| *ok).map(|(p, _)| p).collect();
     current.sort();
     current
 }
@@ -436,15 +511,13 @@ fn load_silent() -> std::collections::HashMap<PathBuf, i64> {
     std::fs::read(silent_file()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
 }
 
-fn recently_silent(dir: &Path) -> bool {
-    load_silent().get(dir).map_or(false, |t| crate::util::now() - t < SILENT_FOR)
-}
-
-fn remember_silent(dir: &Path) {
+fn remember_silent(dirs: &[PathBuf]) {
     let mut m = load_silent();
     let now = crate::util::now();
     m.retain(|_, t| now - *t < SILENT_FOR);
-    m.insert(dir.to_path_buf(), now);
+    for d in dirs {
+        m.insert(d.clone(), now);
+    }
     let f = silent_file();
     let _ = std::fs::create_dir_all(f.parent().unwrap());
     if let Ok(data) = serde_json::to_vec(&m) {
