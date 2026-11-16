@@ -657,7 +657,19 @@ fn emit(out: &Out, v: &Value) {
     }
 }
 
-fn filter(f: &FilterArgs) -> Result<Filter, CliError> {
+/// A bucket id that does not exist is a typo, not an empty bucket.
+fn check_bucket(cat: &poo::catalog::Catalog, id: &str) -> R {
+    if cat.bucket(id).is_some() {
+        return Ok(());
+    }
+    let ids: Vec<&str> = cat.buckets.iter().map(|b| b.id.as_str()).collect();
+    Err(CliError::new("usage", 2, format!("unknown bucket `{}`", id)).hint(format!("buckets: {}", ids.join(", "))))
+}
+
+fn filter(f: &FilterArgs, cat: &poo::catalog::Catalog) -> Result<Filter, CliError> {
+    if let Some(b) = &f.bucket {
+        check_bucket(cat, b)?;
+    }
     Ok(Filter {
         bucket: f.bucket.clone(),
         group: f.group.clone(),
@@ -958,7 +970,7 @@ fn real_main(cli: Cli) -> R {
             let limit = if limit == 0 { usize::MAX } else { limit };
             let r = ops::report(&ctx, false, scan_opts(&out, false))?;
             clear_progress(&out);
-            let flt = filter(&f)?;
+            let flt = filter(&f, &ctx.cat)?;
             let list = ops::list(&r, &flt, &sort, 0);
             if out.json {
                 let total: u64 = list.iter().map(|i| i.bytes).sum();
@@ -989,7 +1001,7 @@ fn real_main(cli: Cli) -> R {
                 None => None,
             };
             let mode = if danger { RiskLevel::Danger } else if force { RiskLevel::Force } else { RiskLevel::Standard };
-            let p = ops::make_plan(&ctx, &r, &plan, target, &filter(&f)?, Admission::mode(mode)).map_err(|e| CliError::new("not_found", 3, e.to_string()))?;
+            let p = ops::make_plan(&ctx, &r, &plan, target, &filter(&f, &ctx.cat)?, Admission::mode(mode)).map_err(|e| CliError::new("not_found", 3, e.to_string()))?;
             if out.json {
                 emit(&out, &serde_json::to_value(&p).unwrap_or_default());
             } else {
@@ -1015,6 +1027,9 @@ fn real_main(cli: Cli) -> R {
                     None => CliError::new("not_found", 3, e.to_string()),
                 })?
             } else if let Some(p) = plan {
+                for b in &bucket {
+                    check_bucket(&ctx.cat, b)?;
+                }
                 let f = Filter { buckets: bucket, tags: tag, ..Default::default() };
                 let adm = Admission { mode, max_tier: Some(mt.unwrap_or(Tier::Warm)) };
                 ops::make_plan(&ctx, &r, &p, target, &f, adm).map_err(|e| CliError::new("not_found", 3, e.to_string()))?.items
