@@ -1,13 +1,33 @@
-# poo
+<p align="center">
+  <img src="docs/images/icon.png" alt="Poo" width="128">
+</p>
 
-[![ci](https://github.com/morajabi/poo/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/morajabi/poo/actions/workflows/ci.yml)
-[![release](https://img.shields.io/github/v/release/morajabi/poo?sort=semver)](https://github.com/morajabi/poo/releases/latest)
-[![macOS 15+](https://img.shields.io/badge/macOS-15%2B-black?logo=apple)](#install)
-[![license: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+<h1 align="center">Poo</h1>
 
-**Find and safely free the disk space your dev work eats.** A menu bar app and CLI for
-macOS, plus an MCP server and skill so your coding agent can do it for you. Free and open
-source. **[poo.morajabi.com](https://poo.morajabi.com)**
+<p align="center">
+  Find and safely free the disk space your dev work eats.
+  <br>
+  A menu bar app and CLI for macOS, with an MCP server and skill for your coding agent.
+</p>
+
+<p align="center">
+  <a href="https://poo.morajabi.com">Website</a>
+  ·
+  <a href="https://github.com/morajabi/poo/releases/latest/download/Poo.app.zip">Download</a>
+  ·
+  <a href="#install">Install</a>
+  ·
+  <a href="docs/mods.md">Rules and mods</a>
+  ·
+  <a href="CONTRIBUTING.md">Contributing</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/morajabi/poo/releases/latest"><img src="https://img.shields.io/github/v/release/morajabi/poo?sort=semver&label=release" alt="Latest release"></a>
+  <a href="https://github.com/morajabi/poo/actions/workflows/ci.yml"><img src="https://github.com/morajabi/poo/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <a href="#install"><img src="https://img.shields.io/badge/macOS-15%2B-black?logo=apple" alt="macOS 15+"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
+</p>
 
 <p align="center">
   <img src="docs/images/overview.png" alt="The Poo window: free space, and what is not in use grouped by what a clean costs you" width="100%">
