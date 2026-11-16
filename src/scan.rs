@@ -1944,8 +1944,20 @@ fn trace(started: &Instant, step: &str) {
 
 /// Guarded folders that did not answer: say so instead of hanging on them.
 fn blocked_warnings() -> Vec<String> {
-    crate::fsutil::blocked_folders()
+    let mut out: Vec<String> = crate::fsutil::blocked_folders()
         .iter()
         .map(|p| format!("skipped {}: macOS is waiting for permission (System Settings > Privacy & Security > Files and Folders, or Full Disk Access)", crate::util::tilde(p)))
-        .collect()
+        .collect();
+    let held = crate::fsutil::held_back_folders();
+    if !held.is_empty() {
+        let names: Vec<String> = held.iter().take(3).map(|p| crate::util::tilde(p)).collect();
+        let more = if held.len() > 3 { format!(" and {} more", held.len() - 3) } else { String::new() };
+        out.push(format!(
+            "{} folders macOS guards with a prompt ({}{}) are skipped until poo has Full Disk Access: System Settings > Privacy & Security > Full Disk Access",
+            held.len(),
+            names.join(", "),
+            more
+        ));
+    }
+    out
 }

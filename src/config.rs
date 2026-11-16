@@ -200,7 +200,7 @@ impl Default for MenubarConfig {
             warn: true,
             warn_below: "10%".into(),
             notify: false,
-            sections: ["health", "disk", "areas", "freed", "schedules"].map(String::from).to_vec(),
+            sections: vec!["areas".to_string()],
             area_order: "size".into(),
             max_areas: 6,
         }
@@ -316,7 +316,7 @@ pub const KEYS: &[(&str, &str)] = &[
     ("menubar.title", "What the menu bar shows: icon | free | not_in_use | percent_free, or a mix joined with + (default icon+free)."),
     ("menubar.warn / menubar.warn_below", "Tint the menu bar number when free space is below this, \"10%\" or \"20G\" (default on, 10%)."),
     ("menubar.notify", "Notify once when free space falls below menubar.warn_below (default off)."),
-    ("menubar.sections", "Panel sections in order: health, disk, areas, buckets, freed, schedules (default [health, disk, areas, freed, schedules])."),
+    ("menubar.sections", "Panel sections in order: health, disk, areas, buckets, freed, schedules (default [areas])."),
     ("menubar.area_order / menubar.max_areas", "Areas in the panel by size | bucket | name, and how many before the rest fold (default size, 6)."),
     ("updates.check", "Check for new versions once a day, in the background, from an interactive terminal (default on)."),
     ("updates.auto", "Install new versions in the background when poo was installed by the script (default on). Off: print a one-line hint instead. Homebrew and Poo.app installs update through brew and the app."),
@@ -401,6 +401,10 @@ pub fn detect_roots() -> Vec<PathBuf> {
     let mut out: Vec<PathBuf> = vec![];
     for c in CANDIDATE_ROOTS {
         let p = expand(c);
+        // ~/Documents/… would show a privacy prompt just to look.
+        if crate::fsutil::held_back(&p) {
+            continue;
+        }
         let Ok(canon) = std::fs::canonicalize(&p) else { continue };
         // macOS volumes are usually case-insensitive: ~/Code and ~/code are one folder.
         let lower = PathBuf::from(canon.to_string_lossy().to_lowercase());

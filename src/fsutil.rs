@@ -46,6 +46,78 @@ fn guarded_parents() -> &'static Vec<PathBuf> {
 }
 
 static BLOCKED: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+static HELD_BACK: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+
+/// Whether a first read inside `point` (a child of a guarded parent) can show a macOS
+/// privacy prompt: Files & Folders, other apps' data, Contacts, Calendars, iCloud Drive,
+/// media libraries, removable and network volumes.
+fn prompts(point: &Path) -> bool {
+    let (Some(parent), Some(name)) = (point.parent(), point.file_name().and_then(|n| n.to_str())) else { return false };
+    if parent == Path::new("/Volumes") {
+        return true;
+    }
+    let h = crate::util::home();
+    let Ok(rel) = parent.strip_prefix(&h) else { return false };
+    match rel.to_str().unwrap_or("") {
+        "" => matches!(name, "Desktop" | "Documents" | "Downloads" | "Pictures" | "Music" | "Movies"),
+        "Pictures" | "Music" | "Movies" => true,
+        "Library/Containers" | "Library/Group Containers" | "Library/Daemon Containers" => true,
+        "Library" => matches!(
+            name,
+            "Mobile Documents" | "CloudStorage" | "Calendars" | "Reminders" | "Mail" | "Messages" | "Safari" | "HomeKit"
+                | "Photos" | "Accounts" | "Cookies" | "Suggestions" | "IdentityServices" | "Sharing" | "Biome"
+        ),
+        "Library/Application Support" => matches!(
+            name,
+            "AddressBook" | "CallHistoryDB" | "CallHistoryTransactions" | "FaceTime" | "Knowledge" | "MobileSync"
+                | "com.apple.TCC" | "CloudDocs"
+        ),
+        "Library/Caches" => matches!(
+            name,
+            "CloudKit" | "com.apple.Safari" | "com.apple.Music" | "com.apple.HomeKit" | "com.apple.findmy.fmipcore"
+                | "FamilyCircle" | "com.apple.homed" | "com.apple.containermanagerd" | "com.apple.ap.adprivacyd"
+        ),
+        _ => false,
+    }
+}
+
+fn full_disk_access() -> bool {
+    static FDA: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *FDA.get_or_init(crate::util::has_full_disk_access)
+}
+
+/// Folders the user added as roots: reading inside them is what they asked for.
+fn chosen_roots() -> &'static Vec<PathBuf> {
+    static ROOTS: std::sync::OnceLock<Vec<PathBuf>> = std::sync::OnceLock::new();
+    ROOTS.get_or_init(|| {
+        crate::config::Config::load()
+            .map(|c| c.roots.iter().map(|r| crate::util::expand(r)).collect())
+            .unwrap_or_default()
+    })
+}
+
+/// Poo never asks macOS for a folder on its own. Without Full Disk Access, a folder that
+/// would show a privacy prompt is read only when it answered before (allowed or denied, so
+/// no prompt now) or holds a folder the user chose to scan. The rest is skipped and
+/// reported once; Full Disk Access covers all of it with one switch.
+pub fn held_back(dir: &Path) -> bool {
+    if full_disk_access() {
+        return false;
+    }
+    let Some(point) = guard_point(dir).filter(|p| prompts(p)) else { return false };
+    if answered().lock().unwrap().contains(&point) {
+        return false;
+    }
+    !chosen_roots().iter().any(|r| r.starts_with(&point) || point.starts_with(r))
+}
+
+/// Prompt-guarded folders skipped this run because Poo lacks Full Disk Access.
+pub fn held_back_folders() -> Vec<PathBuf> {
+    let mut v = HELD_BACK.lock().unwrap().clone();
+    v.sort();
+    v.dedup();
+    v
+}
 
 /// Guarded folders that did not answer in time during this run.
 pub fn blocked_folders() -> Vec<PathBuf> {
@@ -114,6 +186,11 @@ fn probe_many(dirs: &[PathBuf]) {
             if c.contains_key(d) {
                 continue;
             }
+            if held_back(d) {
+                c.insert(d.clone(), false);
+                HELD_BACK.lock().unwrap().extend(guard_point(d));
+                continue;
+            }
             // Silence is remembered across runs for a while, so later commands skip it at once.
             if silent.get(d).map_or(false, |t| now - t < SILENT_FOR) {
                 c.insert(d.clone(), false);
@@ -149,17 +226,23 @@ fn probe_many(dirs: &[PathBuf]) {
         }
     }
     let mut silent_now = vec![];
+    let mut newly_answered = vec![];
     let mut c = cache.lock().unwrap();
     for (d, ok) in todo.into_iter().zip(answered) {
         if !ok {
             BLOCKED.lock().unwrap().push(d.clone());
             silent_now.push(d.clone());
+        } else if let Some(p) = guard_point(&d).filter(|p| prompts(p)) {
+            newly_answered.push(p);
         }
         c.insert(d, ok);
     }
     drop(c);
     if !silent_now.is_empty() {
         remember_silent(&silent_now);
+    }
+    if !newly_answered.is_empty() {
+        remember_answered(newly_answered);
     }
 }
 
@@ -496,7 +579,45 @@ pub fn dev_of(path: &Path) -> Option<u64> {
     std::fs::symlink_metadata(path).ok().map(|m| m.dev())
 }
 
-const SILENT_FOR: i64 = 15 * 60;
+/// A folder that stayed silent is most likely showing a privacy prompt nobody answered:
+/// leave it alone for a day rather than asking again.
+const SILENT_FOR: i64 = 24 * 60 * 60;
+
+fn answered_file() -> PathBuf {
+    crate::config::state_dir().join("answered-folders.json")
+}
+
+/// Prompt-guarded folders that answered once (allowed or denied): reading them again never
+/// shows a prompt, so they stay readable without Full Disk Access.
+fn answered() -> &'static Mutex<HashSet<PathBuf>> {
+    static SET: std::sync::OnceLock<Mutex<HashSet<PathBuf>>> = std::sync::OnceLock::new();
+    SET.get_or_init(|| {
+        let v: Vec<PathBuf> = std::fs::read(answered_file()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        Mutex::new(v.into_iter().collect())
+    })
+}
+
+fn remember_answered(points: Vec<PathBuf>) {
+    let mut set = answered().lock().unwrap();
+    let before = set.len();
+    set.extend(points);
+    if set.len() == before {
+        return;
+    }
+    // Merge with what other runs wrote meanwhile.
+    let disk: Vec<PathBuf> = std::fs::read(answered_file()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    set.extend(disk);
+    let mut all: Vec<&PathBuf> = set.iter().collect();
+    all.sort();
+    let f = answered_file();
+    let _ = std::fs::create_dir_all(f.parent().unwrap());
+    if let Ok(data) = serde_json::to_vec(&all) {
+        let tmp = f.with_extension(format!("json.tmp-{}", std::process::id()));
+        if std::fs::write(&tmp, data).is_ok() {
+            let _ = std::fs::rename(tmp, f);
+        }
+    }
+}
 
 fn silent_file() -> PathBuf {
     crate::config::state_dir().join("silent-folders.json")
@@ -520,5 +641,22 @@ fn remember_silent(dirs: &[PathBuf]) {
         if std::fs::write(&tmp, data).is_ok() {
             let _ = std::fs::rename(tmp, f);
         }
+    }
+}
+
+#[cfg(test)]
+mod prompt_tests {
+    use super::*;
+
+    #[test]
+    fn folders_macos_guards_with_a_prompt() {
+        let h = crate::util::home();
+        for p in ["Downloads", "Documents", "Music/Music", "Library/Containers/com.docker.docker", "Library/Mobile Documents", "Library/Application Support/AddressBook"] {
+            assert!(prompts(&guard_point(&h.join(p).join("x")).unwrap()), "{p}");
+        }
+        for p in ["dev", ".cargo", "Library/Caches/com.apple.dt.Xcode", "Library/Developer", "Library/Application Support/Code"] {
+            assert!(guard_point(&h.join(p).join("x")).map_or(true, |g| !prompts(&g)), "{p}");
+        }
+        assert!(prompts(Path::new("/Volumes/External")));
     }
 }
