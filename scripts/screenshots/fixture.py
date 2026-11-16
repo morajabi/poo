@@ -27,7 +27,7 @@ add("caches","Rust","cargo registry",f"{H}/.cargo/registry",2.2,"idle","redownlo
 add("worktrees","Worktrees","atlas-api-search",P("atlas-api-search"),1.4,"cold","rebuild",9,["work landed in main 9d ago"],"git worktree add",P("atlas-api-search"),kind="worktree-remove",agent="claude",repo=P("atlas-api"))
 add("junk","Logs","Diagnostic reports",f"{H}/Library/Logs/DiagnosticReports",0.42,"junk","none",2,["crash logs older than a week"])
 # In use and check first
-add("build","Rust","ledger/target",P("ledger/target"),4.1,"warm","rebuild",0.2,["built 5h ago"],"cargo build",P("ledger"))
+add("build","Rust","ledger/target",P("ledger/target"),4.1,"warm","rebuild",0.2,["built 5h ago"],"cargo build",P("ledger"),frees=int(0.1229*G))
 add("xcode","Simulator runtimes","iOS 18.2",f"/Library/Developer/CoreSimulator/Volumes/iOS_22C150",7.9,"warm","redownload",1,["used by 2 simulators"])
 add("caches","Homebrew","Homebrew downloads",f"{H}/Library/Caches/Homebrew",1.6,"warm","redownload",2,["last brew install 2d ago"])
 add("ai","Local models","ollama models",f"{H}/.ollama/models",12.4,"hot","redownload",0.02,["ollama is running"])

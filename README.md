@@ -33,7 +33,7 @@ installers, Docker, Homebrew) with safety rules learned from tools like Mole.
 |---|---|
 | ![Browse every item, with why it is there and what cleaning it costs](docs/images/browse.png) | ![Cleaning progress with a running total and Stop](docs/images/cleaning.png) |
 | ![After a clean: freed space and what was backed up](docs/images/freed.png) | ![The menu bar panel in dark mode](docs/images/menubar-dark.png) |
-| ![Elsewhere on This Mac: snapshots, purgeable space and device backups Poo explains but leaves alone](docs/images/elsewhere.png) | |
+| ![The menu bar panel with its areas open: tick what to clean](docs/images/menubar-expanded.png) | ![Elsewhere on This Mac: snapshots, purgeable space and device backups Poo explains but leaves alone](docs/images/elsewhere.png) |
 
 The CLI has the same picture, as an interactive terminal UI (`poo`) and as plain output
 for scripts and agents (JSON when piped):

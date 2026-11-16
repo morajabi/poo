@@ -70,7 +70,8 @@ swiftc -O "$W/wins.swift" -o "$W/wins"
 shot() {
   local name=$1 title=$2 frame=$3 speed=$4; shift 5
   [ "$frame" != - ] && defaults write $D "NSWindow Frame main" "$frame 0 0 1470 923 "
-  open -n "$APP" --env POO_BIN="$W/poo" --env POO_HOME="$W/home" --env POO_NO_GUARD=1 --env POO_NO_WATCH=1 \
+  local size=""; [ "$frame" != - ] && size="${${(s: :)frame}[3]} ${${(s: :)frame}[4]}"
+  open -n "$APP" --env POO_BIN="$W/poo" --env POO_HOME="$W/home" --env POO_NO_GUARD=1 --env POO_NO_WATCH=1 --env POO_SHOTS_RETINA=1 --env POO_SHOTS_SIZE="$size" \
     --env POO_PREVIEW_SPEED="$speed" --args "$@"
   sleep 6
   osascript -e "tell application id \"$D\" to activate" >/dev/null 2>&1 || true
@@ -85,6 +86,9 @@ caffeinate -u -d -t 600 &
 CAF=$!
 shot menubar      "Poo Menu"     -                       1    -- --preview-menu
 shot menubar-dark "Poo Menu"     -                       1    -- --preview-menu --dark
+defaults write $D menuAreasExpanded -bool true
+shot menubar-expanded "Poo Menu" -                       1    -- --preview-menu
+defaults delete $D menuAreasExpanded
 shot overview     "Overview"     "175 136 960 640"       1    -- --window
 shot browse       "Browse"       "120 136 1240 720"      1    -- --window --preview-section=browse --preview-inspect
 shot elsewhere    "Elsewhere on This Mac" "175 136 960 560" 1 -- --window --preview-section=elsewhere
@@ -95,5 +99,6 @@ kill $CAF 2>/dev/null || true
 mkdir -p "$OUT"
 "$W/compose" "$W/raw-menubar.png" "$OUT/menubar.png" light menubar 56 "86 GB"
 "$W/compose" "$W/raw-menubar-dark.png" "$OUT/menubar-dark.png" dark menubar 56 "86 GB"
+"$W/compose" "$W/raw-menubar-expanded.png" "$OUT/menubar-expanded.png" light menubar 56 "86 GB"
 for n in overview browse elsewhere cleaning freed; do "$W/compose" "$W/raw-$n.png" "$OUT/$n.png" light; done
 ls -l "$OUT"
