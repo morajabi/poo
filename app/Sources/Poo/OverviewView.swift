@@ -231,7 +231,7 @@ struct OverviewView: View {
     @ViewBuilder
     private func footnotes(_ r: Report) -> some View {
         // Full Disk Access notes live in Elsewhere on This Mac.
-        let lines = r.warnings.filter { !$0.contains("Full Disk Access") } + [store.lastClean?.snapshot_note].compactMap { $0 }
+        let lines = r.warnings.filter { !$0.contains("Full Disk Access") && !$0.hasPrefix("no roots configured") } + [store.lastClean?.snapshot_note].compactMap { $0 }
         if !lines.isEmpty || store.freedThisWeek > 0 {
             VStack(alignment: .leading, spacing: 3) {
                 if store.freedThisWeek > 0 {
@@ -328,7 +328,7 @@ struct DenseItemRow: View {
                 .foregroundStyle(.secondary)
                 .frame(width: 64, alignment: .trailing)
             SizeLabel(item: item)
-                .frame(width: 72, alignment: .trailing)
+                .frame(width: 96, alignment: .trailing)
         }
         .font(.callout)
         .contentShape(Rectangle())

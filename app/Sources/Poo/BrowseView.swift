@@ -155,17 +155,17 @@ struct BrowseView: View {
             if let sym = g.symbol {
                 Image(systemName: sym).foregroundStyle(g.color ?? .secondary)
             }
-            Text(g.title).font(.headline).foregroundStyle(.primary)
-            if let s = g.subtitle { Text(s).foregroundStyle(.secondary) }
-            Text("\(g.items.count)").foregroundStyle(.tertiary)
-            Spacer()
+            Text(g.title).font(.headline).foregroundStyle(.primary).lineLimit(1).layoutPriority(2)
+            if let s = g.subtitle { Text(s).foregroundStyle(.secondary).lineLimit(1) }
+            Text("\(g.items.count)").foregroundStyle(.tertiary).fixedSize()
+            Spacer(minLength: 4)
             if !g.notInUse.isEmpty {
-                Button("Select not in use") { store.select(g.notInUse, true) }
+                Button { store.select(g.notInUse, true) } label: { Image(systemName: "checkmark.circle") }
                     .buttonStyle(.borderless)
-                    .font(.callout)
+                    .accessibilityLabel("Select not in use")
                     .help("Tick the \(g.notInUse.count) items nothing is using (\(Fmt.bytes(g.notInUse.reduce(0) { $0 + $1.total_bytes })))")
             }
-            Text(Fmt.bytes(g.bytes)).font(.headline).monospacedDigit().foregroundStyle(.primary)
+            Text(Fmt.bytes(g.bytes)).font(.headline).monospacedDigit().foregroundStyle(.primary).fixedSize()
         }
         .contentShape(Rectangle())
         .contextMenu {

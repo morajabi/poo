@@ -265,6 +265,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Self.updateActivationPolicy(windowOpen: false)
+        // Screenshots: put each window once on the sharpest screen (2x on any desk setup),
+        // at POO_SHOTS_SIZE for the main window.
+        if ProcessInfo.processInfo.environment["POO_SHOTS_RETINA"] != nil {
+            var placed = Set<ObjectIdentifier>()
+            NotificationCenter.default.addObserver(forName: NSWindow.didUpdateNotification, object: nil, queue: .main) { n in
+                guard let w = n.object as? NSWindow, w.isVisible, w.styleMask.contains(.titled), !placed.contains(ObjectIdentifier(w)),
+                      let s = NSScreen.screens.max(by: { $0.backingScaleFactor < $1.backingScaleFactor }) else { return }
+                placed.insert(ObjectIdentifier(w))
+                let v = s.visibleFrame
+                var size = w.frame.size
+                if w.title != "Poo Menu", w.title != "Poo Cleaning", w.title != "Poo Review",
+                   let wh = ProcessInfo.processInfo.environment["POO_SHOTS_SIZE"]?.split(separator: " ").compactMap({ Double($0) }), wh.count == 2 {
+                    size = NSSize(width: wh[0], height: wh[1])
+                }
+                w.setFrame(NSRect(x: v.midX - size.width / 2, y: v.midY - size.height / 2, width: size.width, height: size.height), display: true)
+                NSApp.activate()
+                w.makeKeyAndOrderFront(nil)
+            }
+        }
         // Without the menu bar icon nothing else triggers the launch flow, so open the main
         // window through the Window menu item SwiftUI made for it.
         if !Self.showInMenuBar {

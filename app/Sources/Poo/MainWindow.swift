@@ -228,9 +228,10 @@ struct ProjectRow: View {
                 Text(Fmt.tilde(p.path)).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
             }
             Spacer(minLength: 8)
-            Text(p.stacks.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            Text(p.stacks.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
                 .frame(width: 140, alignment: .trailing)
             Text(statusText(p))
+                .lineLimit(1)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .frame(width: 92, alignment: .trailing)

@@ -115,13 +115,22 @@ struct ItemRow: View {
     var subtitle: String?
 
     var body: some View {
+        // Narrow (inspector open, small window): the age column goes before the name shrinks.
+        ViewThatFits(in: .horizontal) {
+            row(showsAge: true)
+            row(showsAge: false)
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func row(showsAge: Bool) -> some View {
         HStack(spacing: 10) {
             SelectBox(item: item)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(item.name).lineLimit(1).truncationMode(.middle).layoutPriority(1)
                     if let a = item.agent {
-                        Text(a).font(.caption2).padding(.horizontal, 4).background(.quaternary, in: Capsule())
+                        Text(a).font(.caption2).padding(.horizontal, 4).background(.quaternary, in: Capsule()).fixedSize()
                     }
                 }
                 Text(subtitle ?? item.why)
@@ -130,16 +139,21 @@ struct ItemRow: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
-            Spacer(minLength: 8)
+            .frame(minWidth: showsAge ? 180 : 0, maxWidth: .infinity, alignment: .leading)
+            .layoutPriority(1)
             TierBadge(tier: item.tier)
-            Text(Fmt.ago(item.lastUsedDate))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(width: 64, alignment: .trailing)
+                .fixedSize()
+            if showsAge {
+                Text(Fmt.ago(item.lastUsedDate))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .frame(width: 64, alignment: .trailing)
+            }
             SizeLabel(item: item)
-                .frame(width: 72, alignment: .trailing)
+                .frame(width: 96, alignment: .trailing)
         }
-        .padding(.vertical, 2)
+        .help(showsAge ? "" : "Used \(Fmt.ago(item.lastUsedDate))")
     }
 }
 
@@ -148,13 +162,16 @@ struct SizeLabel: View {
     var item: Item
 
     var body: some View {
+        // Each line stays on one line: a narrow column must never wrap "frees 122.9 MB".
         VStack(alignment: .trailing, spacing: 0) {
-            Text(Fmt.bytes(item.total_bytes)).monospacedDigit()
+            Text(Fmt.bytes(item.total_bytes)).monospacedDigit().lineLimit(1).fixedSize()
             if item.freesDiffers, let f = item.frees {
                 Text("frees \(Fmt.bytes(f))")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
+                    .lineLimit(1)
+                    .fixedSize()
                     .help("Cleaning returns \(Fmt.bytes(f)). The rest is shared with clones or hard links and stays until they go too.")
             }
         }
