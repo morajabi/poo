@@ -33,11 +33,14 @@ struct Cli {
 
 #[derive(Args, Clone, Default)]
 struct FilterArgs {
-    /// Bucket id (build, xcode, worktrees, deps, caches, ai, containers, system, junk, other).
+    /// Bucket id: build, xcode, android, worktrees, deps, caches, ai, containers, system, junk,
+    /// other, or one from your mods (`poo buckets`).
     bucket: Option<String>,
+    /// Group within a bucket, as shown in `poo ls`, e.g. Rust or DerivedData.
     #[arg(long)]
     group: Option<String>,
-    #[arg(long)]
+    /// Only items in this tier.
+    #[arg(long, value_parser = ["junk", "cold", "idle", "warm", "hot", "review", "protected"])]
     tier: Option<String>,
     /// Project, repo or path prefix.
     #[arg(long)]
@@ -56,6 +59,7 @@ enum Cmd {
     Ui,
     /// Overview: free space, buckets, plans (default command when piped or with --text).
     Overview {
+        /// Update the report now instead of reusing a recent one.
         #[arg(long)]
         rescan: bool,
     },
@@ -78,16 +82,23 @@ enum Cmd {
     Ls {
         #[command(flatten)]
         f: FilterArgs,
-        #[arg(long, default_value = "size")]
+        /// Order: biggest first, oldest first, by tier, or by name.
+        #[arg(long, default_value = "size", value_parser = ["size", "age", "tier", "name"])]
         sort: String,
+        /// Show at most this many items (0 for all).
         #[arg(long, short = 'n', default_value_t = 60)]
         limit: usize,
     },
     /// Show one item by id or path.
     #[command(alias = "inspect")]
-    Show { id: String },
+    Show {
+        /// Item id from `poo ls`, or a path.
+        id: String,
+    },
     /// Preview a cleaning plan (quick, stale, deep, emergency).
     Plan {
+        /// quick (junk only), stale (nothing uses it), deep (also recent builds and caches),
+        /// emergency (least regret first until --free is met), or a plan from your mods.
         plan: String,
         /// Pick least-regret items until this much is freed (e.g. 30G).
         #[arg(long)]
@@ -103,11 +114,15 @@ enum Cmd {
     },
     /// Clean items by id, or a plan.
     Clean {
+        /// Item ids from `poo ls` or `poo plan`, or paths.
         ids: Vec<String>,
+        /// Clean what this plan lists (quick, stale, deep, emergency); see `poo plan <PLAN>`.
         #[arg(long)]
         plan: Option<String>,
+        /// With --plan: pick least-regret items until this much is freed (e.g. 30G).
         #[arg(long)]
         free: Option<String>,
+        /// Show what would be cleaned and why anything stays; remove nothing.
         #[arg(long)]
         dry_run: bool,
         /// Do not ask for confirmation.
@@ -140,9 +155,12 @@ enum Cmd {
     },
     /// Free a target amount with the least regret (emergency plan).
     Free {
+        /// How much to free, e.g. 20G or 500M.
         size: String,
+        /// Show what would be cleaned; remove nothing.
         #[arg(long)]
         dry_run: bool,
+        /// Do not ask for confirmation.
         #[arg(long, short)]
         yes: bool,
         /// Let the emergency plan include things in use too.
@@ -215,8 +233,10 @@ enum Cmd {
         /// Mark setup as done.
         #[arg(long)]
         done: bool,
+        /// With --done: who set it up, e.g. your name or the agent (claude, codex).
         #[arg(long)]
         by: Option<String>,
+        /// With --done: a note about the choices made, kept in config.toml.
         #[arg(long)]
         notes: Option<String>,
     },
@@ -307,9 +327,18 @@ enum ProjectsCmd {
 
 #[derive(Subcommand)]
 enum RootsCmd {
+    /// List the roots poo walks and the agent worktree homes it found.
     Ls,
-    Add { path: String },
-    Rm { path: String },
+    /// Walk this folder too (pins the detected roots on first use).
+    Add {
+        /// Folder with your projects, e.g. ~/dev.
+        path: String,
+    },
+    /// Stop walking this folder.
+    Rm {
+        /// A root from `poo roots`.
+        path: String,
+    },
 }
 
 #[derive(Args)]
@@ -588,19 +617,28 @@ enum ScheduleCmd {
 
 #[derive(Subcommand)]
 enum IntegrationCmd {
+    /// Which coding agents are found and whether the skill and MCP server are installed and current.
     Status,
-    /// Install for an agent: claude, codex, cursor, opencode, gemini, windsurf, claude-desktop, agents, or all.
+    /// Install the skill and MCP server into a coding agent.
     Install {
+        /// claude, codex, cursor, opencode, gemini, windsurf, claude-desktop, agents (shared
+        /// ~/.agents skills folder), or all (every agent found).
         agent: String,
+        /// Only the skill (how agents should use poo), no MCP server.
         #[arg(long)]
         skill_only: bool,
+        /// Only the MCP server, no skill.
         #[arg(long)]
         mcp_only: bool,
         /// Confirm a change asked for by a coding agent (agents must ask the user first).
         #[arg(long, short = 'y')]
         yes: bool,
     },
-    Uninstall { agent: String },
+    /// Remove the skill and MCP server from a coding agent.
+    Uninstall {
+        /// An agent id from `poo integration status`, or all.
+        agent: String,
+    },
 }
 
 struct Out {
