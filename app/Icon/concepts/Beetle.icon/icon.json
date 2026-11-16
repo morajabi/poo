@@ -1,0 +1,76 @@
+{
+  "fill": {
+    "linear-gradient": [
+      "srgb:1.00000,0.87843,0.54118,1.00000",
+      "srgb:1.00000,0.63922,0.22745,1.00000"
+    ]
+  },
+  "groups": [
+    {
+      "name": "Beetle",
+      "layers": [
+        {
+          "name": "Beetle",
+          "image-name": "beetle.svg"
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.6
+      },
+      "translucency": {
+        "enabled": false,
+        "value": 0.0
+      },
+      "specular": true
+    },
+    {
+      "name": "Bits",
+      "layers": [
+        {
+          "name": "Bits",
+          "image-name": "bits.svg"
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.2
+      },
+      "translucency": {
+        "enabled": false,
+        "value": 0.0
+      },
+      "specular": true
+    },
+    {
+      "name": "Ball",
+      "layers": [
+        {
+          "name": "Ball",
+          "image-name": "ball.svg",
+          "fill-specializations": [
+            {
+              "value": {
+                "solid": "srgb:1.00000,1.00000,1.00000,1.00000"
+              }
+            }
+          ]
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.45
+      },
+      "specular": true
+    }
+  ],
+  "supported-platforms": {
+    "squares": [
+      "macOS"
+    ]
+  }
+}

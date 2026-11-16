@@ -1,61 +1,17 @@
 {
   "fill": {
     "linear-gradient": [
-      "srgb:0.29804,0.83922,0.47843,1.00000",
-      "srgb:0.08627,0.56471,0.29020,1.00000"
+      "srgb:0.43137,0.42353,1.00000,1.00000",
+      "srgb:0.20392,0.12549,0.72157,1.00000"
     ]
   },
   "groups": [
     {
-      "name": "Spark",
+      "name": "Blocks",
       "layers": [
         {
-          "name": "Spark",
-          "image-name": "spark.svg",
-          "fill-specializations": [
-            {
-              "value": {
-                "solid": "srgb:1.00000,1.00000,1.00000,1.00000"
-              }
-            },
-            {
-              "appearance": "tinted",
-              "value": {
-                "solid": "srgb:1.00000,1.00000,1.00000,1.00000"
-              }
-            }
-          ]
-        }
-      ],
-      "shadow": {
-        "kind": "neutral",
-        "opacity": 0.35
-      },
-      "translucency": {
-        "enabled": false,
-        "value": 0.0
-      },
-      "specular": true
-    },
-    {
-      "name": "Level",
-      "layers": [
-        {
-          "name": "Level",
-          "image-name": "level.svg",
-          "fill-specializations": [
-            {
-              "value": {
-                "solid": "srgb:1.00000,1.00000,1.00000,1.00000"
-              }
-            },
-            {
-              "appearance": "tinted",
-              "value": {
-                "solid": "srgb:1.00000,1.00000,1.00000,1.00000"
-              }
-            }
-          ]
+          "name": "Blocks",
+          "image-name": "blocks.svg"
         }
       ],
       "shadow": {
@@ -69,11 +25,11 @@
       "specular": true
     },
     {
-      "name": "Track",
+      "name": "Vortex",
       "layers": [
         {
-          "name": "Track",
-          "image-name": "track.svg",
+          "name": "Vortex",
+          "image-name": "vortex.svg",
           "fill-specializations": [
             {
               "value": {
@@ -81,9 +37,12 @@
               }
             },
             {
-              "appearance": "tinted",
+              "appearance": "dark",
               "value": {
-                "solid": "srgb:1.00000,1.00000,1.00000,1.00000"
+                "linear-gradient": [
+                  "srgb:0.89412,0.88235,1.00000,1.00000",
+                  "srgb:0.66275,0.63529,1.00000,1.00000"
+                ]
               }
             }
           ]
@@ -91,11 +50,11 @@
       ],
       "shadow": {
         "kind": "neutral",
-        "opacity": 0.2
+        "opacity": 0.3
       },
       "translucency": {
         "enabled": true,
-        "value": 0.6
+        "value": 0.35
       },
       "specular": true
     }
