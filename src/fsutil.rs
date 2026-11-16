@@ -25,32 +25,23 @@ pub struct Entry {
 /// Folders macOS guards with a consent prompt. Until someone answers, the first read of
 /// one blocks: forever, if nobody is at the Mac. Each is probed once, off-thread, with a
 /// timeout; a folder that does not answer is skipped for the rest of the run.
-fn guarded_roots() -> &'static (Vec<PathBuf>, Vec<PathBuf>) {
-    static ROOTS: std::sync::OnceLock<(Vec<PathBuf>, Vec<PathBuf>)> = std::sync::OnceLock::new();
+/// Folders whose children are probed one by one: macOS can guard any of them with a
+/// consent prompt (another app's data, media, iCloud), and which ones differs per Mac.
+/// Longest first, so the most specific parent decides.
+fn guarded_parents() -> &'static Vec<PathBuf> {
+    static ROOTS: std::sync::OnceLock<Vec<PathBuf>> = std::sync::OnceLock::new();
     ROOTS.get_or_init(|| {
         let h = crate::util::home();
-        // Probed as a whole.
-        let whole = [
-            "Desktop", "Documents", "Downloads", "Movies", "Music", "Pictures",
-            "Library/Mobile Documents", "Library/CloudStorage", "Library/Mail", "Library/Messages",
-            "Library/Safari", "Library/Biome", "Library/Accounts", "Library/Cookies",
-            "Library/Calendars", "Library/HomeKit", "Library/Reminders", "Library/Suggestions",
-            "Library/IdentityServices", "Library/Metadata/CoreSpotlight", "Library/PersonalizationPortrait",
-            "Library/Application Support/AddressBook", "Library/Application Support/CallHistoryDB",
-            "Library/Application Support/Knowledge", "Library/Application Support/MobileSync",
-            "Library/Application Support/FileProvider", "Library/Application Support/com.apple.TCC",
-            "Library/Caches/com.apple.Music", "Library/Caches/com.apple.Safari",
+        let mut v: Vec<PathBuf> = [
+            "", "Library", "Library/Application Support", "Library/Caches", "Library/Containers",
+            "Library/Group Containers", "Library/Daemon Containers", "Pictures", "Music", "Movies",
         ]
         .iter()
-        .map(|p| h.join(p))
+        .map(|p| if p.is_empty() { h.clone() } else { h.join(p) })
+        .chain(std::iter::once(PathBuf::from("/Volumes")))
         .collect();
-        // Probed per child: each app's container, each volume.
-        let per_child = ["Library/Containers", "Library/Group Containers", "Library/Daemon Containers"]
-            .iter()
-            .map(|p| h.join(p))
-            .chain(std::iter::once(PathBuf::from("/Volumes")))
-            .collect();
-        (whole, per_child)
+        v.sort_by_key(|p| std::cmp::Reverse(p.as_os_str().len()));
+        v
     })
 }
 
@@ -64,23 +55,27 @@ pub fn blocked_folders() -> Vec<PathBuf> {
     v
 }
 
-/// The folder whose answer decides whether reading `path` might block, if any.
+/// The folder whose answer decides whether reading `path` might block, if any: the child
+/// of the most specific guarded parent that `path` is in.
 fn guard_point(path: &Path) -> Option<PathBuf> {
-    let (whole, per_child) = guarded_roots();
-    if let Some(parent) = per_child.iter().find(|r| path.starts_with(r)) {
-        let child = path.strip_prefix(parent).ok()?.components().next()?;
-        return Some(parent.join(child));
-    }
-    whole.iter().find(|r| path.starts_with(r)).cloned()
+    let parent = guarded_parents().iter().find(|r| path.starts_with(r) && path != r.as_path())?;
+    let child = path.strip_prefix(parent).ok()?.components().next()?;
+    Some(parent.join(child))
 }
 
 /// False when `path` is inside a guarded folder that does not answer (a pending privacy
 /// prompt, a hung network volume or cloud provider).
 pub fn readable_without_blocking(path: &Path) -> bool {
-    match guard_point(path) {
-        Some(g) => answers(&g),
-        None => true,
+    thread_local! {
+        static LAST: std::cell::RefCell<Option<(PathBuf, bool)>> = const { std::cell::RefCell::new(None) };
     }
+    let Some(g) = guard_point(path) else { return true };
+    if let Some(ok) = LAST.with(|l| l.borrow().as_ref().filter(|(p, _)| *p == g).map(|(_, ok)| *ok)) {
+        return ok;
+    }
+    let ok = answers(&g);
+    LAST.with(|l| *l.borrow_mut() = Some((g, ok)));
+    ok
 }
 
 /// Probes the guard points of many paths at once (one shared 3s wait, not one per folder)
