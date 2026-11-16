@@ -24,26 +24,27 @@ state, and gives every item a **tier** that says how much regret cleaning it cau
 It also covers the usual cleaner territory (app, browser and system caches, logs, temp,
 installers, Docker, Homebrew) with safety rules learned from tools like Mole.
 
-```
-$ poo
-poo  27.9 GB free of 494 GB (94% used)   scanned just now in 17.2s
+<p align="center">
+  <img src="docs/images/menubar.png" alt="The Poo menu bar panel: free space, what is safe to free by area, one Review &amp; clean button" width="49%">
+  <img src="docs/images/overview.png" alt="The Poo window: disk breakdown, not-in-use space grouped by what a clean costs you" width="49%">
+</p>
 
-  Build output               95.9 GB  ██████████░░░░░░░░░░░░  39 items
-  Xcode & simulators          217 GB  ██████████████████████  39 items, 8.53 GB stale
-  Worktrees                  2.63 GB  ░░░░░░░░░░░░░░░░░░░░░░  13 items
-  ...
-Plans
-  quick         152 MB    31 items  Logs, temp files, crash reports and broken simulators.
-  stale        9.01 GB    44 items  Adds build output, worktrees and caches nobody touched for weeks...
-  deep          134 GB   100 items  Adds recent builds and caches. Expect rebuilds and redownloads.
-  emergency    49.7 GB    45 items  Frees the least regrettable items first until 15% is free.
+| | |
+|---|---|
+| ![Browse every item, with why it is there and what cleaning it costs](docs/images/browse.png) | ![Cleaning progress with a running total and Stop](docs/images/cleaning.png) |
+| ![After a clean: freed space and what was backed up](docs/images/freed.png) | ![The menu bar panel in dark mode](docs/images/menubar-dark.png) |
 
-$ poo worktrees
-~/dev/app  194 GB across 12 checkouts
-    40.7 GB clean   warm                 ~/dev/app-blocks   feature-x
-    28.2 GB dirty   protected            ~/dev/app-typo     (detached)
-     143 MB clean   cold      codex      ~/.codex/worktrees/review/app   codex/review
-```
+The CLI has the same picture, as an interactive terminal UI (`poo`) and as plain output
+for scripts and agents (JSON when piped):
+
+<p align="center">
+  <img src="docs/images/cli-overview.png" alt="poo terminal UI overview" width="49%">
+  <img src="docs/images/cli-browse.png" alt="poo terminal UI browse view" width="49%">
+</p>
+<p align="center">
+  <img src="docs/images/cli-plan.png" alt="poo plan stale" width="49%">
+  <img src="docs/images/cli-clean.png" alt="poo cleaning in the terminal" width="49%">
+</p>
 
 ## Install
 
@@ -147,19 +148,36 @@ events, rules or roots changed.
 ## CLI
 
 ```
-poo                         overview
+poo                         interactive terminal UI (a plain overview when piped or with --text)
 poo scan [--full]           update the report (incremental unless --full)
 poo watch                   keep the report current as files change
 poo ls [bucket] [--tier cold] [--project PATH] [--min 1G] [-q text]
 poo show <id|path>          why it is there, what it costs to rebuild, what is inside
-poo plan stale              preview a plan
+poo plan stale              preview a plan (quick, stale, deep, emergency)
 poo clean <id>... | --plan stale [--dry-run] [--yes]
 poo free 30G                least-regret items until 30 GB are free
+poo growth [--since 7d]     what grew, and when the disk fills at this rate
 poo projects | poo worktrees
 poo buckets | poo rules | poo mods | poo roots | poo config
+poo suggest                 big folders no rule explains yet, with draft rules
+poo mods lint | submit      check a rule, then share it as a pull request
 poo catalog                 everything poo knows
 poo rules explain <path>    which rule matches and why
-poo history
+poo schedule | poo backups | poo history | poo update
+```
+
+```
+$ poo plan stale --text
+Not in use  238 MB  5 items
+Everything nothing is using right now: old or orphaned builds, landed worktrees, and builds of checkouts you moved on from. No data is touched; you rebuild only if you go back.
+
+id                 size              status            used  name                                  area / group
+af000c54be10     118 MB  ██████████  unused          4h ago  review-search/atlas                   worktrees / Worktrees
+a78b6b0c75c4     114 MB  █████████▋  unused          2h ago  harbor/apple/App/.build               build / Swift
+fc729110ed0b    3.83 MB  ▍·········  idle           10d ago  ~/Library/Caches/com.apple.dt.Xcode   xcode / Xcode caches
+7cb800dfea91    1.27 MB  ▏·········  junk           16m ago  -Users-you                            junk / Logs
+ec7524183965     721 KB  ··········  unused          4h ago  bump-sync                             worktrees / Worktrees
+5 items · 238 MB · 238 MB not in use
 ```
 
 Output is JSON when piped (`--text` forces tables). Errors are
