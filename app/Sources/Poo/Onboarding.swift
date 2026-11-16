@@ -46,7 +46,7 @@ struct OnboardingView: View {
             case .folders: return "Where your code lives"
             case .access: return "See the whole disk"
             case .routines: return "Keep it tidy"
-            case .agents: return "Your coding agents"
+            case .agents: return "Terminal and agents"
             case .ready: return "You're set"
             }
         }
@@ -62,6 +62,7 @@ struct OnboardingView: View {
     @State private var loginItem = SMAppService.mainApp.status == .enabled
     @State private var loginError: String?
     @State private var working = false
+    @State private var cliState = CommandLineTool.State.notInstalled
 
     var body: some View {
         VStack(spacing: 0) {
@@ -389,9 +390,11 @@ struct OnboardingView: View {
 
     private var agents: some View {
         VStack(alignment: .leading, spacing: 12) {
-            header("Give your coding agent Poo's tools, so it can check your disk and clean with you. Optional.")
+            header("Use Poo from Terminal, and give your coding agent its tools so it can check your disk and clean with you. Optional.")
             let detected = store.integrations.filter(\.detected)
             VStack(spacing: 0) {
+                cliRow
+                Divider().padding(.leading, 44)
                 HStack(spacing: 12) {
                     Image(systemName: "sparkles").foregroundStyle(Color.accentColor).frame(width: 20)
                     VStack(alignment: .leading, spacing: 1) {
@@ -455,6 +458,51 @@ struct OnboardingView: View {
             }
             Spacer(minLength: 0)
         }
+    }
+
+    private var cliRow: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "terminal").foregroundStyle(Color.accentColor).frame(width: 20)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Command-line tool")
+                Group {
+                    switch cliState {
+                    case .linked:
+                        if CommandLineTool.onPath {
+                            Text("Type poo in Terminal. Updates with the app.")
+                        } else {
+                            Text("Add ~/.local/bin to your PATH to type poo.")
+                        }
+                    case .separate(let p): Text("Installed at \(Fmt.tilde(p))")
+                    case .notInstalled: Text("poo in Terminal: the same engine, plus a full-screen view")
+                    case .unavailable: Text("Not bundled in this build")
+                    }
+                }
+                .font(.caption).foregroundStyle(.secondary)
+                .textSelection(.enabled)
+            }
+            Spacer()
+            switch cliState {
+            case .linked where !CommandLineTool.onPath:
+                Button("Copy PATH Line") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(CommandLineTool.pathLine, forType: .string)
+                    store.flash("Copied. Paste it in Terminal.")
+                }
+            case .linked, .separate:
+                Label("Installed", systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(.callout)
+            case .notInstalled:
+                Button("Install") {
+                    if let err = CommandLineTool.linkNow() { store.flash(err) }
+                    cliState = CommandLineTool.state
+                }
+            case .unavailable:
+                EmptyView()
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .onAppear { cliState = CommandLineTool.state }
     }
 
     // MARK: Ready
@@ -659,5 +707,76 @@ struct AppTile: View {
         .card()
         .draggable(url)
         .help("Drag into System Settings › Privacy & Security › Full Disk Access")
+    }
+}
+
+/// Puts the CLI bundled in Poo.app on the PATH as ~/.local/bin/poo (a link, so Sparkle
+/// updates it with the app). Never replaces a poo someone installed another way.
+enum CommandLineTool {
+    enum State: Equatable { case linked, separate(String), notInstalled, unavailable }
+
+    static var bundled: URL? { Bundle.main.url(forResource: "poo", withExtension: nil, subdirectory: "bin") }
+    static var link: URL { URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".local/bin/poo") }
+
+    static var state: State {
+        guard let bundled else { return .unavailable }
+        let fm = FileManager.default
+        if let dest = try? fm.destinationOfSymbolicLink(atPath: link.path) {
+            return dest == bundled.path ? .linked : .notInstalled
+        }
+        if fm.isExecutableFile(atPath: link.path) { return .separate(link.path) }
+        for p in ["/opt/homebrew/bin/poo", "/usr/local/bin/poo"] where fm.isExecutableFile(atPath: p) { return .separate(p) }
+        return .notInstalled
+    }
+
+    /// Whether ~/.local/bin is on the PATH a new zsh would get (checked from ~/.zshrc and friends).
+    static var onPath: Bool {
+        ["/.zshrc", "/.zprofile", "/.profile", "/.bash_profile", "/.config/fish/config.fish"].contains { f in
+            ((try? String(contentsOfFile: NSHomeDirectory() + f, encoding: .utf8)) ?? "").contains(".local/bin")
+        }
+    }
+
+    /// Links the bundled CLI. Returns an error message, or nil on success.
+    @discardableResult
+    static func linkNow() -> String? {
+        guard let bundled else { return "This build has no bundled CLI." }
+        if case .separate = state { return nil }
+        let fm = FileManager.default
+        do {
+            try fm.createDirectory(at: link.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if (try? fm.destinationOfSymbolicLink(atPath: link.path)) != nil { try fm.removeItem(at: link) }
+            try fm.createSymbolicLink(at: link, withDestinationURL: bundled)
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    static let pathLine = "echo 'export PATH=\"$HOME/.local/bin:$PATH\"' >> ~/.zshrc"
+
+    /// The app menu's Install Command-Line Tool…
+    static func install() {
+        let alert = NSAlert()
+        defer { NSApp.activate(); alert.runModal() }
+        switch state {
+        case .unavailable:
+            alert.messageText = "This build has no bundled CLI"
+            alert.informativeText = "Install it with: curl -fsSL https://raw.githubusercontent.com/morajabi/poo/main/install.sh | sh"
+            return
+        case .separate(let p):
+            alert.messageText = "poo is already installed"
+            alert.informativeText = "\(p) is a separate install that updates itself. Poo left it as is."
+            return
+        case .linked, .notInstalled:
+            break
+        }
+        if let err = linkNow() {
+            alert.messageText = "Could not install poo"
+            alert.informativeText = err
+            return
+        }
+        alert.messageText = "poo is ready in Terminal"
+        alert.informativeText = "\(link.path) runs the CLI inside Poo.app and updates with it."
+            + (onPath ? "" : "\n\nAdd ~/.local/bin to your PATH:\n\(pathLine)")
     }
 }
