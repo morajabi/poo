@@ -120,8 +120,9 @@ final class MenubarTests: XCTestCase {
         let m = try JSONDecoder().decode(MenubarSettings.self, from: Data(#"{"title":"free+percent_free","sections":["areas"]}"#.utf8))
         XCTAssertEqual(m.parts, [.free, .percent_free])
         XCTAssertEqual(m.sections, ["areas"])
-        XCTAssertTrue(m.warn)
+        XCTAssertFalse(m.warn, "calm by default: no low-space tint")
         XCTAssertEqual(m.max_areas, 6)
+        XCTAssertEqual(MenubarSettings().parts, [.icon], "icon only by default")
         XCTAssertFalse(m.shows(.disk))
     }
 
