@@ -3,7 +3,7 @@
 use crate::clean::{self, CleanOptions};
 use crate::model::{ProjectPolicy, RiskLevel, Tier};
 use crate::ops::{self, BucketEdit, Ctx};
-use crate::plan::Filter;
+use crate::plan::{Admission, Filter};
 use crate::scan::ScanOptions;
 use crate::util::parse_bytes;
 use anyhow::{anyhow, Result};
@@ -32,6 +32,7 @@ fn tools() -> Value {
     let mut plan_props = filter_props.clone();
     plan_props["plan"] = json!({"type": "string", "description": "quick, stale, deep or emergency (plans are configurable)"});
     plan_props["free"] = json!({"type": "string", "description": "Target to free, e.g. 30G. Makes the plan pick least-regret items until reached."});
+    plan_props["mode"] = json!({"type": "string", "enum": ["safe", "in-use", "dangerous"], "default": "safe", "description": "Preview what clean would take in this mode; items it would refuse are left out."});
     json!([
         {"name": "overview", "description": "Disk usage, buckets with tier breakdown, plan sizes and the biggest items. Uses the cached scan when fresh.",
          "inputSchema": {"type": "object", "properties": {"rescan": {"type": "boolean", "description": "Update the report now (from the file-change journal, usually under a second; a full walk when the journal cannot help)"}, "full": {"type": "boolean", "description": "Walk everything (10-60s)"}}}},
@@ -109,6 +110,14 @@ fn filter_from(a: &Value) -> Filter {
     }
 }
 
+fn mode_from(a: &Value) -> RiskLevel {
+    match s(a, "mode").as_deref() {
+        Some("in-use") | Some("force") => RiskLevel::Force,
+        Some("dangerous") | Some("danger") => RiskLevel::Danger,
+        _ => RiskLevel::Standard,
+    }
+}
+
 fn call(ctx: &mut Ctx, name: &str, a: &Value) -> Result<Value> {
     let full = a.get("full").and_then(|v| v.as_bool()).unwrap_or(false);
     let rescan = full || a.get("rescan").and_then(|v| v.as_bool()).unwrap_or(false);
@@ -146,7 +155,7 @@ fn call(ctx: &mut Ctx, name: &str, a: &Value) -> Result<Value> {
             let r = ops::report(ctx, false, ScanOptions::default())?;
             let id = s(a, "plan").ok_or_else(|| anyhow!("plan is required"))?;
             let target = s(a, "free").and_then(|f| parse_bytes(&f));
-            let p = ops::make_plan(ctx, &r, &id, target, &filter_from(a))?;
+            let p = ops::make_plan(ctx, &r, &id, target, &filter_from(a), Admission::mode(mode_from(a)))?;
             Ok(json!({"plan": p.plan, "name": p.name, "bytes": p.bytes, "count": p.count, "target_bytes": p.target_bytes,
                       "items": p.items.iter().map(ops::compact).collect::<Vec<_>>()}))
         }
@@ -154,11 +163,7 @@ fn call(ctx: &mut Ctx, name: &str, a: &Value) -> Result<Value> {
             let mut r = ops::report(ctx, false, ScanOptions::default())?;
             let dry = a.get("dry_run").and_then(|v| v.as_bool()).unwrap_or(true);
             let approved = a.get("approved_by_user").and_then(|v| v.as_bool()).unwrap_or(false);
-            let mode = match s(a, "mode").as_deref() {
-                Some("in-use") | Some("force") => RiskLevel::Force,
-                Some("dangerous") | Some("danger") => RiskLevel::Danger,
-                _ => RiskLevel::Standard,
-            };
+            let mode = mode_from(a);
             if mode > RiskLevel::Standard && !approved && !dry {
                 return Ok(json!({"status": "needs_approval", "message": format!("mode `{}` needs approved_by_user: true after the user explicitly agreed to it", mode.as_str())}));
             }
@@ -167,7 +172,8 @@ fn call(ctx: &mut Ctx, name: &str, a: &Value) -> Result<Value> {
                 ops::resolve_ids(&r, &keys)?
             } else if let Some(p) = s(a, "plan") {
                 let target = s(a, "free").and_then(|f| parse_bytes(&f));
-                ops::make_plan(ctx, &r, &p, target, &Filter::default())?.items
+                // Items above the autonomy tier stay in, so they can be shown for approval.
+                ops::make_plan(ctx, &r, &p, target, &Filter::default(), Admission::mode(mode))?.items
             } else {
                 return Err(anyhow!("pass ids or plan"));
             };
@@ -383,7 +389,7 @@ pub fn schedule_preview(ctx: &mut Ctx, x: &crate::config::Schedule) -> Result<Va
         exclude_tags: x.exclude_tags.clone(),
         ..Default::default()
     };
-    let p = ops::make_plan(ctx, &r, &x.plan, None, &filter)?;
+    let p = ops::make_plan(ctx, &r, &x.plan, None, &filter, Admission::default())?;
     Ok(json!({
         "status": "needs_approval",
         "message": format!("Not saved. Show the user this schedule and what it would clean right now ({} in {} items; scheduled runs skip items with risks), then call again with approved_by_user: true after they say yes.", crate::util::bytes(p.bytes), p.count),

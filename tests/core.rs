@@ -335,3 +335,58 @@ fn elsewhere_rules_are_report_only() {
     let steam = cat.rule("app.steam-partial-downloads").unwrap();
     assert!(!steam.report_only && !steam.running_apps.is_empty());
 }
+
+#[test]
+fn plans_keep_only_what_clean_admits() {
+    use poo::plan::{evaluate, freed_total, Admission, Filter};
+    let cat = catalog::load(&Config::default());
+    let base = std::env::temp_dir().join(format!("poo-plan-admit-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    std::fs::create_dir_all(base.join("app/target")).unwrap();
+    std::fs::create_dir_all(base.join("wt/target")).unwrap();
+    std::fs::write(base.join("wt/.git"), "gitdir: /nowhere\n").unwrap();
+    let base = std::fs::canonicalize(&base).unwrap();
+    let p = |rel: &str| base.join(rel).to_string_lossy().to_string();
+    let mut app = item(&p("app/target"), ActionKind::Delete);
+    app.bytes = 5;
+    app.total_bytes = 5;
+    let mut wt_target = item(&p("wt/target"), ActionKind::Delete);
+    wt_target.bytes = 100;
+    wt_target.total_bytes = 100;
+    let mut wt = item(&p("wt"), ActionKind::WorktreeRemove);
+    wt.bucket = "worktrees".into();
+    wt.rule = "git.worktrees".into();
+    wt.bytes = 10;
+    wt.total_bytes = 110;
+    wt.risks.push(Risk::new("dirty", RiskLevel::Force, "uncommitted work"));
+    // Gone since the scan: clean would refuse it, so the plan must too.
+    let mut gone = item(&p("gone/target"), ActionKind::Delete);
+    gone.bytes = 1000;
+    gone.total_bytes = 1000;
+    let report: Report = serde_json::from_value(serde_json::json!({
+        "schema": 1, "version": "test", "scanned_at": 0, "duration_ms": 0, "disk": {"total": 0, "free": 0, "used": 0},
+        "roots": [], "total_bytes": 0, "buckets": [], "plans": [], "projects": [], "items": [], "warnings": [],
+    }))
+    .unwrap();
+    let report = Report { items: vec![app, wt_target, wt, gone], ..report };
+    let stale = cat.plan("stale").unwrap();
+
+    // Standard: the dirty worktree needs --include-in-use, so its build folder is cleaned alone.
+    let r = evaluate(stale, &report, &Filter::default(), None, &cat, Admission::default());
+    let mut paths: Vec<&str> = r.items.iter().map(|i| i.path.as_str()).collect();
+    paths.sort();
+    assert_eq!(paths, vec![p("app/target"), p("wt/target")]);
+    assert_eq!(r.bytes, 105);
+
+    // In-use: the whole worktree goes, and its build folder is counted once inside it.
+    let r = evaluate(stale, &report, &Filter::default(), None, &cat, Admission::mode(RiskLevel::Force));
+    let mut paths: Vec<&str> = r.items.iter().map(|i| i.path.as_str()).collect();
+    paths.sort();
+    assert_eq!(paths, vec![p("app/target"), p("wt")]);
+    assert_eq!(r.bytes, 115);
+
+    // Totals of a list count nested items once.
+    let all: Vec<&Item> = report.items.iter().take(3).collect();
+    assert_eq!(freed_total(&all), 115);
+    std::fs::remove_dir_all(&base).unwrap();
+}

@@ -2,7 +2,7 @@ use clap::{Args, Parser, Subcommand};
 use poo::clean::{self, CleanOptions};
 use poo::model::{ProjectPolicy, RiskLevel, Tier};
 use poo::ops::{self, BucketEdit, Ctx};
-use poo::plan::Filter;
+use poo::plan::{Admission, Filter};
 use poo::render;
 use poo::scan::{Progress, ScanOptions};
 use poo::util::{bytes, is_tty, parse_bytes, tilde};
@@ -94,6 +94,12 @@ enum Cmd {
         free: Option<String>,
         #[command(flatten)]
         f: FilterArgs,
+        /// Preview `clean --plan <PLAN> --include-in-use`: also items in use.
+        #[arg(long = "include-in-use", alias = "force")]
+        force: bool,
+        /// Preview `clean --plan <PLAN> --dangerously-include-protected`: also protected items.
+        #[arg(long = "dangerously-include-protected", alias = "danger")]
+        danger: bool,
     },
     /// Clean items by id, or a plan.
     Clean {
@@ -964,14 +970,15 @@ fn real_main(cli: Cli) -> R {
                 render::item_detail(item, ctx.cat.rule(&item.rule));
             }
         }
-        Cmd::Plan { plan, free, f } => {
+        Cmd::Plan { plan, free, f, force, danger } => {
             let r = ops::report(&ctx, false, scan_opts(&out, false))?;
             clear_progress(&out);
             let target = match free {
                 Some(s) => Some(parse_bytes(&s).ok_or_else(|| CliError::new("usage", 2, format!("bad size `{}`", s)))?),
                 None => None,
             };
-            let p = ops::make_plan(&ctx, &r, &plan, target, &filter(&f)?).map_err(|e| CliError::new("not_found", 3, e.to_string()))?;
+            let mode = if danger { RiskLevel::Danger } else if force { RiskLevel::Force } else { RiskLevel::Standard };
+            let p = ops::make_plan(&ctx, &r, &plan, target, &filter(&f)?, Admission::mode(mode)).map_err(|e| CliError::new("not_found", 3, e.to_string()))?;
             if out.json {
                 emit(&out, &serde_json::to_value(&p).unwrap_or_default());
             } else {
@@ -982,17 +989,6 @@ fn real_main(cli: Cli) -> R {
             let r = ops::report(&ctx, false, scan_opts(&out, false))?;
             clear_progress(&out);
             let target = free.as_ref().and_then(|s| parse_bytes(s));
-            let items = if !ids.is_empty() {
-                ops::resolve_ids(&r, &ids).map_err(|e| match e.downcast_ref::<ops::ReportOnlyError>() {
-                    Some(ro) => CliError::new("report_only", 2, ro.0.clone()).hint("poo never cleans report-only items; manage them where the message says"),
-                    None => CliError::new("not_found", 3, e.to_string()),
-                })?
-            } else if let Some(p) = plan {
-                let f = Filter { buckets: bucket, tags: tag, ..Default::default() };
-                ops::make_plan(&ctx, &r, &p, target, &f).map_err(|e| CliError::new("not_found", 3, e.to_string()))?.items
-            } else {
-                return Err(CliError::new("usage", 2, "pass item ids or --plan").hint("poo plan stale shows what --plan stale would clean"));
-            };
             // `auto` is the agent autonomy tier: what an agent may clean without asking.
             let mt = match max_tier.as_deref() {
                 None => None,
@@ -1002,6 +998,18 @@ fn real_main(cli: Cli) -> R {
                 })?),
             };
             let mode = if danger { RiskLevel::Danger } else if force { RiskLevel::Force } else { RiskLevel::Standard };
+            let items = if !ids.is_empty() {
+                ops::resolve_ids(&r, &ids).map_err(|e| match e.downcast_ref::<ops::ReportOnlyError>() {
+                    Some(ro) => CliError::new("report_only", 2, ro.0.clone()).hint("poo never cleans report-only items; manage them where the message says"),
+                    None => CliError::new("not_found", 3, e.to_string()),
+                })?
+            } else if let Some(p) = plan {
+                let f = Filter { buckets: bucket, tags: tag, ..Default::default() };
+                let adm = Admission { mode, max_tier: Some(mt.unwrap_or(Tier::Warm)) };
+                ops::make_plan(&ctx, &r, &p, target, &f, adm).map_err(|e| CliError::new("not_found", 3, e.to_string()))?.items
+            } else {
+                return Err(CliError::new("usage", 2, "pass item ids or --plan").hint("poo plan stale shows what --plan stale would clean"));
+            };
             let mut r = r;
             run_clean_p(&ctx, &out, &mut r, items, dry_run, yes, trash, mode, mt, progress)?;
         }
@@ -1009,11 +1017,11 @@ fn real_main(cli: Cli) -> R {
             let target = parse_bytes(&size).ok_or_else(|| CliError::new("usage", 2, format!("bad size `{}`", size)))?;
             let r = ops::report(&ctx, false, scan_opts(&out, false))?;
             clear_progress(&out);
-            let p = ops::make_plan(&ctx, &r, "emergency", Some(target), &Filter::default()).map_err(|e| CliError::new("not_found", 3, e.to_string()))?;
+            let mode = if force { RiskLevel::Force } else { RiskLevel::Standard };
+            let p = ops::make_plan(&ctx, &r, "emergency", Some(target), &Filter::default(), Admission::mode(mode)).map_err(|e| CliError::new("not_found", 3, e.to_string()))?;
             if p.bytes < target && !out.json {
                 eprintln!("Only {} can be freed without touching hot, review or protected items.", bytes(p.bytes));
             }
-            let mode = if force { RiskLevel::Force } else { RiskLevel::Standard };
             run_clean(&ctx, &out, r, p.items, dry_run, yes, false, mode, None)?;
         }
         Cmd::Projects { cmd } => match cmd.unwrap_or(ProjectsCmd::Ls) {

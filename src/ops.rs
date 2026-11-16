@@ -140,7 +140,9 @@ pub fn resolve_ids(r: &Report, keys: &[String]) -> Result<Vec<Item>> {
     Ok(out)
 }
 
-pub fn make_plan(ctx: &Ctx, r: &Report, id: &str, target: Option<u64>, f: &Filter) -> Result<PlanResult> {
+/// A plan as `clean` would run it with `adm` (mode and tier limit): items it would refuse
+/// are left out, so the plan's total is what that clean frees.
+pub fn make_plan(ctx: &Ctx, r: &Report, id: &str, target: Option<u64>, f: &Filter, adm: plan::Admission) -> Result<PlanResult> {
     let p = ctx.cat.plan(id).ok_or_else(|| {
         anyhow!("unknown plan `{}`; plans: {}", id, ctx.cat.plans.iter().map(|p| p.id.as_str()).collect::<Vec<_>>().join(", "))
     })?;
@@ -148,7 +150,7 @@ pub fn make_plan(ctx: &Ctx, r: &Report, id: &str, target: Option<u64>, f: &Filte
     if target.is_some() {
         p.greedy = true;
     }
-    Ok(plan::evaluate(&p, r, f, target))
+    Ok(plan::evaluate(&p, r, f, target, &ctx.cat, adm))
 }
 
 /// Removes cleaned items from the cached report so follow-up commands stay accurate.

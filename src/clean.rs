@@ -757,33 +757,47 @@ pub fn probe_ok(item: &Item, cat: &Catalog) -> Result<(), String> {
 /// How long a probe may take before poo treats it as "could not tell".
 const PROBE_TIMEOUT_SECS: u64 = 30;
 
-/// Why an item cannot be cleaned in this mode, or the warnings accepted to clean it.
-pub fn admit(item: &Item, cat: &Catalog, opts: &CleanOptions, procs_list: &[Proc]) -> Result<Vec<String>, String> {
+/// Why `clean` would refuse an item before looking at the moment (running processes,
+/// guards, probes): report-only, the tier limit, each risk against the mode, and the floor.
+/// Plans use it too, so a plan lists only what `clean` with the same flags would clean.
+pub fn admit_static(item: &Item, cat: &Catalog, mode: RiskLevel, max_tier: Option<Tier>) -> Result<Vec<String>, String> {
     let mut warnings = vec![];
     // Report-only items are never cleaned, in any mode.
     if item.report_only || cat.rule(&item.rule).map_or(false, |r| r.report_only) {
         return Err(report_only_message(item));
     }
-    // Snapshots are backups: never removed by a schedule or a hook, only when someone asks.
-    let snapshot_cmd = item.action.command.as_ref().map_or(false, |c| c.iter().any(|a| a == "deletelocalsnapshots"));
-    if snapshot_cmd && (opts.actor.starts_with("schedule") || opts.actor.starts_with("hook")) {
-        return Err("Time Machine snapshots are only removed when you ask, never on a schedule".into());
-    }
-    if let Some(limit) = opts.max_tier {
-        if item.tier.rank() > limit.rank() && opts.mode == RiskLevel::Standard {
-            return Err(format!("{} item; plans and schedules stop at `{}` (pick it explicitly with --include-in-use)", item.tier.label(), limit.label()));
+    if let Some(limit) = max_tier {
+        if item.tier.rank() > limit.rank() && mode == RiskLevel::Standard {
+            let what = match item.tier {
+                Tier::Hot => "in use right now".to_string(),
+                Tier::Review => "marked check first".to_string(),
+                Tier::Protected => "kept".to_string(),
+                t => format!("`{}`", t.label()),
+            };
+            return Err(format!("{} (this run stops at `{}`); add --include-in-use to clean it anyway", what, limit.label()));
         }
     }
     for r in &item.risks {
-        if r.level > opts.mode {
+        if r.level > mode {
             return Err(format!("{} (needs {})", r.message, r.level.flag()));
         }
         if r.level > RiskLevel::Standard {
             warnings.push(format!("{}: {}", r.tag, r.message));
         }
     }
-    let rule = cat.rule(&item.rule);
-    warnings.extend(floor_check_rule(item, rule, opts.mode)?);
+    warnings.extend(floor_check_rule(item, cat.rule(&item.rule), mode)?);
+    Ok(warnings)
+}
+
+/// Why an item cannot be cleaned in this mode, or the warnings accepted to clean it.
+pub fn admit(item: &Item, cat: &Catalog, opts: &CleanOptions, procs_list: &[Proc]) -> Result<Vec<String>, String> {
+    // Snapshots are backups: never removed by a schedule or a hook, only when someone asks.
+    let snapshot_cmd = item.action.command.as_ref().map_or(false, |c| c.iter().any(|a| a == "deletelocalsnapshots"));
+    let report_only = item.report_only || cat.rule(&item.rule).map_or(false, |r| r.report_only);
+    if snapshot_cmd && !report_only && (opts.actor.starts_with("schedule") || opts.actor.starts_with("hook")) {
+        return Err("Time Machine snapshots are only removed when you ask, never on a schedule".into());
+    }
+    let mut warnings = admit_static(item, cat, opts.mode, opts.max_tier)?;
     if !item.path.contains("://") {
         if let Err(e) = still_matches(item, cat) {
             if opts.mode < RiskLevel::Danger || e == "no longer exists" {

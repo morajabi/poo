@@ -246,7 +246,7 @@ impl App {
             .cat
             .plans
             .iter()
-            .filter_map(|p| ops::make_plan(&self.ctx, &r, &p.id, None, &Filter::default()).ok())
+            .filter_map(|p| ops::make_plan(&self.ctx, &r, &p.id, None, &Filter::default(), crate::plan::Admission::default()).ok())
             .collect();
         // Drop selections that no longer exist.
         let ids: BTreeSet<&str> = r.items.iter().map(|i| i.id.as_str()).collect();

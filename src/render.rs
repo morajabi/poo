@@ -239,8 +239,10 @@ pub fn items(list: &[&Item], show_bucket: bool) {
             if grp_w > 4 { format!("  {}", st.dim(&fit(&grp, grp_w))) } else { String::new() }
         );
     }
-    let total: u64 = list.iter().map(|i| i.bytes).sum();
-    let free: u64 = list.iter().filter(|i| crate::tui::app::cleanable(i)).map(|i| i.bytes).sum();
+    // Nested items count once: a worktree's total already holds the build folders inside it.
+    let total = crate::plan::freed_total(list);
+    let cleanable: Vec<&Item> = list.iter().filter(|i| crate::tui::app::cleanable(i)).copied().collect();
+    let free = crate::plan::freed_total(&cleanable);
     println!(
         "{}",
         st.dim(&format!("{} items · {}{}", list.len(), bytes(total), if free > 0 { format!(" · {} not in use", bytes(free)) } else { String::new() }))
