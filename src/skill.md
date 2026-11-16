@@ -103,6 +103,8 @@ arguments is a summary; pass `bucket`, `tag`, `stack`, `id` or `query` for full 
 answers `needs_approval` for items above the autonomy tier; `schedules` add/enable
 answer with a preview until `approved_by_user`. Pass `approved_by_user: true` only
 after the user saw those exact items and said yes.
+A clean returns as soon as folders are moved aside; `erasing_bytes` in its result is
+what a background erase is still freeing, so `disk_free_after` catches up seconds later.
 
 ## Routine cleanups
 

@@ -9,6 +9,7 @@ pub mod catalog;
 pub mod clean;
 pub mod config;
 pub mod contrib;
+pub mod delete;
 pub mod fsevents;
 pub mod fsutil;
 pub mod growth;

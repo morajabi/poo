@@ -620,14 +620,17 @@ pub fn clean_summary(res: &crate::clean::CleanResult) {
     if res.failed > 0 {
         extra.push(format!("{} failed", res.failed));
     }
+    // Free space only counts what the background erase has finished.
+    let pending = if res.erasing_bytes > 0 { st.dim(&format!(" (+{} erasing)", bytes(res.erasing_bytes))) } else { String::new() };
     println!(
-        "{} {}  {} {} {} {}   {}",
+        "{} {}  {} {} {} {}{}   {}",
         st.bold("Freed"),
         st.good(&st.bold(&bytes(res.freed_bytes))),
         st.dim("· free"),
         bytes(res.disk_free_before),
         st.dim("→"),
         st.bold(&bytes(res.disk_free_after)),
+        pending,
         st.dim(&extra.join(" · "))
     );
 }

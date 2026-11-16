@@ -108,6 +108,9 @@ pub struct CleanResult {
     pub cancelled: bool,
     /// Deleted folders were moved aside; a background `poo gc` erases them.
     pub background_delete: bool,
+    /// Of `freed_bytes`, what the background erase is still working through: free space
+    /// catches up when it finishes (seconds for most cleans).
+    pub erasing_bytes: u64,
     pub dry_run: bool,
     pub mode: RiskLevel,
     pub freed_bytes: u64,
@@ -450,43 +453,64 @@ fn run_guards(item: &Item, guards: &[Guard], procs_list: &[Proc]) -> Result<(), 
     Ok(())
 }
 
-fn graveyard() -> PathBuf {
-    state_dir().join("graveyard")
-}
-
-
-/// Renames into the graveyard (instant, same volume); the graveyard is erased right away or,
-/// with `background`, by a detached `poo gc` after the clean returns.
-fn delete_path(p: &Path, contents_only: bool, background: bool) -> Result<(), String> {
+/// Deletes `p` (or, with `contents_only`, everything in it). Folders are renamed into the
+/// graveyard in one step and erased by a detached reaper (`background`) or right away; a
+/// folder that cannot be renamed there (another volume) is erased in place, in parallel.
+/// Returns whether erasing continues in the background.
+fn delete_path(p: &Path, contents_only: bool, background: bool, bytes: u64) -> Result<bool, String> {
     if contents_only {
+        // One graveyard entry holds all the children; a child that cannot move is erased in place.
+        let mut staging = crate::delete::Staging::grave(p, Some(bytes)).ok();
+        let mut errors = vec![];
         for e in read_entries(p) {
-            delete_path(&e.path, false, background)?;
+            if staging.as_mut().is_none_or(|s| s.take(&e.path).is_err()) {
+                if let Err(err) = crate::delete::erase(&e.path, false) {
+                    errors.push(err);
+                }
+            }
         }
-        return Ok(());
+        let buried = match staging {
+            Some(s) if !s.is_empty() => s.commit(None).ok(),
+            Some(s) => {
+                let _ = s.undo();
+                None
+            }
+            None => None,
+        };
+        let background = finish_burial(buried, background, &mut errors);
+        return match errors.first() {
+            None => Ok(background),
+            Some(e) => Err(e.clone()),
+        };
     }
     let md = std::fs::symlink_metadata(p).map_err(|e| e.to_string())?;
     if !md.is_dir() {
-        return std::fs::remove_file(p).map_err(|e| e.to_string());
+        return std::fs::remove_file(p).map(|_| false).map_err(|e| e.to_string());
     }
-    let grave = graveyard();
-    let _ = std::fs::create_dir_all(&grave);
-    let target = grave.join(format!("{}-{}", now(), crate::util::short_hash(&p.to_string_lossy())));
-    match std::fs::rename(p, &target) {
-        Ok(()) if background => Ok(()),
-        Ok(()) => remove_tree(&target).map_err(|e| format!("moved to graveyard but delete failed: {}", e)),
-        Err(_) => remove_tree(p),
+    match crate::delete::bury(p, Some(bytes)) {
+        Ok(grave) => {
+            let mut errors = vec![];
+            let background = finish_burial(Some(grave), background, &mut errors);
+            match errors.pop() {
+                None => Ok(background),
+                Some(e) => Err(format!("moved to the graveyard but erasing failed: {}", e)),
+            }
+        }
+        Err(_) => crate::delete::erase(p, false).map(|_| false),
     }
 }
 
-/// remove_dir_all, making read-only folders writable first (Go module cache, some SwiftPM checkouts).
-fn remove_tree(p: &Path) -> Result<(), String> {
-    match std::fs::remove_dir_all(p) {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
-            let _ = std::process::Command::new("chmod").args(["-R", "u+w", &p.to_string_lossy()]).status();
-            std::fs::remove_dir_all(p).map_err(|e| e.to_string())
+/// Erases a graveyard entry now unless a background reaper will. Returns whether it will.
+fn finish_burial(grave: Option<PathBuf>, background: bool, errors: &mut Vec<String>) -> bool {
+    match grave {
+        Some(_) if background => true,
+        Some(g) => {
+            if let Err(e) = crate::delete::erase(&g, false) {
+                errors.push(e);
+            }
+            false
         }
-        Err(e) => Err(e.to_string()),
+        None => false,
     }
 }
 
@@ -502,19 +526,12 @@ fn trash_path(p: &Path) -> Result<(), String> {
     std::fs::rename(p, &target).map_err(|e| format!("could not move to Trash: {}", e))
 }
 
-/// Empties leftovers from interrupted deletes.
+/// Erases what earlier cleans left in the graveyard, waiting for a reaper already at it.
 pub fn empty_graveyard() -> u64 {
     if read_only() {
         return 0;
     }
-    let mut freed = 0;
-    for e in read_entries(&graveyard()) {
-        freed += crate::fsutil::SizeCtx::default()
-            .size_path(&e.path, &Default::default())
-            .map_or(0, |s| s.0.bytes);
-        let _ = if e.is_dir { remove_tree(&e.path) } else { std::fs::remove_file(&e.path).map_err(|e| e.to_string()) };
-    }
-    freed
+    crate::delete::reap().freed
 }
 
 fn git_out(dir: &str, args: &[&str]) -> Result<String, String> {
@@ -526,8 +543,9 @@ fn git_out(dir: &str, args: &[&str]) -> Result<String, String> {
     }
 }
 
-/// Removes a linked worktree while keeping everything recoverable.
-fn remove_worktree(item: &Item, opts: &CleanOptions, notes: &mut Vec<String>) -> Result<(), String> {
+/// Removes a linked worktree while keeping everything recoverable. Returns whether part of it
+/// is still being erased in the background.
+fn remove_worktree(item: &Item, opts: &CleanOptions, notes: &mut Vec<String>) -> Result<bool, String> {
     let mode = opts.mode;
     let cfgb = &opts.backup;
     let repo = item.repo.clone().ok_or("worktree has no repo")?;
@@ -652,14 +670,72 @@ fn remove_worktree(item: &Item, opts: &CleanOptions, notes: &mut Vec<String>) ->
     if has("locked") {
         let _ = git_out(&repo, &["worktree", "unlock", &item.path]);
     }
-    // 4. Remove. What is left is committed, stashed, ignored or known build output, so
+    // 4. Move ignored folders (node_modules, target, DerivedData) aside first, so git only
+    // deletes the checked-in files one by one; if git refuses, they go back.
+    let staged = stage_ignored(wt);
+    // 5. Remove. What is left is committed, stashed, ignored or known build output, so
     // --force only skips git's refusal over untracked build folders.
-    git_out(&repo, &["worktree", "remove", "--force", &item.path]).map(|_| ())
+    if let Err(e) = git_out(&repo, &["worktree", "remove", "--force", &item.path]) {
+        return match staged.map(|s| s.undo()) {
+            Some(Err(stuck)) => Err(format!("{}; {}", e, stuck)),
+            _ => Err(e),
+        };
+    }
+    let Some(staged) = staged else { return Ok(false) };
+    match staged.commit(None) {
+        Ok(grave) => {
+            let mut errors = vec![];
+            let background = finish_burial(Some(grave), opts.background_delete, &mut errors);
+            if let Some(e) = errors.pop() {
+                notes.push(format!("removed the worktree; erasing its ignored folders failed: {}", e));
+            }
+            Ok(background)
+        }
+        Err(e) => {
+            notes.push(format!("removed the worktree; its ignored folders wait in the graveyard staging area ({})", e));
+            Ok(false)
+        }
+    }
+}
+
+/// Moves a worktree's ignored folders into a staging area on the same volume, so removing the
+/// worktree leaves git only the checked-in files. Only real folders inside the worktree (no
+/// symlink on the way, same volume) move; a folder that cannot move stays for git to delete.
+fn stage_ignored(wt: &Path) -> Option<crate::delete::Staging> {
+    let dev = |p: &Path| std::fs::symlink_metadata(p).ok().map(|m| std::os::unix::fs::MetadataExt::dev(&m));
+    let wt_dev = dev(wt)?;
+    let dirs: Vec<PathBuf> = git::ignored_dirs(wt)
+        .into_iter()
+        .filter(|d| {
+            let Ok(rel) = d.strip_prefix(wt) else { return false };
+            if rel.as_os_str().is_empty() || rel.components().any(|c| !matches!(c, std::path::Component::Normal(_))) {
+                return false;
+            }
+            // Every folder from the worktree down to it must be a real folder on the same volume.
+            let mut cur = wt.to_path_buf();
+            rel.components().all(|c| {
+                cur.push(c);
+                std::fs::symlink_metadata(&cur).is_ok_and(|m| m.is_dir() && !m.file_type().is_symlink()) && dev(&cur) == Some(wt_dev)
+            })
+        })
+        .collect();
+    if dirs.is_empty() {
+        return None;
+    }
+    let mut staging = crate::delete::Staging::new(wt).ok()?;
+    for d in &dirs {
+        let _ = staging.take(d);
+    }
+    if staging.is_empty() {
+        let _ = staging.undo();
+        return None;
+    }
+    Some(staging)
 }
 
 /// Cleans one item. Returns the bytes measured as freed when the item says how to measure
 /// (owner commands re-measure their folder, snapshots the free space), otherwise None.
-fn perform(item: &Item, cat: &Catalog, opts: &CleanOptions, notes: &mut Vec<String>) -> Result<Option<u64>, String> {
+fn perform(item: &Item, cat: &Catalog, opts: &CleanOptions, notes: &mut Vec<String>, erasing: &mut bool) -> Result<Option<u64>, String> {
     let p = Path::new(&item.path);
     match item.action.kind {
         ActionKind::None => Err("this item has no clean action".into()),
@@ -667,7 +743,8 @@ fn perform(item: &Item, cat: &Catalog, opts: &CleanOptions, notes: &mut Vec<Stri
         ActionKind::Trash => trash_path(p).map(|_| None),
         ActionKind::Delete => {
             let contents = item.meta.get("contents").and_then(|v| v.as_bool()).unwrap_or(false);
-            delete_path(p, contents, opts.background_delete).map(|_| None)
+            *erasing = delete_path(p, contents, opts.background_delete, item.total_bytes)?;
+            Ok(None)
         }
         ActionKind::Command => {
             let argv = command_argv(item).ok_or("no command")?;
@@ -690,7 +767,10 @@ fn perform(item: &Item, cat: &Catalog, opts: &CleanOptions, notes: &mut Vec<Stri
             }
             Ok(freed)
         }
-        ActionKind::WorktreeRemove => remove_worktree(item, opts, notes).map(|_| None),
+        ActionKind::WorktreeRemove => {
+            *erasing = remove_worktree(item, opts, notes)?;
+            Ok(None)
+        }
     }
 }
 
@@ -841,6 +921,7 @@ pub fn clean_with(items: &[Item], cat: &Catalog, opts: &CleanOptions, progress: 
     let procs_list = procs_known.unwrap_or_default();
     let mut results = vec![];
     let mut freed = 0u64;
+    let mut erasing_bytes = 0u64;
     // Bytes of batch items nested in a worktree are counted on their own, not twice.
     let nested_in = |wt: &Item| -> u64 {
         let prefix = format!("{}/", wt.path);
@@ -898,13 +979,17 @@ pub fn clean_with(items: &[Item], cat: &Catalog, opts: &CleanOptions, progress: 
             continue;
         }
         let mut notes = vec![];
-        match perform(item, cat, opts, &mut notes) {
+        let mut erasing = false;
+        match perform(item, cat, opts, &mut notes, &mut erasing) {
             Ok(measured) => {
                 if let Some(m) = measured {
                     res.bytes = m;
                 }
                 res.status = "cleaned".into();
                 freed += res.bytes;
+                if erasing {
+                    erasing_bytes += res.bytes;
+                }
                 log_history(item, &opts.actor, opts.mode, &notes);
             }
             Err(e) => {
@@ -923,16 +1008,10 @@ pub fn clean_with(items: &[Item], cat: &Catalog, opts: &CleanOptions, progress: 
         // New backups may push past the budget.
         crate::backup::enforce(&opts.backup);
     }
-    let graveyard_busy = !opts.dry_run && opts.background_delete && !read_entries(&graveyard()).is_empty();
+    // A detached reaper erases what this clean (or an interrupted earlier one) buried.
+    let graveyard_busy = !opts.dry_run && opts.background_delete && !crate::delete::pending().is_empty();
     if graveyard_busy {
-        if let Ok(exe) = std::env::current_exe() {
-            let _ = std::process::Command::new(exe)
-                .args(["gc", "--json"])
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn();
-        }
+        crate::delete::spawn_reaper();
     }
     let after = crate::fsutil::disk_info(&home()).free;
     let cleaned_bytes: u64 = results.iter().filter(|r| r.status == "cleaned").map(|r| r.bytes).sum();
@@ -942,6 +1021,7 @@ pub fn clean_with(items: &[Item], cat: &Catalog, opts: &CleanOptions, progress: 
     CleanResult {
         cancelled,
         background_delete: graveyard_busy,
+        erasing_bytes,
         dry_run: opts.dry_run,
         mode: opts.mode,
         freed_bytes: freed,

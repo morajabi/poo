@@ -1137,7 +1137,7 @@ fn summary(f: &mut Frame, area: Rect, app: &mut App, th: &Theme) {
     }
     if res.background_delete {
         body.push(Line::raw(""));
-        body.push(Line::from(Span::styled("Erasing in the background; free space keeps growing for a minute.", th.dim())));
+        body.push(Line::from(Span::styled(format!("Erasing {} in the background; free space catches up as it finishes.", bytes(res.erasing_bytes)), th.dim())));
     }
     if let Some(n) = &res.snapshot_note {
         body.push(Line::from(Span::styled(n.clone(), th.dim())));

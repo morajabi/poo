@@ -907,7 +907,7 @@ fn run_clean_p(ctx: &Ctx, out: &Out, report: &mut poo::model::Report, items: Vec
             println!("\nCancelled after the item in flight.");
         }
         if res.background_delete {
-            println!("\nErasing in the background; free space grows over the next minutes.");
+            println!("\nErasing {} in the background; free space catches up as it finishes, usually within seconds.", bytes(res.erasing_bytes));
         }
         if let Some(n) = &res.read_only {
             println!("\n{}", n);
