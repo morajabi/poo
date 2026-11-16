@@ -71,6 +71,10 @@ pub fn managed_by(exe: &Path) -> Option<String> {
     if s.contains("/mise/installs/") {
         return Some("mise upgrade poo".into());
     }
+    // A cargo build is a developer's binary: replacing it with a release would hide their changes.
+    if is_cargo_build(&s) {
+        return Some("cargo build (this is a development binary)".into());
+    }
     None
 }
 
@@ -220,7 +224,13 @@ pub fn background_allowed() -> bool {
     if ["CI", "POO_NO_UPDATE_CHECK"].iter().any(|k| std::env::var_os(k).is_some_and(|v| !v.is_empty())) {
         return false;
     }
-    !current_exe().to_string_lossy().contains(".app/Contents/")
+    let exe = current_exe().to_string_lossy().to_string();
+    !exe.contains(".app/Contents/") && !is_cargo_build(&exe)
+}
+
+/// A binary inside a cargo target folder (`target/debug/poo`, `target/<triple>/release/poo`).
+fn is_cargo_build(path: &str) -> bool {
+    path.contains("/target/") && (path.contains("/debug/") || path.contains("/release/"))
 }
 
 /// Called at the start of a command. Costs one small file read: when the last check is
@@ -297,5 +307,7 @@ mod tests {
         assert!(managed_by(Path::new("/Applications/Poo.app/Contents/Resources/bin/poo")).unwrap().contains("Sparkle"));
         assert!(managed_by(Path::new("/opt/homebrew/Cellar/poo/0.1.3/bin/poo")).unwrap().contains("brew"));
         assert!(managed_by(Path::new("/Users/me/.local/bin/poo")).is_none());
+        assert!(managed_by(Path::new("/Users/me/dev/poo/target/debug/poo")).unwrap().contains("cargo"));
+        assert!(managed_by(Path::new("/Users/me/dev/poo/target/aarch64-apple-darwin/release/poo")).unwrap().contains("cargo"));
     }
 }
