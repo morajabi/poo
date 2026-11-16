@@ -1,7 +1,7 @@
 #!/bin/sh
 # poo installer: curl -fsSL https://raw.githubusercontent.com/morajabi/poo/main/install.sh | sh
 #   POO_INSTALL_DIR   where the CLI goes (default ~/.local/bin)
-#   POO_APP=1         also install Poo.app (menu bar + window) into /Applications
+#   POO_APP=1         also install Poo.app (menu bar + window) into /Applications (or ~/Applications)
 #   POO_VERSION       not supported yet; installs the latest release
 set -eu
 
@@ -57,14 +57,19 @@ if [ "${POO_APP:-0}" = "1" ] && [ "$os" = "Darwin" ]; then
   app_url="$(read_json assets app-macos)"
   app_sum="$(read_json sha256 app-macos)"
   if [ -n "$app_url" ]; then
-    curl -fsSL "$app_url" -o "$tmp/Poo.app.zip"
+    curl -fsSL "$app_url" -o "$tmp/Poo.app.zip" || die "could not download Poo.app"
     got="$(shasum -a 256 "$tmp/Poo.app.zip" | cut -d' ' -f1)"
     [ "$got" = "$app_sum" ] || die "app checksum mismatch"
     ditto -x -k "$tmp/Poo.app.zip" "$tmp/app"
-    rm -rf /Applications/Poo.app
-    mv "$tmp/app/Poo.app" /Applications/Poo.app
-    say "Installed /Applications/Poo.app"
-    open /Applications/Poo.app || true
+    apps=/Applications
+    [ -w "$apps" ] || { apps="$HOME/Applications"; mkdir -p "$apps"; }
+    osascript -e 'tell application id "com.morajabi.poo" to quit' >/dev/null 2>&1 || true
+    # New copy in place first, then swap, so a failure never leaves no app at all.
+    ditto "$tmp/app/Poo.app" "$apps/.Poo.app.new" || die "could not write to $apps"
+    rm -rf "$apps/Poo.app"
+    mv "$apps/.Poo.app.new" "$apps/Poo.app"
+    say "Installed $apps/Poo.app"
+    open "$apps/Poo.app" || true
   fi
 fi
 

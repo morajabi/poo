@@ -114,8 +114,9 @@ jobs:
         run: |
           set -eu
           if [ -z "$SPARKLE_PRIVATE_KEY" ]; then
-            echo "::warning::SPARKLE_PRIVATE_KEY is not set: this release has no appcast and its app will not update itself."
-            exit 0
+            # A release without it ships an app that can never update itself: refuse.
+            echo "::error::SPARKLE_PRIVATE_KEY is not set: the app would not update itself."
+            exit 1
           fi
           echo "SPARKLE_PUBLIC_KEY=$(scripts/sparkle.sh pubkey)" >> "$GITHUB_ENV"
       - name: import signing certificate
@@ -218,6 +219,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.version.outputs.sha }}
+          fetch-depth: 0  # tags and history for the changes list
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -226,10 +228,17 @@ jobs:
         run: |
           set -eu
           base="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}"
+          prev="$(git tag --sort=-v:refname | grep -v "^v${VERSION}$" | head -n1 || true)"
+          changes="$(git log --no-merges --format='- %s' ${prev:+$prev..}HEAD | grep -v -e '\[skip release\]' -e '^- docs:' -e '^- chore:' | head -n 30 || true)"
           cat > notes.md <<NOTES
-          **Poo.app** (macOS 15+, universal, CLI included): [Poo.app.zip](${base}/Poo.app.zip). ${SIGNING}.
+          Poo finds and safely frees the disk space your dev work eats: build output, caches, simulators and agent worktrees. Menu bar app, CLI and MCP server. [What it does](https://github.com/${GITHUB_REPOSITORY}#readme).
 
-          **CLI**: \`curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/install.sh | sh\`, or a tarball below. Checksums in \`SHA256SUMS\`.
+          **Poo.app** (macOS 15+, universal): [Poo.app.zip](${base}/Poo.app.zip). ${SIGNING}. Updates itself. To use the CLI from Terminal too: Poo menu › Install Command-Line Tool.
+
+          **CLI only**: \`curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/install.sh | sh\`, or a tarball below. Checksums in \`SHA256SUMS\`.
+
+          ### Changes
+          ${changes:-- Maintenance}
           NOTES
           python3 scripts/release-manifest.py "$VERSION" "$base" artifacts > artifacts/latest.json
           (cd artifacts && sha256sum *.tar.gz Poo.app.zip latest.json $(ls appcast.xml 2>/dev/null) > SHA256SUMS)
@@ -241,7 +250,6 @@ jobs:
           target_commitish: ${{ needs.version.outputs.sha }}
           name: poo ${{ needs.version.outputs.version }}
           body_path: notes.md
-          generate_release_notes: true
           make_latest: true
           files: |
             artifacts/*.tar.gz
