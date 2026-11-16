@@ -318,7 +318,7 @@ pub fn run(ctx: &Ctx, s: &Schedule, dry_run: bool) -> Result<RunRecord> {
         exclude_tags: s.exclude_tags.clone(),
         ..Default::default()
     };
-    let mut plan = crate::ops::make_plan(ctx, &report, &s.plan, target, &filter)?;
+    let mut plan = crate::ops::make_plan(ctx, &report, &s.plan, target, &filter, crate::plan::Admission::default())?;
     if let Some(m) = &s.max_bytes {
         let cap = parse_amount(m, disk.total)?;
         let mut sum = 0;

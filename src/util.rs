@@ -2,6 +2,11 @@ use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// "1 item", "3 items".
+pub fn plural(n: u64, one: &str) -> String {
+    format!("{} {}{}", n, one, if n == 1 { "" } else { "s" })
+}
+
 pub fn home() -> PathBuf {
     std::env::var_os("HOME")
         .map(PathBuf::from)

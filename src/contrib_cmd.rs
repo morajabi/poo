@@ -41,7 +41,7 @@ pub fn lint(ctx: &Ctx, out: &Out, core: bool, base: Option<String>, repo: Option
         }
     }
     if errors > 0 {
-        return Err(CliError::new("lint_failed", 8, format!("{} lint error(s)", errors)));
+        return Err(CliError::new("lint_failed", 8, poo::util::plural(errors as u64, "lint error")));
     }
     Ok(())
 }
@@ -80,7 +80,7 @@ pub fn submit(
             return if sub.blocked() { Err(CliError::new("lint_failed", 8, "lint errors block the submission")) } else { Ok(()) };
         }
     } else {
-        println!("Sharing {} rule(s){}", sub.rules.len(), if sub.overrides.is_empty() { String::new() } else { format!(" and {} change(s) to built-in rules", sub.overrides.len()) });
+        println!("Sharing {}{}", poo::util::plural(sub.rules.len() as u64, "rule"), if sub.overrides.is_empty() { String::new() } else { format!(" and {} to built-in rules", poo::util::plural(sub.overrides.len() as u64, "change")) });
         println!();
         for fc in &sub.files {
             println!("── {} ({}) ──", fc.path, if fc.append { "appended" } else { "new file" });

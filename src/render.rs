@@ -5,7 +5,7 @@
 use crate::model::*;
 use crate::plan::PlanResult;
 use crate::tui::fmt::{self as tf, cells, fit, fit_mid, pad, rpad};
-use crate::util::{age, bytes, color_enabled, is_tty, tilde};
+use crate::util::{age, bytes, color_enabled, is_tty, plural, tilde};
 use std::path::Path;
 
 pub struct Style {
@@ -178,7 +178,7 @@ pub fn overview(r: &Report) {
             "  {}  {}  {}  {}",
             pad(&p.id, 12),
             size,
-            st.dim(&rpad(&format!("{} items", p.count), 9)),
+            st.dim(&rpad(&plural(p.count as u64, "item"), 9)),
             st.dim(&fit(&p.description, desc_w))
         );
     }
@@ -239,11 +239,13 @@ pub fn items(list: &[&Item], show_bucket: bool) {
             if grp_w > 4 { format!("  {}", st.dim(&fit(&grp, grp_w))) } else { String::new() }
         );
     }
-    let total: u64 = list.iter().map(|i| i.bytes).sum();
-    let free: u64 = list.iter().filter(|i| crate::tui::app::cleanable(i)).map(|i| i.bytes).sum();
+    // Nested items count once: a worktree's total already holds the build folders inside it.
+    let total = crate::plan::freed_total(list);
+    let cleanable: Vec<&Item> = list.iter().filter(|i| crate::tui::app::cleanable(i)).copied().collect();
+    let free = crate::plan::freed_total(&cleanable);
     println!(
         "{}",
-        st.dim(&format!("{} items · {}{}", list.len(), bytes(total), if free > 0 { format!(" · {} not in use", bytes(free)) } else { String::new() }))
+        st.dim(&format!("{} · {}{}", plural(list.len() as u64, "item"), bytes(total), if free > 0 { format!(" · {} not in use", bytes(free)) } else { String::new() }))
     );
 }
 
@@ -324,7 +326,7 @@ pub fn item_detail(i: &Item, rule: Option<&crate::catalog::Rule>) {
 
 pub fn plan(p: &PlanResult) {
     let st = Style::new();
-    println!("{}  {}  {}", st.bold(&p.name), st.good(&st.bold(&bytes(p.bytes))), st.dim(&format!("{} items", p.count)));
+    println!("{}  {}  {}", st.bold(&p.name), st.good(&st.bold(&bytes(p.bytes))), st.dim(&plural(p.count as u64, "item")));
     println!("{}", st.dim(&p.description));
     if let Some(t) = p.target_bytes {
         println!("{}", st.dim(&format!("target: free {}", bytes(t))));
@@ -531,7 +533,7 @@ pub fn clean_summary(res: &crate::clean::CleanResult) {
             "{} {}  {}",
             st.dim("Would free"),
             st.good(&st.bold(&bytes(res.freed_bytes))),
-            st.dim(&format!("· {} items · {} stay · nothing removed (dry run)", res.cleaned, res.skipped))
+            st.dim(&format!("· {} · {} stay · nothing removed (dry run)", plural(res.cleaned as u64, "item"), res.skipped))
         );
         return;
     }

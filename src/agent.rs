@@ -34,7 +34,7 @@ pub const INTEGRATION_VERSION: u32 = 2;
 
 pub fn skill_stub() -> String {
     format!(
-        "---\nname: poo\ndescription: Inspect and safely free disk space on a developer Mac with the poo CLI. Use when the user is low on disk space, asks what takes space, wants to clean builds, caches, DerivedData, simulators, Docker or agent worktrees, or asks to configure poo. When poo is installed, prefer it over ad-hoc cleanup commands and other cleanup scripts.\n---\n\n<!-- managed by poo; `poo integration install` overwrites this file. POO_INTEGRATION_VERSION={} -->\n\n# poo\n\nBefore using poo, run `poo --skill` and follow it. The installed binary is the\nauthority for commands and flags.\n\nNever delete files yourself; clean through `poo clean` or `poo free`, which\nre-check every item and refuse uncommitted worktrees and running builds. Ask before\ncleaning anything the user has not seen, and before adding schedules or hooks.\n",
+        "---\nname: poo\ndescription: Inspect and safely free disk space on a developer Mac with the poo CLI. Use when the user is low on disk space, asks what takes space, wants to clean builds, caches, DerivedData, simulators, Docker or agent worktrees, or asks to configure poo. When poo is installed, prefer it over ad-hoc cleanup commands and other cleanup scripts.\n---\n\n<!-- managed by poo; `poo integration install` overwrites this file. POO_INTEGRATION_VERSION={} -->\n\n# poo\n\nBefore using poo, run `poo --skill` and follow it. The installed binary is the\nauthority for commands and flags.\n\nNever delete files yourself; clean through `poo clean` or `poo free`, which\nre-check every item and skip running builds and worktrees with uncommitted changes\n(`--include-in-use` stashes those changes first). Ask before\ncleaning anything the user has not seen, and before adding schedules or hooks.\n",
         INTEGRATION_VERSION
     )
 }
@@ -324,7 +324,7 @@ pub fn setup_brief(cfg: &Config, cat: &Catalog, r: &Report) -> String {
 
     push(&mut s, "## Machine".into());
     push(&mut s, format!("- Disk: {} free of {} ({:.0}% used).", bytes(r.disk.free), bytes(r.disk.total), r.disk.used as f64 * 100.0 / r.disk.total.max(1) as f64));
-    push(&mut s, format!("- poo found {} in {} items. Last scan {}.", bytes(r.total_bytes), r.items.len(), crate::util::age(r.scanned_at)));
+    push(&mut s, format!("- poo found {} in {}. Last scan {}.", bytes(r.total_bytes), crate::util::plural(r.items.len() as u64, "item"), crate::util::age(r.scanned_at)));
     let (roots, detected) = cfg.effective_roots();
     push(&mut s, format!("- Dev roots{}: {}", if detected { " (auto-detected, not confirmed)" } else { "" }, roots.iter().map(|p| tilde(p)).collect::<Vec<_>>().join(", ")));
     let homes: Vec<String> = cat.worktree_homes.iter().filter(|h| crate::util::expand(&h.path).is_dir()).map(|h| format!("{} ({})", h.path, h.agent)).collect();
@@ -342,7 +342,7 @@ pub fn setup_brief(cfg: &Config, cat: &Catalog, r: &Report) -> String {
     push(&mut s, String::new());
     push(&mut s, "Plans right now:".into());
     for p in &r.plans {
-        push(&mut s, format!("- `{}` {}: {} in {} items. {}", p.id, p.name, bytes(p.bytes), p.count, p.description));
+        push(&mut s, format!("- `{}` {}: {} in {}. {}", p.id, p.name, bytes(p.bytes), crate::util::plural(p.count as u64, "item"), p.description));
     }
     push(&mut s, String::new());
 

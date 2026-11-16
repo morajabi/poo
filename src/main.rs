@@ -2,10 +2,10 @@ use clap::{Args, Parser, Subcommand};
 use poo::clean::{self, CleanOptions};
 use poo::model::{ProjectPolicy, RiskLevel, Tier};
 use poo::ops::{self, BucketEdit, Ctx};
-use poo::plan::Filter;
+use poo::plan::{Admission, Filter};
 use poo::render;
 use poo::scan::{Progress, ScanOptions};
-use poo::util::{bytes, is_tty, parse_bytes, tilde};
+use poo::util::{bytes, is_tty, parse_bytes, plural, tilde};
 use serde_json::{json, Value};
 use std::io::Write;
 use std::process::ExitCode;
@@ -33,11 +33,14 @@ struct Cli {
 
 #[derive(Args, Clone, Default)]
 struct FilterArgs {
-    /// Bucket id (build, xcode, worktrees, deps, caches, ai, containers, system, junk, other).
+    /// Bucket id: build, xcode, android, worktrees, deps, caches, ai, containers, system, junk,
+    /// other, or one from your mods (`poo buckets`).
     bucket: Option<String>,
+    /// Group within a bucket, as shown in `poo ls`, e.g. Rust or DerivedData.
     #[arg(long)]
     group: Option<String>,
-    #[arg(long)]
+    /// Only items in this tier.
+    #[arg(long, value_parser = ["junk", "cold", "idle", "warm", "hot", "review", "protected"])]
     tier: Option<String>,
     /// Project, repo or path prefix.
     #[arg(long)]
@@ -56,6 +59,7 @@ enum Cmd {
     Ui,
     /// Overview: free space, buckets, plans (default command when piped or with --text).
     Overview {
+        /// Update the report now instead of reusing a recent one.
         #[arg(long)]
         rescan: bool,
     },
@@ -78,30 +82,47 @@ enum Cmd {
     Ls {
         #[command(flatten)]
         f: FilterArgs,
-        #[arg(long, default_value = "size")]
+        /// Order: biggest first, oldest first, by tier, or by name.
+        #[arg(long, default_value = "size", value_parser = ["size", "age", "tier", "name"])]
         sort: String,
+        /// Show at most this many items (0 for all).
         #[arg(long, short = 'n', default_value_t = 60)]
         limit: usize,
     },
     /// Show one item by id or path.
     #[command(alias = "inspect")]
-    Show { id: String },
+    Show {
+        /// Item id from `poo ls`, or a path.
+        id: String,
+    },
     /// Preview a cleaning plan (quick, stale, deep, emergency).
     Plan {
+        /// quick (junk only), stale (nothing uses it), deep (also recent builds and caches),
+        /// emergency (least regret first until --free is met), or a plan from your mods.
         plan: String,
         /// Pick least-regret items until this much is freed (e.g. 30G).
         #[arg(long)]
         free: Option<String>,
         #[command(flatten)]
         f: FilterArgs,
+        /// Preview `clean --plan <PLAN> --include-in-use`: also items in use.
+        #[arg(long = "include-in-use", alias = "force")]
+        force: bool,
+        /// Preview `clean --plan <PLAN> --dangerously-include-protected`: also protected items.
+        #[arg(long = "dangerously-include-protected", alias = "danger")]
+        danger: bool,
     },
     /// Clean items by id, or a plan.
     Clean {
+        /// Item ids from `poo ls` or `poo plan`, or paths.
         ids: Vec<String>,
+        /// Clean what this plan lists (quick, stale, deep, emergency); see `poo plan <PLAN>`.
         #[arg(long)]
         plan: Option<String>,
+        /// With --plan: pick least-regret items until this much is freed (e.g. 30G).
         #[arg(long)]
         free: Option<String>,
+        /// Show what would be cleaned and why anything stays; remove nothing.
         #[arg(long)]
         dry_run: bool,
         /// Do not ask for confirmation.
@@ -134,9 +155,12 @@ enum Cmd {
     },
     /// Free a target amount with the least regret (emergency plan).
     Free {
+        /// How much to free, e.g. 20G or 500M.
         size: String,
+        /// Show what would be cleaned; remove nothing.
         #[arg(long)]
         dry_run: bool,
+        /// Do not ask for confirmation.
         #[arg(long, short)]
         yes: bool,
         /// Let the emergency plan include things in use too.
@@ -209,8 +233,10 @@ enum Cmd {
         /// Mark setup as done.
         #[arg(long)]
         done: bool,
+        /// With --done: who set it up, e.g. your name or the agent (claude, codex).
         #[arg(long)]
         by: Option<String>,
+        /// With --done: a note about the choices made, kept in config.toml.
         #[arg(long)]
         notes: Option<String>,
     },
@@ -301,9 +327,18 @@ enum ProjectsCmd {
 
 #[derive(Subcommand)]
 enum RootsCmd {
+    /// List the roots poo walks and the agent worktree homes it found.
     Ls,
-    Add { path: String },
-    Rm { path: String },
+    /// Walk this folder too (pins the detected roots on first use).
+    Add {
+        /// Folder with your projects, e.g. ~/dev.
+        path: String,
+    },
+    /// Stop walking this folder.
+    Rm {
+        /// A root from `poo roots`.
+        path: String,
+    },
 }
 
 #[derive(Args)]
@@ -582,19 +617,28 @@ enum ScheduleCmd {
 
 #[derive(Subcommand)]
 enum IntegrationCmd {
+    /// Which coding agents are found and whether the skill and MCP server are installed and current.
     Status,
-    /// Install for an agent: claude, codex, cursor, opencode, gemini, windsurf, claude-desktop, agents, or all.
+    /// Install the skill and MCP server into a coding agent.
     Install {
+        /// claude, codex, cursor, opencode, gemini, windsurf, claude-desktop, agents (shared
+        /// ~/.agents skills folder), or all (every agent found).
         agent: String,
+        /// Only the skill (how agents should use poo), no MCP server.
         #[arg(long)]
         skill_only: bool,
+        /// Only the MCP server, no skill.
         #[arg(long)]
         mcp_only: bool,
         /// Confirm a change asked for by a coding agent (agents must ask the user first).
         #[arg(long, short = 'y')]
         yes: bool,
     },
-    Uninstall { agent: String },
+    /// Remove the skill and MCP server from a coding agent.
+    Uninstall {
+        /// An agent id from `poo integration status`, or all.
+        agent: String,
+    },
 }
 
 struct Out {
@@ -651,7 +695,19 @@ fn emit(out: &Out, v: &Value) {
     }
 }
 
-fn filter(f: &FilterArgs) -> Result<Filter, CliError> {
+/// A bucket id that does not exist is a typo, not an empty bucket.
+fn check_bucket(cat: &poo::catalog::Catalog, id: &str) -> R {
+    if cat.bucket(id).is_some() {
+        return Ok(());
+    }
+    let ids: Vec<&str> = cat.buckets.iter().map(|b| b.id.as_str()).collect();
+    Err(CliError::new("usage", 2, format!("unknown bucket `{}`", id)).hint(format!("buckets: {}", ids.join(", "))))
+}
+
+fn filter(f: &FilterArgs, cat: &poo::catalog::Catalog) -> Result<Filter, CliError> {
+    if let Some(b) = &f.bucket {
+        check_bucket(cat, b)?;
+    }
     Ok(Filter {
         bucket: f.bucket.clone(),
         group: f.group.clone(),
@@ -784,7 +840,7 @@ fn run_clean_p(ctx: &Ctx, out: &Out, report: &mut poo::model::Report, items: Vec
     };
     if !dry && !yes {
         if !is_tty(0) || out.json {
-            return Err(CliError::new("needs_approval", 5, format!("cleaning {} items ({}) needs confirmation", items.len(), bytes(total)))
+            return Err(CliError::new("needs_approval", 5, format!("cleaning {} ({}) needs confirmation", plural(items.len() as u64, "item"), bytes(total)))
                 .hint("show the items to the user, then pass --yes (or use --dry-run to preview)"));
         }
         let refs: Vec<&poo::model::Item> = items.iter().collect();
@@ -807,7 +863,7 @@ fn run_clean_p(ctx: &Ctx, out: &Out, report: &mut poo::model::Report, items: Vec
             }
         }
         if mode == RiskLevel::Danger {
-            eprint!("Including protected items: {} item(s) carry warnings above. Type \"dangerous\" to clean {}: ", risky, bytes(total));
+            eprint!("Including protected items: {} {} warnings above. Type \"dangerous\" to clean {}: ", plural(risky as u64, "item"), if risky == 1 { "carries" } else { "carry" }, bytes(total));
             let _ = std::io::stderr().flush();
             let mut s = String::new();
             let _ = std::io::stdin().read_line(&mut s);
@@ -815,7 +871,7 @@ fn run_clean_p(ctx: &Ctx, out: &Out, report: &mut poo::model::Report, items: Vec
                 println!("Cancelled.");
                 return Ok(());
             }
-        } else if !confirm(&format!("Clean {} items, {}{}?", items.len(), bytes(total), if risky > 0 { format!(" ({} with warnings)", risky) } else { String::new() })) {
+        } else if !confirm(&format!("Clean {}, {}{}?", plural(items.len() as u64, "item"), bytes(total), if risky > 0 { format!(" ({} with warnings)", risky) } else { String::new() })) {
             println!("Cancelled.");
             return Ok(());
         }
@@ -862,7 +918,7 @@ fn run_clean_p(ctx: &Ctx, out: &Out, report: &mut poo::model::Report, items: Vec
         }
     }
     if res.failed > 0 && !dry {
-        return Err(CliError::new("partial", 6, format!("{} item(s) failed", res.failed)));
+        return Err(CliError::new("partial", 6, format!("{} failed", plural(res.failed as u64, "item"))));
     }
     Ok(())
 }
@@ -923,7 +979,18 @@ fn real_main(cli: Cli) -> R {
             opts.no_providers = no_providers;
             opts.full = full;
             if !root.is_empty() {
-                opts.roots = Some(root.iter().map(|r| poo::util::expand(r)).collect());
+                let mut roots = vec![];
+                for r in &root {
+                    let p = poo::util::expand(r);
+                    // Relative roots are relative to where poo runs.
+                    let p = if p.is_absolute() { p } else { std::env::current_dir().map(|d| d.join(&p)).unwrap_or(p) };
+                    if !p.is_dir() {
+                        let what = if p.exists() { "is not a folder" } else { "does not exist" };
+                        return Err(CliError::new("usage", 2, format!("--root {} {}", r, what)).hint("pass a folder to walk, e.g. --root ~/dev"));
+                    }
+                    roots.push(std::fs::canonicalize(&p).unwrap_or(p));
+                }
+                opts.roots = Some(roots);
             }
             let r = ops::report(&ctx, true, opts)?;
             clear_progress(&out);
@@ -941,7 +1008,7 @@ fn real_main(cli: Cli) -> R {
             let limit = if limit == 0 { usize::MAX } else { limit };
             let r = ops::report(&ctx, false, scan_opts(&out, false))?;
             clear_progress(&out);
-            let flt = filter(&f)?;
+            let flt = filter(&f, &ctx.cat)?;
             let list = ops::list(&r, &flt, &sort, 0);
             if out.json {
                 let total: u64 = list.iter().map(|i| i.bytes).sum();
@@ -964,14 +1031,15 @@ fn real_main(cli: Cli) -> R {
                 render::item_detail(item, ctx.cat.rule(&item.rule));
             }
         }
-        Cmd::Plan { plan, free, f } => {
+        Cmd::Plan { plan, free, f, force, danger } => {
             let r = ops::report(&ctx, false, scan_opts(&out, false))?;
             clear_progress(&out);
             let target = match free {
                 Some(s) => Some(parse_bytes(&s).ok_or_else(|| CliError::new("usage", 2, format!("bad size `{}`", s)))?),
                 None => None,
             };
-            let p = ops::make_plan(&ctx, &r, &plan, target, &filter(&f)?).map_err(|e| CliError::new("not_found", 3, e.to_string()))?;
+            let mode = if danger { RiskLevel::Danger } else if force { RiskLevel::Force } else { RiskLevel::Standard };
+            let p = ops::make_plan(&ctx, &r, &plan, target, &filter(&f, &ctx.cat)?, Admission::mode(mode)).map_err(|e| CliError::new("not_found", 3, e.to_string()))?;
             if out.json {
                 emit(&out, &serde_json::to_value(&p).unwrap_or_default());
             } else {
@@ -982,17 +1050,6 @@ fn real_main(cli: Cli) -> R {
             let r = ops::report(&ctx, false, scan_opts(&out, false))?;
             clear_progress(&out);
             let target = free.as_ref().and_then(|s| parse_bytes(s));
-            let items = if !ids.is_empty() {
-                ops::resolve_ids(&r, &ids).map_err(|e| match e.downcast_ref::<ops::ReportOnlyError>() {
-                    Some(ro) => CliError::new("report_only", 2, ro.0.clone()).hint("poo never cleans report-only items; manage them where the message says"),
-                    None => CliError::new("not_found", 3, e.to_string()),
-                })?
-            } else if let Some(p) = plan {
-                let f = Filter { buckets: bucket, tags: tag, ..Default::default() };
-                ops::make_plan(&ctx, &r, &p, target, &f).map_err(|e| CliError::new("not_found", 3, e.to_string()))?.items
-            } else {
-                return Err(CliError::new("usage", 2, "pass item ids or --plan").hint("poo plan stale shows what --plan stale would clean"));
-            };
             // `auto` is the agent autonomy tier: what an agent may clean without asking.
             let mt = match max_tier.as_deref() {
                 None => None,
@@ -1002,6 +1059,21 @@ fn real_main(cli: Cli) -> R {
                 })?),
             };
             let mode = if danger { RiskLevel::Danger } else if force { RiskLevel::Force } else { RiskLevel::Standard };
+            let items = if !ids.is_empty() {
+                ops::resolve_ids(&r, &ids).map_err(|e| match e.downcast_ref::<ops::ReportOnlyError>() {
+                    Some(ro) => CliError::new("report_only", 2, ro.0.clone()).hint("poo never cleans report-only items; manage them where the message says"),
+                    None => CliError::new("not_found", 3, e.to_string()),
+                })?
+            } else if let Some(p) = plan {
+                for b in &bucket {
+                    check_bucket(&ctx.cat, b)?;
+                }
+                let f = Filter { buckets: bucket, tags: tag, ..Default::default() };
+                let adm = Admission { mode, max_tier: Some(mt.unwrap_or(Tier::Warm)) };
+                ops::make_plan(&ctx, &r, &p, target, &f, adm).map_err(|e| CliError::new("not_found", 3, e.to_string()))?.items
+            } else {
+                return Err(CliError::new("usage", 2, "pass item ids or --plan").hint("poo plan stale shows what --plan stale would clean"));
+            };
             let mut r = r;
             run_clean_p(&ctx, &out, &mut r, items, dry_run, yes, trash, mode, mt, progress)?;
         }
@@ -1009,11 +1081,11 @@ fn real_main(cli: Cli) -> R {
             let target = parse_bytes(&size).ok_or_else(|| CliError::new("usage", 2, format!("bad size `{}`", size)))?;
             let r = ops::report(&ctx, false, scan_opts(&out, false))?;
             clear_progress(&out);
-            let p = ops::make_plan(&ctx, &r, "emergency", Some(target), &Filter::default()).map_err(|e| CliError::new("not_found", 3, e.to_string()))?;
+            let mode = if force { RiskLevel::Force } else { RiskLevel::Standard };
+            let p = ops::make_plan(&ctx, &r, "emergency", Some(target), &Filter::default(), Admission::mode(mode)).map_err(|e| CliError::new("not_found", 3, e.to_string()))?;
             if p.bytes < target && !out.json {
                 eprintln!("Only {} can be freed without touching hot, review or protected items.", bytes(p.bytes));
             }
-            let mode = if force { RiskLevel::Force } else { RiskLevel::Standard };
             run_clean(&ctx, &out, r, p.items, dry_run, yes, false, mode, None)?;
         }
         Cmd::Projects { cmd } => match cmd.unwrap_or(ProjectsCmd::Ls) {
@@ -1550,7 +1622,7 @@ fn real_main(cli: Cli) -> R {
             if out.json {
                 emit(&out, &v);
             } else {
-                println!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
+                print_doctor(&ctx, &roots, detected, &st);
             }
         }
         Cmd::Gc => {
@@ -1565,6 +1637,140 @@ fn real_main(cli: Cli) -> R {
     Ok(())
 }
 
+/// `poo doctor` for people: one line per check, with what to do when it fails.
+fn print_doctor(ctx: &Ctx, roots: &[std::path::PathBuf], detected: bool, integrations: &[poo::agent::Target]) {
+    let st = render::Style::new();
+    let line = |ok: Option<bool>, what: String, hint: Option<String>| {
+        let mark = match ok {
+            Some(true) => st.good("✓"),
+            Some(false) => st.note("✗"),
+            None => st.dim("–"),
+        };
+        println!("{} {}", mark, what);
+        if let Some(h) = hint {
+            println!("  {}", st.dim(&h));
+        }
+    };
+    let exe = std::env::current_exe().ok();
+    let exe_real = exe.as_ref().and_then(|e| std::fs::canonicalize(e).ok());
+    let managed = poo::update::managed_by(exe.as_deref().unwrap_or(std::path::Path::new("")));
+
+    // Version and updates, from the last check on record (doctor never goes online).
+    match poo::update::last_check() {
+        Some((_, latest)) if poo::update::newer(&latest, poo::VERSION) => line(
+            Some(false),
+            format!("poo {} (version {} is available)", poo::VERSION, latest),
+            Some(managed.clone().map(|m| format!("update with {}", m)).unwrap_or_else(|| "run `poo update`".into())),
+        ),
+        Some((at, _)) => line(Some(true), format!("poo {} is the latest (checked {})", poo::VERSION, poo::util::age(at)), None),
+        None => line(None, format!("poo {} (no update check yet)", poo::VERSION), Some("run `poo update --check`".into())),
+    }
+
+    // Full Disk Access.
+    if poo::util::has_full_disk_access() {
+        line(Some(true), "Full Disk Access granted".into(), None);
+    } else {
+        line(
+            Some(false),
+            "No Full Disk Access: some caches, Mail, Messages and protected folders are skipped".into(),
+            Some(format!(
+                "System Settings > Privacy & Security > Full Disk Access, then add {}",
+                exe_real.as_ref().map(|e| tilde(e)).unwrap_or_else(|| "poo".into())
+            )),
+        );
+    }
+
+    // On PATH, and whether it is this copy.
+    match poo::util::which("poo") {
+        Some(p) => {
+            let same = std::fs::canonicalize(&p).ok() == exe_real;
+            let note = if same || exe_real.is_none() { String::new() } else { format!(" (a different copy than this one, {})", exe_real.as_ref().map(|e| tilde(e)).unwrap_or_default()) };
+            line(Some(true), format!("`poo` is on PATH at {}{}", tilde(&p), note), None);
+        }
+        None => line(
+            Some(false),
+            "`poo` is not on PATH, so agents and scripts cannot find it".into(),
+            Some(match exe_real.as_ref().and_then(|e| e.parent()) {
+                Some(d) => format!("add {} to PATH, or link it: ln -s {} ~/.local/bin/poo", tilde(d), exe_real.as_ref().map(|e| e.to_string_lossy().to_string()).unwrap_or_default()),
+                None => "reinstall poo (see the README)".into(),
+            }),
+        ),
+    }
+
+    // Roots.
+    let missing: Vec<&String> = ctx.cfg.roots.iter().filter(|r| !poo::util::expand(r).is_dir()).collect();
+    if roots.is_empty() {
+        line(Some(false), "No dev roots to walk".into(), Some("run `poo setup`, or `poo roots add ~/dev`".into()));
+    } else {
+        let list = roots.iter().map(|r| tilde(r)).collect::<Vec<_>>().join(", ");
+        let how = if detected { "detected" } else { "configured" };
+        line(Some(true), format!("{} root{} ({}): {}", roots.len(), if roots.len() == 1 { "" } else { "s" }, how, list), detected.then(|| "pin them with `poo setup` or `poo roots add <path>`".to_string()));
+    }
+    if !missing.is_empty() {
+        line(
+            Some(false),
+            format!("configured root{} not found: {}", if missing.len() == 1 { "" } else { "s" }, missing.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")),
+            Some("remove with `poo roots rm <path>`".into()),
+        );
+    }
+
+    // Config and mods (a config that does not load stops poo before this point).
+    line(Some(true), format!("config is valid ({})", tilde(&poo::config::config_path())), None);
+    if ctx.cat.errors.is_empty() {
+        line(Some(true), format!("{} mod{}, {} rules load cleanly", ctx.cat.mods.len(), if ctx.cat.mods.len() == 1 { "" } else { "s" }, ctx.cat.rules.len()), None);
+    } else {
+        line(
+            Some(false),
+            format!("{} mod error{}: {}", ctx.cat.errors.len(), if ctx.cat.errors.len() == 1 { "" } else { "s" }, ctx.cat.errors[0]),
+            Some("see `poo mods validate --text`".into()),
+        );
+    }
+
+    // Last scan.
+    match poo::scan::load_report() {
+        Some(r) => line(Some(true), format!("last scan {}", poo::util::age(r.scanned_at)), None),
+        None => line(Some(false), "no scan yet".into(), Some("run `poo scan` (the first full scan takes 10-60s)".into())),
+    }
+
+    // Coding agent integrations: only the agents found on this Mac.
+    let found: Vec<&poo::agent::Target> = integrations.iter().filter(|t| t.detected).collect();
+    if found.is_empty() {
+        line(None, "no coding agents found for the skill or MCP server".into(), None);
+    }
+    for t in found {
+        let skill = match (t.skill_path.is_some(), t.skill_installed, t.skill_current) {
+            (false, _, _) => None,
+            (true, true, true) => Some((true, "skill current")),
+            (true, true, false) => Some((false, "skill outdated")),
+            (true, false, _) => Some((false, "no skill")),
+        };
+        let mcp = t.mcp_config.is_some().then_some(if t.mcp_registered { (true, "MCP installed") } else { (false, "no MCP server") });
+        let parts: Vec<(bool, &str)> = skill.into_iter().chain(mcp).collect();
+        let ok = parts.iter().all(|(ok, _)| *ok);
+        let text = parts.iter().map(|(_, s)| *s).collect::<Vec<_>>().join(", ");
+        line(Some(ok), format!("{}: {}", t.name, text), (!ok).then(|| format!("run `poo integration install {}`", t.id)));
+    }
+
+    // Schedules need the launchd agent.
+    let enabled = ctx.cfg.schedule.iter().filter(|s| s.enabled).count();
+    if enabled == 0 {
+        line(None, "no schedules".into(), Some("see `poo schedule presets`".into()));
+    } else if poo::schedule::agent_loaded() {
+        line(Some(true), format!("scheduler running for {} schedule{}", enabled, if enabled == 1 { "" } else { "s" }), None);
+    } else {
+        line(
+            Some(false),
+            format!("{} schedule{} on, but the scheduler is not {}", enabled, if enabled == 1 { "" } else { "s" }, if poo::schedule::agent_installed() { "loaded" } else { "installed" }),
+            Some("run `poo schedule install`".into()),
+        );
+    }
+
+    // Tools poo uses when they are there.
+    if poo::util::which("git").is_none() {
+        line(Some(false), "git not found: worktrees and ignored-folder checks are off".into(), Some("install the Xcode command line tools: xcode-select --install".into()));
+    }
+}
+
 /// What a schedule does and would clean right now, for the user to approve.
 fn schedule_summary(ctx: &mut Ctx, s: &poo::config::Schedule) -> String {
     let when = format!("every {}{}{}", s.every, s.at.as_ref().map(|a| format!(" at {}", a)).unwrap_or_default(), s.when_free_below.as_ref().map(|b| format!(" when free space is below {}", b)).unwrap_or_default());
@@ -1572,7 +1778,7 @@ fn schedule_summary(ctx: &mut Ctx, s: &poo::config::Schedule) -> String {
         Ok(v) => {
             let w = &v["would_clean_now"];
             let names: Vec<&str> = w["items"].as_array().map(|a| a.iter().take(8).filter_map(|i| i["name"].as_str()).collect()).unwrap_or_default();
-            format!("schedule `{}` runs plan `{}` {}; right now it would clean {} in {} items ({}). Scheduled runs skip items with risks", s.id, s.plan, when, bytes(w["bytes"].as_u64().unwrap_or(0)), w["count"], names.join(", "))
+            format!("schedule `{}` runs plan `{}` {}; right now it would clean {} in {} ({}). Scheduled runs skip items with risks", s.id, s.plan, when, bytes(w["bytes"].as_u64().unwrap_or(0)), plural(w["count"].as_u64().unwrap_or(0), "item"), names.join(", "))
         }
         Err(_) => format!("schedule `{}` runs plan `{}` {}", s.id, s.plan, when),
     }

@@ -12,5 +12,6 @@ If `poo` is not installed, ask the user before installing it:
 `curl -fsSL https://raw.githubusercontent.com/morajabi/poo/main/install.sh | sh`
 
 Never delete files yourself; clean through `poo clean` or `poo free`, which
-re-check every item and refuse uncommitted worktrees and running builds. Ask before
+re-check every item and skip running builds and worktrees with uncommitted changes
+(`--include-in-use` stashes those changes first). Ask before
 cleaning anything the user has not seen, and before adding schedules or hooks.

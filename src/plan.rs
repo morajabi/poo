@@ -2,7 +2,7 @@
 //! evaluates them against a report.
 
 use crate::catalog::{Catalog, Plan};
-use crate::model::{ActionKind, Item, PlanSummary, Report, Tier};
+use crate::model::{ActionKind, Item, PlanSummary, Report, RiskLevel, Tier};
 use serde::Serialize;
 
 #[derive(Debug, Clone, Default)]
@@ -82,6 +82,30 @@ pub struct PlanResult {
     pub items: Vec<Item>,
 }
 
+/// What the clean that follows a plan accepts: its mode and tier limit. A plan keeps only
+/// items `clean` would admit with the same flags, so its total is what that clean frees.
+#[derive(Debug, Clone, Copy)]
+pub struct Admission {
+    pub mode: RiskLevel,
+    pub max_tier: Option<Tier>,
+}
+
+impl Default for Admission {
+    /// `poo clean --plan` without flags: risk-free items up to `warm`.
+    fn default() -> Self {
+        Self { mode: RiskLevel::Standard, max_tier: Some(Tier::Warm) }
+    }
+}
+
+impl Admission {
+    pub fn mode(mode: RiskLevel) -> Self {
+        Self { mode, ..Default::default() }
+    }
+    pub fn admits(&self, cat: &Catalog, i: &Item) -> bool {
+        crate::clean::admit_static(i, cat, self.mode, self.max_tier).is_ok()
+    }
+}
+
 pub fn eligible(plan: &Plan, i: &Item) -> bool {
     plan.tiers.contains(&i.tier)
         && i.cost.rank() <= plan.max_cost.rank()
@@ -97,11 +121,11 @@ pub fn default_target(plan: &Plan, report: &Report) -> Option<u64> {
     Some(want.saturating_sub(report.disk.free))
 }
 
-pub fn evaluate(plan: &Plan, report: &Report, filter: &Filter, target: Option<u64>) -> PlanResult {
+pub fn evaluate(plan: &Plan, report: &Report, filter: &Filter, target: Option<u64>, cat: &Catalog, adm: Admission) -> PlanResult {
     let mut items: Vec<Item> = report
         .items
         .iter()
-        .filter(|i| eligible(plan, i) && filter.matches(i))
+        .filter(|i| eligible(plan, i) && filter.matches(i) && adm.admits(cat, i))
         .cloned()
         .collect();
     let mut target_bytes = None;
@@ -153,6 +177,17 @@ pub fn evaluate(plan: &Plan, report: &Report, filter: &Filter, target: Option<u6
     }
 }
 
+/// What cleaning all of these frees, counting nested items once: an item inside another
+/// listed item (a build folder in a listed worktree) is already in that item's total_bytes.
+pub fn freed_total(items: &[&Item]) -> u64 {
+    let paths: std::collections::HashSet<&str> = items.iter().map(|i| i.path.as_str()).collect();
+    items
+        .iter()
+        .filter(|i| !std::path::Path::new(&i.path).ancestors().skip(1).any(|a| a.to_str().is_some_and(|a| paths.contains(a))))
+        .map(|i| i.total_bytes)
+        .sum()
+}
+
 /// When a worktree is removed, its nested artifacts go with it: count them once.
 pub fn drop_nested(items: Vec<Item>) -> Vec<Item> {
     let wts: Vec<String> = items
@@ -173,7 +208,7 @@ pub fn summaries(cat: &Catalog, report: &Report) -> Vec<PlanSummary> {
     cat.plans
         .iter()
         .map(|p| {
-            let r = evaluate(p, report, &Filter::default(), None);
+            let r = evaluate(p, report, &Filter::default(), None, cat, Admission::default());
             PlanSummary {
                 id: p.id.clone(),
                 name: p.name.clone(),

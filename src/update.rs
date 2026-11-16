@@ -186,6 +186,12 @@ struct Stamp {
 
 const DAY: i64 = 86400;
 
+/// The last update check on record (no network): when it ran and the latest version it saw.
+pub fn last_check() -> Option<(i64, String)> {
+    let st = read_stamp();
+    (st.checked_at > 0 && !st.latest.is_empty()).then_some((st.checked_at, st.latest))
+}
+
 fn stamp_path() -> PathBuf {
     state_dir().join("update-check.json")
 }

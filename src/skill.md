@@ -14,9 +14,9 @@ item gets a tier that says how much regret cleaning it causes.
 ## Rules for you
 
 - Never delete files yourself (`rm`, `git clean`, `docker system prune`...).
-  Clean through poo: it re-checks each item right before deleting, refuses
-  worktrees with uncommitted changes, skips projects with running builds and
-  never leaves its safety floor.
+  Clean through poo: it re-checks each item right before deleting, skips
+  worktrees with uncommitted changes (with `--include-in-use` it stashes them
+  first), skips projects with running builds and never leaves its safety floor.
 - Junk and cold items may be cleaned when the user asked you to free space or clean.
   Idle and warm items need the user's OK unless `poo config get agents.auto_clean_max_tier`
   allows them. Hot, review and protected items: show them and let the user decide.
@@ -52,8 +52,8 @@ JSON says `tier`; `--text` and the app show the `status` label.
 | idle | idle | nothing uses it now: other checkouts' builds while you work in your 2 newest, untouched for hours | stale, deep, emergency |
 | warm | in use | in active use; costs a rebuild or redownload | deep, emergency |
 | hot | active now | in use right now (build or agent running, touched in the last hour) | never |
-| review | check first | needs a human look (unknown ignored folder, transcripts, archives) | never |
-| protected | kept | never cleaned (uncommitted work, data, volumes) | never |
+| review | check first | needs a human look (worktree with uncommitted work, unknown ignored folder, transcripts, archives) | never |
+| protected | kept | never cleaned (data, volumes, projects marked protected) | never |
 
 An item's reasons say why it got its tier ("checkout used just now" means files in that
 checkout or its git metadata changed recently, not necessarily the item itself).
@@ -71,18 +71,20 @@ you pass `--yes`.
 
 ```
 poo                         overview: free space, buckets, plan sizes
-poo scan                    update now (from the file-change journal, usually <1s)
-poo scan --full             walk everything again (5-20s)
+poo scan                    update now: the first full scan takes 10-60s; later scans are
+                            incremental (file-change journal), about a second
+poo scan --full             walk everything again (10-60s)
 poo watch                   keep the report current as files change (JSON lines when piped)
 poo ls [bucket] [--tier cold] [--project PATH] [--min 1G] [--query text]
 poo show <id|path>          reasons, rebuild cost, what is inside
-poo plan quick|stale|deep|emergency [--free 30G]
+poo plan quick|stale|deep|emergency [--free 30G] [--include-in-use]
 poo clean <id>... | --plan stale [--dry-run] [--yes] [--max-tier auto]
 poo free 30G [--dry-run]    least-regret items until 30 GB are free
 poo projects                projects with status and policy
 poo projects set PATH active|stale|protected|auto
 poo worktrees               repos, their worktrees, dirty/merged state, sizes
-poo catalog                 every bucket, rule, provider and recommendation
+poo catalog                 every bucket, rule, provider and recommendation (large; prefer
+                            `poo rules ls --bucket <id>` or the MCP catalog with a filter)
 poo rules explain PATH      which rule matches a path and why
 poo history                 what poo cleaned before
 poo setup --agent           setup brief for configuring poo for this user
@@ -94,7 +96,10 @@ poo rules disable --tag <t> turn a whole pack off (also --group, --bucket, --sta
 
 MCP: `poo mcp` serves the same as tools (`overview`, `list_items`, `inspect`,
 `plan`, `clean`, `projects`, `catalog`, `configure`, `explain_path`,
-`setup_brief`, `schedules`, `backups`, `history`). `clean` defaults to a dry run and
+`setup_brief`, `schedules`, `backups`, `growth`, `history`). `catalog` without
+arguments is a summary; pass `bucket`, `tag`, `stack`, `id` or `query` for full rules.
+`plan` and `clean` take a `mode` (safe, in-use, dangerous) and a plan only lists what
+`clean` in that mode would take. `clean` defaults to a dry run and
 answers `needs_approval` for items above the autonomy tier; `schedules` add/enable
 answer with a preview until `approved_by_user`. Pass `approved_by_user: true` only
 after the user saw those exact items and said yes.
@@ -115,9 +120,14 @@ Before adding or enabling one, show `poo schedule presets` for it and `poo plan 
   rebuild costs) and ask before `poo free 20G --yes`. Items with risks need a mode
   (`--include-in-use`) the user agreed to. If the target is out of reach, say how close
   the least-regret options get.
+- Plans list only what `poo clean` would take with the same flags: `poo plan stale` is
+  exactly `poo clean --plan stale`, and `poo plan stale --include-in-use` previews that
+  mode (worktrees with uncommitted work, stashed first; items used in the last hour).
 - What takes space: `poo`, then `poo ls <bucket>` and `poo show <id>`.
 - After a feature lands: `poo worktrees`; propose removing merged worktrees. Their
-  build output goes with them and the branch stays.
+  build output goes with them and the branch stays. Worktrees with uncommitted changes
+  are skipped by default; with `--include-in-use` poo stashes the changes first
+  (recoverable from `git stash list` and `poo backups`).
 - Duplicated builds: the same repo across many worktrees often costs 10-25 GB
   each (DerivedData, .build, target, node_modules). `poo ls --query <repo>` shows it.
 

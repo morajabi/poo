@@ -77,14 +77,14 @@ pub fn for_project(r: &Report, path: &str, cat: &Catalog) -> Option<Brief> {
     let p = r.projects.iter().find(|p| p.path == path)?;
     let items: Vec<&Item> = r.items.iter().filter(|i| i.project.as_deref() == Some(path)).collect();
     let mut facts = format!(
-        "- Path: {}\n- Kind: {}{}\n- Stacks: {}\n- Last activity: {}\n- Build output and dependencies: {} in {} items\n- Status: {}, policy {:?}\n",
+        "- Path: {}\n- Kind: {}{}\n- Stacks: {}\n- Last activity: {}\n- Build output and dependencies: {} in {}\n- Status: {}, policy {:?}\n",
         p.path,
         p.kind,
         p.branch.as_ref().map(|b| format!(", branch {}", b)).unwrap_or_default(),
         p.stacks.join(", "),
         p.last_activity.map(crate::util::age).unwrap_or_else(|| "unknown".into()),
         bytes(p.artifact_bytes),
-        p.item_count,
+        crate::util::plural(p.item_count as u64, "item"),
         p.status,
         p.policy
     );
@@ -107,7 +107,7 @@ pub fn for_project(r: &Report, path: &str, cat: &Catalog) -> Option<Brief> {
 
 pub fn for_bucket(r: &Report, bucket: &str) -> Option<Brief> {
     let b = r.buckets.iter().find(|b| b.id == bucket)?;
-    let mut facts = format!("Bucket \"{}\": {} in {} items. By status: {}\n\nBiggest items:\n", b.name, bytes(b.bytes), b.count, b.tiers.iter().map(|(k, v)| format!("{} {}", k, bytes(*v))).collect::<Vec<_>>().join(", "));
+    let mut facts = format!("Bucket \"{}\": {} in {}. By status: {}\n\nBiggest items:\n", b.name, bytes(b.bytes), crate::util::plural(b.count as u64, "item"), b.tiers.iter().map(|(k, v)| format!("{} {}", k, bytes(*v))).collect::<Vec<_>>().join(", "));
     for i in r.items.iter().filter(|i| i.bucket == bucket).take(20) {
         facts.push_str(&format!("- {} {} [{}] {} (poo id {})\n", bytes(i.total_bytes), i.name, i.tier.label(), i.reasons.join("; "), i.id));
     }
@@ -148,14 +148,14 @@ pub fn for_items(r: &Report, ids: &[&str]) -> Option<Brief> {
         return None;
     }
     let total: u64 = items.iter().map(|i| i.total_bytes).sum();
-    let mut facts = format!("{} items, {} in total:\n", items.len(), bytes(total));
+    let mut facts = format!("{}, {} in total:\n", crate::util::plural(items.len() as u64, "item"), bytes(total));
     for i in &items {
         facts.push_str(&item_line(i));
     }
     let prompt = format!(
         "poo, my disk-space tool, listed these and I want a second opinion before cleaning. Go through all of them together, not one question at a time.\n\n{facts}\nPlease:\n1. Group them by what they really are (which project, worktree, tool or task) and check the ones poo can't judge from the filesystem: git state, open PRs, whether I still work there, anything unique inside.\n2. Give me one table: item, what it is, keep / clean build output / remove, and why.\n3. Point out anything poo may have misjudged and suggest poo settings (project policies, rules) that would get it right next time.\n\n{RULES}"
     );
-    Some(Brief { title: format!("Ask about {} items", items.len()), prompt, cwd: home().to_string_lossy().to_string() })
+    Some(Brief { title: format!("Ask about {}", crate::util::plural(items.len() as u64, "item")), prompt, cwd: home().to_string_lossy().to_string() })
 }
 
 pub fn for_worktrees(r: &Report) -> Brief {
