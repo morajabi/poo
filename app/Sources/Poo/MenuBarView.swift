@@ -73,10 +73,14 @@ struct MenuBarView: View {
         }
         .task {
             await store.loadLight()
-            // `--preview-menu-cleaning`: show the panel's progress with a simulated clean.
-            if CommandLine.arguments.contains("--preview-menu-cleaning"), store.menuSession == nil, let r = store.report {
+            // `--preview-menu-cleaning`: show the panel's progress with a simulated clean (nothing
+            // is deleted); `=freed` finishes it as a real clean would, with some still erasing.
+            let args = CommandLine.arguments
+            if args.contains(where: { $0.hasPrefix("--preview-menu-cleaning") }), store.menuSession == nil, let r = store.report {
                 let items = r.items.filter { $0.status == .notInUse }.sorted { $0.total_bytes > $1.total_bytes }
-                store.menuSession = CleanSession.fake(items: items, freeBefore: r.disk.free, speed: 0.3)
+                let s = CleanSession.fake(items: items, freeBefore: r.disk.free, speed: 0.3)
+                if args.contains("--preview-menu-cleaning=freed") { s.dryRun = false }
+                store.menuSession = s
             }
         }
     }
@@ -350,12 +354,25 @@ struct MenuCleaningView: View {
                         Text("\(session.dryRun ? "Would free" : "Freed") \(Fmt.bytes(r?.freed_bytes ?? 0))").font(.callout.weight(.medium))
                         Text([r.map { "\($0.cleaned) cleaned" }, (r?.skipped ?? 0) > 0 ? "\(r!.skipped) skipped" : nil].compactMap { $0 }.joined(separator: " · "))
                             .font(.caption).foregroundStyle(.secondary)
+                        if session.erasingBytes > 0 {
+                            Text("\(Fmt.bytes(session.erasingBytes)) still erasing")
+                                .font(.caption).foregroundStyle(.tertiary).monospacedDigit()
+                                .contentTransition(.numericText())
+                                .help("Erasing in the background. Free space catches up on its own.")
+                                .transition(.opacity)
+                        }
                     }
+                    .animation(.smooth, value: session.erasingBytes)
                     Spacer()
                     if backups { Button("Backups", action: onShowBackups).controlSize(.small) }
                 }
                 .task {
                     try? await Task.sleep(for: .seconds(6))
+                    if session.erasingBytes > 0 {
+                        // Stay until the background erase settles, then show the final number briefly.
+                        await session.settled()
+                        try? await Task.sleep(for: .seconds(2))
+                    }
                     if store.menuSession === session { store.menuSession = nil }
                 }
             case .failed(let m):

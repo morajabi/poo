@@ -88,11 +88,20 @@ struct CleaningView: View {
                 Text("\(session.dryRun ? "Would free" : "Freed") \(Fmt.bytes(r?.freed_bytes ?? session.freedBytes))")
                     .font(.title2.weight(.semibold))
                     .monospacedDigit()
-                if let before = session.freeBefore, let after = r?.disk_free_after, !session.dryRun {
+                if let before = session.freeBefore, let after = session.freeAfter, !session.dryRun {
                     Text("\(Fmt.bytes(before)) → \(Fmt.bytes(after)) free").foregroundStyle(.secondary).monospacedDigit()
+                        .contentTransition(.numericText())
+                }
+                if session.erasingBytes > 0 {
+                    Text("\(Fmt.bytes(session.erasingBytes)) still erasing")
+                        .font(.callout).foregroundStyle(.tertiary).monospacedDigit()
+                        .contentTransition(.numericText())
+                        .help("Poo moved these folders aside and erases them in the background. Free space catches up on its own.")
+                        .transition(.opacity)
                 }
                 Text(summaryLine(r)).font(.callout).foregroundStyle(.secondary)
             }
+            .animation(.smooth, value: session.erasingBytes)
             if !skipped.isEmpty || !failed.isEmpty || !notes.isEmpty || r?.snapshot_note != nil {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {

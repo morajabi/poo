@@ -23,4 +23,25 @@ final class ModelTests: XCTestCase {
         let r = try JSONDecoder().decode(Report.self, from: data)
         XCTAssertFalse(r.buckets.isEmpty)
     }
+
+    /// `erasing_bytes` is newer than the app: older CLIs leave it out, and a dry run never erases.
+    @MainActor func testCleanResultErasingBytes() throws {
+        let base = #"{"dry_run":false,"freed_bytes":1000,"cleaned":2,"skipped":0,"failed":0,"disk_free_after":5000,"results":[]"#
+        let old = try JSONDecoder().decode(CleanResult.self, from: Data((base + "}").utf8))
+        XCTAssertNil(old.erasing_bytes)
+        let new = try JSONDecoder().decode(CleanResult.self, from: Data((base + #","erasing_bytes":400}"#).utf8))
+        XCTAssertEqual(new.erasing_bytes, 400)
+
+        let s = CleanSession(items: [], freeBefore: 4000)
+        s.finish(new)
+        XCTAssertEqual(s.erasingBytes, 400)
+        XCTAssertEqual(s.freeAfter, 5000)
+
+        var dry = new
+        dry.dry_run = true
+        let d = CleanSession(items: [], freeBefore: 4000)
+        d.finish(dry)
+        XCTAssertEqual(d.erasingBytes, 0)
+        XCTAssertNil(d.freeAfter)
+    }
 }

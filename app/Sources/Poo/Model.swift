@@ -357,6 +357,9 @@ struct CleanResult: Codable {
     var snapshot_note: String?
     var cancelled: Bool?
     var disk_free_before: UInt64?
+    /// Of `freed_bytes`, what poo's background reaper is still erasing; `disk_free_after`
+    /// doesn't include it yet. Absent from older CLIs.
+    var erasing_bytes: UInt64?
 }
 
 struct HistoryEntry: Codable {
