@@ -1,4 +1,4 @@
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 use poo::clean::{self, CleanOptions};
 use poo::model::{ProjectPolicy, RiskLevel, Tier};
 use poo::ops::{self, BucketEdit, Ctx};
@@ -57,7 +57,7 @@ struct FilterArgs {
 enum Cmd {
     /// Interactive terminal UI (default with no command in a terminal).
     Ui,
-    /// Overview: free space, buckets, plans (default command when piped or with --text).
+    /// Free space, areas and plans (the default when piped or with --text).
     Overview {
         /// Update the report now instead of reusing a recent one.
         #[arg(long)]
@@ -218,8 +218,9 @@ enum Cmd {
         #[arg(long, short = 'n', default_value_t = 30)]
         limit: usize,
     },
-    /// What grew: per bucket and group since a point in time, unusual growth, and how long
-    /// the free space lasts at this pace.
+    /// What grew since a point in time, and how long free space lasts at this pace.
+    ///
+    /// Per bucket and group, with unusual growth called out.
     Growth {
         /// How far back to compare: 24h, 7d, 2w...
         #[arg(long, default_value = "7d")]
@@ -266,7 +267,7 @@ enum Cmd {
         #[command(subcommand)]
         cmd: Option<ScheduleCmd>,
     },
-    /// Write a brief about an item, project (path), bucket:<id> or overview for an AI agent.
+    /// Write an AI agent brief about an item, project (path), bucket:<id> or the overview.
     Prompt {
         #[arg(default_value = "overview")]
         target: String,
@@ -970,7 +971,10 @@ fn real_main(cli: Cli) -> R {
             } else {
                 render::overview(&r);
                 if ctx.cfg.setup.completed_at.is_none() && ctx.cfg.roots.is_empty() {
-                    println!("\nTip: run `poo setup` to choose your dev folders, or ask your coding agent to run `poo setup --agent`.");
+                    println!();
+                    for l in render::wrap("Tip: run `poo setup` to choose your dev folders, or ask your coding agent to run `poo setup --agent`.", render::width(), 5) {
+                        println!("{}", l);
+                    }
                 }
             }
         }
@@ -1006,9 +1010,10 @@ fn real_main(cli: Cli) -> R {
         }
         Cmd::Ls { f, sort, limit } => {
             let limit = if limit == 0 { usize::MAX } else { limit };
+            // A typo in the bucket fails before any scan.
+            let flt = filter(&f, &ctx.cat)?;
             let r = ops::report(&ctx, false, scan_opts(&out, false))?;
             clear_progress(&out);
-            let flt = filter(&f, &ctx.cat)?;
             let list = ops::list(&r, &flt, &sort, 0);
             if out.json {
                 let total: u64 = list.iter().map(|i| i.bytes).sum();
@@ -1032,14 +1037,16 @@ fn real_main(cli: Cli) -> R {
             }
         }
         Cmd::Plan { plan, free, f, force, danger } => {
-            let r = ops::report(&ctx, false, scan_opts(&out, false))?;
-            clear_progress(&out);
+            // Typos (size, bucket) fail before any scan.
             let target = match free {
                 Some(s) => Some(parse_bytes(&s).ok_or_else(|| CliError::new("usage", 2, format!("bad size `{}`", s)))?),
                 None => None,
             };
+            let flt = filter(&f, &ctx.cat)?;
+            let r = ops::report(&ctx, false, scan_opts(&out, false))?;
+            clear_progress(&out);
             let mode = if danger { RiskLevel::Danger } else if force { RiskLevel::Force } else { RiskLevel::Standard };
-            let p = ops::make_plan(&ctx, &r, &plan, target, &filter(&f, &ctx.cat)?, Admission::mode(mode)).map_err(|e| CliError::new("not_found", 3, e.to_string()))?;
+            let p = ops::make_plan(&ctx, &r, &plan, target, &flt, Admission::mode(mode)).map_err(|e| CliError::new("not_found", 3, e.to_string()))?;
             if out.json {
                 emit(&out, &serde_json::to_value(&p).unwrap_or_default());
             } else {
@@ -1196,18 +1203,40 @@ fn real_main(cli: Cli) -> R {
                         .collect();
                     emit(&out, &json!({"rules": v}));
                 } else {
+                    use poo::tui::fmt::{fit, pad};
                     let st = render::Style::new();
+                    let w = render::width();
+                    // Ids stay whole (people copy them); the cost column goes first, then the name shrinks.
+                    let id_w = rules.iter().map(|r| r.id.chars().count()).max().unwrap_or(4).max(4);
+                    let hits_w = rules.iter().map(|r| hit(&r.id).map_or(0, |(n, b)| format!("{} in {}", bytes(b), n).len())).max().unwrap_or(0);
+                    let mut fixed = id_w + 2 + 10 + 2 + if hits_w > 0 { hits_w + 2 } else { 0 };
+                    let mut hits_w = hits_w;
+                    if hits_w > 0 && w.saturating_sub(fixed) < 20 {
+                        fixed -= hits_w + 2;
+                        hits_w = 0;
+                    }
+                    let show_cost = w.saturating_sub(fixed + 12) >= 20;
+                    if show_cost {
+                        fixed += 12;
+                    }
+                    let name_w = w.saturating_sub(fixed).max(12);
+                    let row = |id: &str, bucket: &str, cost: &str, h: &str, name: &str| {
+                        format!(
+                            "{}  {}  {}{}{}",
+                            pad(id, id_w),
+                            pad(bucket, 10),
+                            if show_cost { format!("{}  ", pad(cost, 10)) } else { String::new() },
+                            if hits_w > 0 { format!("{:>w$}  ", h, w = hits_w) } else { String::new() },
+                            fit(name, name_w)
+                        )
+                    };
+                    if !rules.is_empty() {
+                        println!("{}", st.dim(row("rule", "area", "cost", if hits_w > 0 { "found" } else { "" }, "name").trim_end()));
+                    }
                     for r in rules {
                         let h = hit(&r.id).map(|(n, b)| format!("{} in {}", bytes(b), n)).unwrap_or_default();
-                        println!(
-                            "{:<32} {:<10} {:<10} {:>14}  {}{}",
-                            r.id,
-                            r.bucket,
-                            r.cost.as_str(),
-                            h,
-                            r.name,
-                            if r.enabled { String::new() } else { st.dim(" (off)") }
-                        );
+                        let name = if r.enabled { r.name.clone() } else { format!("{} (off)", r.name) };
+                        println!("{}", row(&r.id, &r.bucket, r.cost.as_str(), &h, &name).trim_end());
                     }
                 }
             }
@@ -1646,9 +1675,14 @@ fn print_doctor(ctx: &Ctx, roots: &[std::path::PathBuf], detected: bool, integra
             Some(false) => st.note("✗"),
             None => st.dim("–"),
         };
-        println!("{} {}", mark, what);
+        let w = render::width();
+        for (i, l) in render::wrap(&what, w.saturating_sub(2), 2).into_iter().enumerate() {
+            println!("{} {}", if i == 0 { mark.clone() } else { " ".into() }, l);
+        }
         if let Some(h) = hint {
-            println!("  {}", st.dim(&h));
+            for l in render::wrap(&h, w.saturating_sub(2), 0) {
+                println!("  {}", st.dim(&l));
+            }
         }
     };
     let exe = std::env::current_exe().ok();
@@ -2063,8 +2097,52 @@ fn human_setup(ctx: &mut Ctx) -> R {
     Ok(())
 }
 
+/// `poo --help` lists commands by what you want to do instead of one long list. Every
+/// visible subcommand must appear in exactly one group (a test checks).
+const HELP_GROUPS: &[(&str, &[&str])] = &[
+    ("Look", &["ui", "overview", "ls", "show", "projects", "worktrees", "growth", "history"]),
+    ("Clean", &["plan", "clean", "free", "backups", "gc"]),
+    ("Keep it tidy", &["scan", "watch", "schedule", "hooks"]),
+    ("Agents", &["mcp", "integration", "prompt", "ask"]),
+    ("Set up and extend", &["setup", "roots", "config", "buckets", "rules", "mods", "catalog", "suggest", "doctor", "update"]),
+];
+
+fn grouped_help(cmd: &clap::Command) -> String {
+    let width = render::width().min(100);
+    let name_w = 13;
+    let mut out = String::new();
+    for (title, names) in HELP_GROUPS {
+        out.push_str(&format!("{}:\n", title));
+        for n in *names {
+            let Some(sc) = cmd.find_subcommand(n) else { continue };
+            let about = sc.get_about().map(|a| a.to_string()).unwrap_or_default();
+            let about = about.trim_end_matches('.');
+            for (i, l) in render::wrap(about, width.saturating_sub(name_w + 2), 0).into_iter().enumerate() {
+                if i == 0 {
+                    out.push_str(&format!("  {:<w$}{}\n", n, l, w = name_w));
+                } else {
+                    out.push_str(&format!("  {:<w$}{}\n", "", l, w = name_w));
+                }
+            }
+        }
+        out.push('\n');
+    }
+    out.push_str(&format!("  {:<w$}{}\n", "help", "Help for a command: poo help <command> or poo <command> --help", w = name_w));
+    out
+}
+
+fn cli_command() -> clap::Command {
+    let cmd = Cli::command();
+    let groups = grouped_help(&cmd);
+    let template = format!("{{about-with-newline}}\n{{usage-heading}} {{usage}}\n\nRun `poo` in a terminal for the interactive view; pipe it for JSON.\n\n{}\nOptions:\n{{options}}{{after-help}}", groups);
+    cmd.help_template(template)
+}
+
 fn main() -> ExitCode {
-    let cli = Cli::parse();
+    let cli = match Cli::from_arg_matches(&cli_command().get_matches()) {
+        Ok(c) => c,
+        Err(e) => e.exit(),
+    };
     let json_errors = cli.json || (!cli.text && !is_tty(1));
     match real_main(cli) {
         Ok(()) => ExitCode::SUCCESS,
@@ -2084,9 +2162,35 @@ fn main() -> ExitCode {
 
 mod contrib_cmd;
 
+
 /// Refreshes skills poo installed so they match the new binary.
 fn refresh_skills() {
     for t in poo::agent::status().into_iter().filter(|t| t.skill_installed && !t.skill_current) {
         let _ = poo::agent::install(t.id, true, false);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn help_groups_cover_every_command_once() {
+        let cmd = Cli::command();
+        let mut seen = std::collections::HashSet::new();
+        for (_, names) in HELP_GROUPS {
+            for n in *names {
+                assert!(cmd.find_subcommand(n).is_some(), "help lists `{}`, which is not a command", n);
+                assert!(seen.insert(*n), "`{}` is in two help groups", n);
+            }
+        }
+        for sc in cmd.get_subcommands().filter(|c| !c.is_hide_set()) {
+            assert!(seen.contains(sc.get_name()), "`poo {}` is missing from the grouped --help", sc.get_name());
+        }
+    }
+
+    #[test]
+    fn cli_definition_is_valid() {
+        cli_command().debug_assert();
     }
 }

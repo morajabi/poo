@@ -86,14 +86,54 @@ fn truecolor() -> bool {
     matches!(std::env::var("COLORTERM").as_deref(), Ok("truecolor") | Ok("24bit"))
 }
 
-/// Output width: the terminal's when stdout is one, else a roomy default.
+/// Output width: COLUMNS when set, else the terminal's when stdout is one, else a roomy
+/// default for pipes and logs.
 pub fn width() -> usize {
+    if let Some(w) = std::env::var("COLUMNS").ok().and_then(|c| c.trim().parse::<usize>().ok()).filter(|w| *w > 0) {
+        return w.clamp(40, 240);
+    }
     if is_tty(1) {
         if let Ok((w, _)) = crossterm::terminal::size() {
-            return (w as usize).clamp(50, 200);
+            return (w as usize).clamp(40, 240);
         }
     }
     120
+}
+
+/// Word-wraps plain text (no escapes) to `w` cells; lines after the first start with
+/// `indent` spaces. A word longer than a line is left whole rather than split.
+pub fn wrap(text: &str, w: usize, indent: usize) -> Vec<String> {
+    let mut lines: Vec<String> = vec![];
+    let mut cur = String::new();
+    let mut cur_w = 0;
+    for word in text.split_whitespace() {
+        let ww = cells(word);
+        let room = if lines.is_empty() { w } else { w.saturating_sub(indent) };
+        if cur_w > 0 && cur_w + 1 + ww > room {
+            lines.push(std::mem::take(&mut cur));
+            cur_w = 0;
+        }
+        if cur_w > 0 {
+            cur.push(' ');
+            cur_w += 1;
+        }
+        cur.push_str(word);
+        cur_w += ww;
+    }
+    if !cur.is_empty() || lines.is_empty() {
+        lines.push(cur);
+    }
+    let pad = " ".repeat(indent);
+    lines.into_iter().enumerate().map(|(i, l)| if i == 0 { l } else { format!("{}{}", pad, l) }).collect()
+}
+
+/// A dim "note"-style line: `label` then text wrapped under itself.
+pub fn note_line(st: &Style, label: &str, text: &str) {
+    let indent = cells(label) + 1;
+    for (i, l) in wrap(text, width().saturating_sub(indent), 0).into_iter().enumerate() {
+        let head = if i == 0 { label.to_string() } else { " ".repeat(indent - 1) };
+        println!("{} {}", st.dim(&head), st.dim(&l));
+    }
 }
 
 /// "free 119 GB of 494 GB ▕██████████····▏ 76% used"
@@ -109,12 +149,8 @@ pub fn disk_line(st: &Style, d: &DiskInfo) -> String {
 }
 
 fn header(st: &Style, r: &Report) {
-    println!(
-        "{}  {}   {}",
-        st.accent(&st.bold("poo")),
-        disk_line(st, &r.disk),
-        st.dim(&format!("updated {}", age(r.scanned_at)))
-    );
+    let updated = if width() >= 80 { format!("   {}", st.dim(&format!("updated {}", age(r.scanned_at)))) } else { String::new() };
+    println!("{}  {}{}", st.accent(&st.bold("poo")), disk_line(st, &r.disk), updated);
 }
 
 fn section(st: &Style, title: &str) {
@@ -129,7 +165,7 @@ pub fn overview(r: &Report) {
     println!(
         "{}",
         st.dim(&format!(
-            "     other {}  ·  dev in use {}  ·  not in use {}",
+            "     other {}  ·  in use {}  ·  not in use {}",
             bytes(parts[0]),
             bytes(parts[1]),
             bytes(parts[2])
@@ -143,7 +179,7 @@ pub fn overview(r: &Report) {
     let shown: Vec<&BucketSummary> = r.buckets.iter().filter(|b| !b.hidden && !b.report_only && b.count > 0).collect();
     let max = shown.iter().map(|b| b.bytes).max().unwrap_or(1).max(1);
     let name_w = shown.iter().map(|b| cells(&b.name)).max().unwrap_or(10).clamp(10, 26);
-    let bar_w = if w >= 100 { 24 } else { 12 };
+    let bar_w = if w >= 100 { 24 } else if w >= 72 { 12 } else { 4 };
     println!("{}", st.dim(&format!("  {}  {:>9}  {}  {:>10}  {:>6}", pad("", name_w), "size", " ".repeat(bar_w), "not in use", "items")));
     for b in &shown {
         let cold = crate::tui::app::bucket_not_in_use(b);
@@ -185,13 +221,21 @@ pub fn overview(r: &Report) {
     println!();
     let hint = [("poo", "interactive"), ("ls [area]", "items"), ("show <id>", "details"), ("plan stale", "preview"), ("clean --plan stale", ""), ("free 20G", "")];
     let mut line = String::new();
+    let mut line_w = 0;
     for (k, d) in hint {
+        let piece_w = cells(k) + if d.is_empty() { 0 } else { 1 + cells(d) };
+        if line_w > 0 && line_w + piece_w > w {
+            println!("{}", line.trim_end());
+            line.clear();
+            line_w = 0;
+        }
         let piece = if d.is_empty() { format!("{}   ", st.accent(k)) } else { format!("{} {}   ", st.accent(k), st.dim(d)) };
         line.push_str(&piece);
+        line_w += piece_w + 3;
     }
     println!("{}", line.trim_end());
-    for w in &r.warnings {
-        println!("{} {}", st.dim("note"), st.dim(w));
+    for warn in &r.warnings {
+        note_line(&st, "note", warn);
     }
 }
 
@@ -203,24 +247,25 @@ pub fn items(list: &[&Item], show_bucket: bool) {
     let bar_w = if w >= 110 { 10 } else { 0 };
     let id_w = list.iter().map(|i| cells(&i.id)).max().unwrap_or(4).clamp(4, 14);
     // id, size, bar, status, used, then name and group share the rest.
-    let fixed = id_w + 2 + 9 + 2 + if bar_w > 0 { bar_w + 2 } else { 0 } + 11 + 2 + 9 + 2;
+    let show_used = w >= 70;
+    let fixed = id_w + 2 + 9 + 2 + if bar_w > 0 { bar_w + 2 } else { 0 } + 11 + 2 + if show_used { 9 + 2 } else { 0 };
     let rest = w.saturating_sub(fixed);
     let longest_grp = list.iter().map(|i| if show_bucket { cells(&i.bucket) + 3 + cells(&i.group) } else { cells(&i.group) }).max().unwrap_or(0);
     // The group gets what the longest name leaves over (never less than a third).
     let longest_name = list.iter().map(|i| cells(&i.name)).max().unwrap_or(0);
     let grp_w = longest_grp.min(28).min((rest / 3).max(rest.saturating_sub(longest_name + 2)));
-    let name_w = rest.saturating_sub(grp_w + 2).max(16);
+    let name_w = rest.saturating_sub(grp_w + 2).max(10);
     println!(
         "{}",
         st.dim(&format!(
-            "{}  {:>9}  {}{}  {:>9}  {}{}",
+            "{}  {:>9}  {}{}  {}{}{}",
             pad("id", id_w),
             "size",
             if bar_w > 0 { format!("{}  ", " ".repeat(bar_w)) } else { String::new() },
             pad("status", 11),
-            "used",
+            if show_used { format!("{:>9}  ", "used") } else { String::new() },
             pad("name", name_w),
-            if grp_w > 4 { format!("  {}", if show_bucket { "area / group" } else { "group" }) } else { String::new() }
+            if grp_w > 4 { format!("  {}", fit(if show_bucket { "area / group" } else { "group" }, grp_w)) } else { String::new() }
         ))
     );
     for i in list {
@@ -228,16 +273,17 @@ pub fn items(list: &[&Item], show_bucket: bool) {
         let grp = if show_bucket { format!("{} / {}", i.bucket, i.group) } else { i.group.clone() };
         let size = if i.total_bytes > i.bytes { format!("{}+", bytes(i.total_bytes)) } else { bytes(i.bytes) };
         let bar = if bar_w > 0 { format!("{}  ", st.bar(i.total_bytes as f64 / max as f64, bar_w, None)) } else { String::new() };
-        println!(
-            "{}  {}  {}{}  {}  {}{}",
+        let line = format!(
+            "{}  {}  {}{}  {}{}{}",
             st.dim(&pad(&i.id, id_w)),
             st.bold(&rpad(&size, 9)),
             bar,
             if i.report_only { st.dim(&pad("in its app", 11)) } else { st.tier(i.tier) },
-            st.dim(&rpad(&used, 9)),
+            if show_used { format!("{}  ", st.dim(&rpad(&used, 9))) } else { String::new() },
             pad(&i.name, name_w),
             if grp_w > 4 { format!("  {}", st.dim(&fit(&grp, grp_w))) } else { String::new() }
         );
+        println!("{}", line.trim_end());
     }
     // Nested items count once: a worktree's total already holds the build folders inside it.
     let total = crate::plan::freed_total(list);
@@ -350,36 +396,42 @@ pub fn projects(list: &[Project]) {
     let w = width();
     let max = list.iter().map(|p| p.artifact_bytes).max().unwrap_or(1).max(1);
     let bar_w = if w >= 110 { 10 } else { 0 };
-    let fixed = 9 + 2 + if bar_w > 0 { bar_w + 2 } else { 0 } + 8 + 2 + 9 + 2 + 9 + 2 + 10 + 2;
-    let path_w = w.saturating_sub(fixed + 14).max(20);
+    // Policy and kind are the first to go on narrow terminals; the path keeps the room.
+    let wide = w >= 100;
+    let stacks_w = if w < 70 { 0 } else { list.iter().map(|p| cells(&p.stacks.join(" "))).max().unwrap_or(0).min(if wide { 20 } else { 14 }) };
+    let fixed = 9 + 2 + if bar_w > 0 { bar_w + 2 } else { 0 } + 8 + 2 + if wide { 9 + 2 + 9 + 2 } else { 0 } + 9 + 2 + if stacks_w > 0 { stacks_w + 2 } else { 0 };
+    let path_w = w.saturating_sub(fixed).max(16);
+    let opt = |s: String| if wide { s } else { String::new() };
     println!(
         "{}",
         st.dim(&format!(
-            "{:>9}  {}{}  {}  {}  {:>9}  {}  {}",
+            "{:>9}  {}{}  {}{}{:>9}  {}{}",
             "build",
             if bar_w > 0 { format!("{}  ", " ".repeat(bar_w)) } else { String::new() },
             pad("status", 8),
-            pad("policy", 9),
-            pad("kind", 9),
+            opt(format!("{}  ", pad("policy", 9))),
+            opt(format!("{}  ", pad("kind", 9))),
             "active",
-            pad("project", path_w),
-            "stacks"
+            if stacks_w > 0 { pad("project", path_w) } else { "project".into() },
+            if stacks_w > 0 { format!("  {}", "stacks") } else { String::new() }
         ))
+        .trim_end()
     );
     for p in list {
         let pol = format!("{:?}", p.policy).to_lowercase();
         let bar = if bar_w > 0 { format!("{}  ", st.bar(p.artifact_bytes as f64 / max as f64, bar_w, None)) } else { String::new() };
-        println!(
-            "{}  {}{}  {}  {}  {}  {}  {}",
+        let line = format!(
+            "{}  {}{}  {}{}{}  {}{}",
             st.bold(&rpad(&bytes(p.artifact_bytes), 9)),
             bar,
             project_status(&st, &p.status, 8),
-            st.dim(&pad(&pol, 9)),
-            st.dim(&pad(&p.kind, 9)),
+            opt(format!("{}  ", st.dim(&pad(&pol, 9)))),
+            opt(format!("{}  ", st.dim(&pad(&p.kind, 9)))),
             st.dim(&rpad(&p.last_activity.map(age).unwrap_or_else(|| "–".into()), 9)),
             pad(&fit_mid(&tilde(Path::new(&p.path)), path_w), path_w),
-            st.dim(&p.stacks.join(" "))
+            if stacks_w > 0 { format!("  {}", st.dim(&fit(&p.stacks.join(" "), stacks_w))) } else { String::new() }
         );
+        println!("{}", line.trim_end());
     }
 }
 
@@ -387,18 +439,23 @@ pub fn projects(list: &[Project]) {
 pub fn worktrees(v: &serde_json::Value) {
     let st = Style::new();
     let w = width();
-    let path_w = w.saturating_sub(2 + 9 + 2 + 8 + 2 + 11 + 2 + 10 + 2 + 9 + 2).clamp(20, 60);
     let repos = v["repos"].as_array().cloned().unwrap_or_default();
+    let all = || repos.iter().flat_map(|r| r["worktrees"].as_array().cloned().unwrap_or_default());
+    let show_agent = w >= 100 && all().any(|wt| wt["agent"].as_str().is_some_and(|a| !a.is_empty()));
+    let id_w = all().map(|wt| cells(wt["item"]["id"].as_str().unwrap_or(""))).max().unwrap_or(0);
+    let branch_w = all().map(|wt| cells(wt["branch"].as_str().unwrap_or("(detached)"))).max().unwrap_or(10).clamp(10, if w >= 120 { 32 } else { 18 });
+    // Narrow terminals put the branch and id on a second line under the path.
+    let two_line = w < 100;
+    let fixed = 2 + 9 + 2 + 8 + 2 + 11 + 2 + if show_agent { 10 + 2 } else { 0 } + if two_line { 0 } else { 2 + branch_w + if id_w > 0 { 2 + id_w } else { 0 } };
+    let path_w = w.saturating_sub(fixed).clamp(12, 60);
     if repos.is_empty() {
         println!("{}", st.dim("No repos with extra worktrees found."));
         return;
     }
     for repo in repos {
-        println!(
-            "{}  {}",
-            st.bold(&tilde(Path::new(repo["repo"].as_str().unwrap_or("")))),
-            st.dim(&format!("{} across {} checkouts", bytes(repo["build_bytes"].as_u64().unwrap_or(0)), repo["checkouts"]))
-        );
+        let n = repo["checkouts"].as_u64().unwrap_or(0);
+        let tail = format!("{} across {}", bytes(repo["build_bytes"].as_u64().unwrap_or(0)), plural(n, "checkout"));
+        println!("{}  {}", st.bold(&fit_mid(&tilde(Path::new(repo["repo"].as_str().unwrap_or(""))), w.saturating_sub(cells(&tail) + 2).max(20))), st.dim(&tail));
         for wt in repo["worktrees"].as_array().into_iter().flatten() {
             let item = &wt["item"];
             let (state, styled): (&str, fn(&Style, &str) -> String) = match (wt["dirty"].as_bool(), wt["merged"].as_bool()) {
@@ -409,15 +466,34 @@ pub fn worktrees(v: &serde_json::Value) {
             };
             let tier = item["tier"].as_str().and_then(Tier::parse).map(|t| st.tier(t)).unwrap_or_else(|| st.dim(&pad("–", 11)));
             let path = std::path::Path::new(wt["path"].as_str().unwrap_or(""));
-            println!(
-                "  {}  {}  {}  {}  {}  {}",
+            if two_line {
+                let line = format!(
+                    "  {}  {}  {}  {}",
+                    st.bold(&rpad(&bytes(item["total_bytes"].as_u64().unwrap_or(wt["build_bytes"].as_u64().unwrap_or(0))), 9)),
+                    styled(&st, &pad(state, 8)),
+                    tier,
+                    fit_mid(&tilde(path), path_w)
+                );
+                println!("{}", line.trim_end());
+                let extra = [wt["branch"].as_str().unwrap_or("(detached)"), item["id"].as_str().unwrap_or(""), wt["agent"].as_str().unwrap_or("")]
+                    .iter()
+                    .filter(|s| !s.is_empty())
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join("  ");
+                println!("{}{}", " ".repeat(36), st.dim(&fit(&extra, w.saturating_sub(36))));
+                continue;
+            }
+            let line = format!(
+                "  {}  {}  {}  {}{}  {}",
                 st.bold(&rpad(&bytes(item["total_bytes"].as_u64().unwrap_or(wt["build_bytes"].as_u64().unwrap_or(0))), 9)),
                 styled(&st, &pad(state, 8)),
                 tier,
-                st.dim(&pad(wt["agent"].as_str().unwrap_or(""), 10)),
+                if show_agent { format!("{}  ", st.dim(&pad(wt["agent"].as_str().unwrap_or(""), 10))) } else { String::new() },
                 pad(&fit_mid(&tilde(path), path_w), path_w),
-                st.dim(&format!("{}  {}", wt["branch"].as_str().unwrap_or("(detached)"), item["id"].as_str().unwrap_or("")))
+                st.dim(&format!("{}  {}", pad(&fit(wt["branch"].as_str().unwrap_or("(detached)"), branch_w), branch_w), item["id"].as_str().unwrap_or("")))
             );
+            println!("{}", line.trim_end());
         }
     }
 }

@@ -178,8 +178,18 @@ pub fn is_tty(fd: i32) -> bool {
     unsafe { libc::isatty(fd) == 1 }
 }
 
+/// Color for human output: off when NO_COLOR is set to anything non-empty (no-color.org),
+/// for TERM=dumb, and when stdout is not a terminal unless CLICOLOR_FORCE asks for it.
 pub fn color_enabled() -> bool {
-    std::env::var_os("NO_COLOR").is_none() && is_tty(1)
+    if no_color() {
+        return false;
+    }
+    let forced = std::env::var("CLICOLOR_FORCE").is_ok_and(|v| !v.is_empty() && v != "0");
+    forced || is_tty(1)
+}
+
+pub fn no_color() -> bool {
+    std::env::var("NO_COLOR").is_ok_and(|v| !v.is_empty()) || std::env::var("TERM").is_ok_and(|t| t == "dumb")
 }
 
 /// Runs a command with a timeout and returns stdout on success.

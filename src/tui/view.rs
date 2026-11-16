@@ -946,7 +946,7 @@ fn detail(f: &mut Frame, area: Rect, app: &mut App, idx: usize, th: &Theme) {
     let r = popup(area, 80, 80, 40, 12);
     app.hits.modal = Some(r);
     f.render_widget(Clear, r);
-    let selected = app.item(idx).map_or(false, |i| app.selected.contains(&i.id));
+    let selected = app.item(idx).is_some_and(|i| app.selected.contains(&i.id));
     let block = panel(if selected { "Details · selected" } else { "Details" }, th, true);
     let inner = inset(block.inner(r), 1, 0);
     f.render_widget(block, r);

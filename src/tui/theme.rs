@@ -13,7 +13,7 @@ pub struct Theme {
 
 impl Theme {
     pub fn detect() -> Theme {
-        let color = std::env::var_os("NO_COLOR").is_none();
+        let color = !crate::util::no_color();
         // COLORFGBG="15;0" (fg;bg); a light background is 7 or 15.
         let light = std::env::var("COLORFGBG")
             .ok()

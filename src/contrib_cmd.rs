@@ -178,9 +178,15 @@ pub fn suggest(ctx: &Ctx, out: &Out, min: Option<String>, write: Option<String>,
         println!("Every folder over {} is explained by a rule.", bytes(min));
         return Ok(());
     }
-    println!("{} folder(s) over {} that no specific rule explains:\n", cands.len(), bytes(min));
+    let st = poo::render::Style::new();
+    let w = poo::render::width();
+    println!("{} over {} that no specific rule explains:\n", poo::util::plural(cands.len() as u64, "folder"), bytes(min));
     for c in &cands {
-        println!("{:>9}  {}\n           {}", bytes(c.bytes), c.path, c.why);
+        let path = poo::util::tilde(std::path::Path::new(&c.path));
+        println!("{}  {}", st.bold(&format!("{:>9}", bytes(c.bytes))), poo::tui::fmt::fit_mid(&path, w.saturating_sub(11)));
+        for l in poo::render::wrap(&c.why, w.saturating_sub(11), 0) {
+            println!("           {}", st.dim(&l));
+        }
     }
     match written {
         Some(f) => println!(
@@ -188,7 +194,12 @@ pub fn suggest(ctx: &Ctx, out: &Out, min: Option<String>, write: Option<String>,
             poo::util::tilde(&f),
             write.unwrap_or_default()
         ),
-        None => println!("\n`poo suggest --write <mod>` writes a draft rule for each into a mod you can test and share."),
+        None => {
+            println!();
+            for l in poo::render::wrap("`poo suggest --write <mod>` writes a draft rule for each into a mod you can test and share.", w, 0) {
+                println!("{}", l);
+            }
+        }
     }
     Ok(())
 }
