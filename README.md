@@ -7,7 +7,7 @@
 
 **Find and safely free the disk space your dev work eats.** A menu bar app and CLI for
 macOS, plus an MCP server and skill so your coding agent can do it for you. Free and open
-source.
+source. **[poo.morajabi.com](https://poo.morajabi.com)**
 
 <p align="center">
   <img src="docs/images/overview.png" alt="The Poo window: free space, and what is not in use grouped by what a clean costs you" width="100%">
