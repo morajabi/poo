@@ -88,15 +88,17 @@ struct OverviewView: View {
                 }
             }
             DiskBreakdownBar(breakdown: d, onReview: { nav.review(plan: "stale") })
-            // One row when it fits, otherwise two; labels never wrap mid-word.
+            // One row when it fits, otherwise two; labels never wrap mid-word. Empty segments
+            // are left out, like in the bar, except Free.
+            let shown = d.segments.filter { $0.bytes > 0 || $0.kind == .free }
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 18) {
-                    ForEach(d.segments) { s in legend(s) }
+                    ForEach(shown) { s in legend(s) }
                     Spacer(minLength: 0)
                 }
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 18) { ForEach(d.segments.prefix(3)) { s in legend(s) } }
-                    HStack(spacing: 18) { ForEach(d.segments.dropFirst(3)) { s in legend(s) } }
+                    HStack(spacing: 18) { ForEach(shown.prefix(3)) { s in legend(s) } }
+                    HStack(spacing: 18) { ForEach(shown.dropFirst(3)) { s in legend(s) } }
                 }
             }
         }

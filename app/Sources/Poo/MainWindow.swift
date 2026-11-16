@@ -196,28 +196,38 @@ struct ItemInspector: View {
 
 struct ProjectsView: View {
     @Environment(Store.self) private var store
+    /// The highlighted row: a project ("project:<path>") or one of its items (the item id).
+    @State private var highlighted: String?
+    @State private var expanded: Set<String> = []
 
     var body: some View {
         let projects = (store.report?.projects ?? []).sorted { $0.artifact_bytes > $1.artifact_bytes }
         let byProject = store.itemsByProject
-        List {
-            ForEach(projects) { p in
-                let items = byProject[p.path] ?? []
-                if items.isEmpty {
-                    ProjectRow(project: p, items: items)
-                } else {
-                    DisclosureGroup {
-                        ForEach(items) { i in
-                            ItemRow(item: i, subtitle: "\(i.group) · \(i.why)")
-                                .contextMenu { ItemContextMenu(item: i) }
-                        }
-                    } label: {
-                        ProjectRow(project: p, items: items)
-                    }
+        List(selection: $highlighted) {
+            // One flat list of rows with a chevron rather than DisclosureGroup, so every row
+            // takes the list selection and the arrow keys.
+            ForEach(rows(projects, byProject)) { row in
+                switch row {
+                case .project(let p, let items):
+                    projectRow(p, items)
+                        .tag(row.id as String?)
+                case .item(let i):
+                    ItemRow(item: i, subtitle: "\(i.group) · \(i.why)")
+                        .padding(.leading, 18)
+                        .tag(row.id as String?)
+                        .contextMenu { ItemContextMenu(item: i) }
                 }
             }
         }
         .listStyle(.inset)
+        // Arrows move, → and ← open and close a project, Space ticks an item: like Finder's list view.
+        .onKeyPress(.rightArrow) { expand(true, byProject) }
+        .onKeyPress(.leftArrow) { expand(false, byProject) }
+        .onKeyPress(.space) {
+            guard let id = highlighted, let i = store.item(id), i.isCleanable else { return .ignored }
+            store.toggle(i.id)
+            return .handled
+        }
         .overlay {
             if store.report == nil {
                 NoReportView()
@@ -232,8 +242,71 @@ struct ProjectsView: View {
             }
         }
         .navigationTitle("Projects")
+        .task {
+            // `--preview-inspect`: highlight and open the biggest project (screenshots).
+            if CommandLine.arguments.contains("--preview-inspect"), highlighted == nil, let p = projects.first {
+                highlighted = Self.tag(p)
+                expanded.insert(p.path)
+            }
+        }
         .toolbar { ToolbarItem { AskAgentButton(target: "projects", title: "Ask") } }
         .freshSubtitle(Fmt.count(projects.count, "project"))
+    }
+
+    private static func tag(_ p: Project) -> String { "project:" + p.path }
+
+    private enum Row: Identifiable {
+        case project(Project, [Item])
+        case item(Item)
+        var id: String {
+            switch self {
+            case .project(let p, _): ProjectsView.tag(p)
+            case .item(let i): i.id
+            }
+        }
+    }
+
+    private func rows(_ projects: [Project], _ byProject: [String: [Item]]) -> [Row] {
+        projects.flatMap { p -> [Row] in
+            let items = byProject[p.path] ?? []
+            return [.project(p, items)] + (expanded.contains(p.path) ? items.map { .item($0) } : [])
+        }
+    }
+
+    private func projectRow(_ p: Project, _ items: [Item]) -> some View {
+        let open = expanded.contains(p.path)
+        return HStack(spacing: 4) {
+            Button {
+                withAnimation(.snappy) { if open { expanded.remove(p.path) } else { expanded.insert(p.path) } }
+            } label: {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(open ? 90 : 0))
+                    .frame(width: 14, height: 14)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .opacity(items.isEmpty ? 0 : 1)
+            .disabled(items.isEmpty)
+            .accessibilityLabel(open ? "Collapse \(p.name)" : "Expand \(p.name)")
+            ProjectRow(project: p, items: items)
+        }
+    }
+
+    private func expand(_ open: Bool, _ byProject: [String: [Item]]) -> KeyPress.Result {
+        guard let id = highlighted else { return .ignored }
+        if id.hasPrefix("project:") {
+            let path = String(id.dropFirst("project:".count))
+            guard byProject[path]?.isEmpty == false, expanded.contains(path) != open else { return .ignored }
+            withAnimation(.snappy) { if open { expanded.insert(path) } else { expanded.remove(path) } }
+            return .handled
+        }
+        // ← on an item goes back to its project and closes it.
+        guard !open, let path = store.item(id)?.project, byProject[path] != nil else { return .ignored }
+        highlighted = "project:" + path
+        withAnimation(.snappy) { expanded.remove(path) }
+        return .handled
     }
 }
 

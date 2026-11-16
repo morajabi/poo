@@ -103,7 +103,7 @@ struct BucketSettings: View {
             Section {
                 ForEach(store.catalog?.buckets ?? []) { b in BucketRow(bucket: b) }
             } footer: {
-                Text("Rename with Return. Saved to config.toml.")
+                Text("Edit a name to rename the bucket. Changes are saved to config.toml.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("New bucket") {
@@ -129,14 +129,28 @@ struct BucketRow: View {
     var bucket: CatalogBucket
     @State private var name = ""
     @State private var color = Color.gray
+    @FocusState private var editing: Bool
+
+    /// Saves a changed name when you press Return or leave the field.
+    private func rename() {
+        let n = name.trimmingCharacters(in: .whitespaces)
+        guard !n.isEmpty else { name = bucket.name; return }
+        guard n != bucket.name else { return }
+        Task { await store.configure(["buckets", "set", bucket.id, "--name", n], rescan: true) }
+    }
 
     var body: some View {
         HStack {
             Image(systemName: bucket.symbol).foregroundStyle(Color(hex: bucket.color)).frame(width: 20)
             TextField("Name", text: $name, prompt: Text(bucket.id))
                 .labelsHidden()
-                .textFieldStyle(.plain)
-                .onSubmit { Task { await store.configure(["buckets", "set", bucket.id, "--name", name], rescan: true) } }
+                .textFieldStyle(.roundedBorder)
+                .frame(maxWidth: 240)
+                .focused($editing)
+                .onSubmit(rename)
+                .onChange(of: editing) { _, now in if !now { rename() } }
+                .accessibilityLabel("Name of \(bucket.name)")
+            Spacer(minLength: 8)
             ColorPicker("", selection: $color, supportsOpacity: false)
                 .labelsHidden()
                 .onChange(of: color) { _, c in
