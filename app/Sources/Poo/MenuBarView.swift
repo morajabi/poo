@@ -195,10 +195,9 @@ struct MenuBarView: View {
         HStack(spacing: 10) {
             Button("Open Poo") { open(.overview) }
                 .keyboardShortcut("o")
-            if updater.available != nil {
-                Button("Update") { Task { await updater.install() } }
-                    .help("Poo \(updater.available ?? "") is ready. Installs and relaunches.")
-            }
+            UpdateButton(compact: true)
+                .labelStyle(.titleAndIcon)
+                .tint(.accentColor)
             Spacer()
             refreshButton
             Menu {
@@ -213,6 +212,7 @@ struct MenuBarView: View {
                 Button("Elsewhere on This Mac") { open(.elsewhere) }
                 Button("Backups") { open(.backups) }
                 Divider()
+                Button("Report a Problem…") { ProblemReport.start() }
                 Button("Quit Poo") { NSApp.terminate(nil) }
                     .keyboardShortcut("q")
             } label: {

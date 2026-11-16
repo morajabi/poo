@@ -97,6 +97,7 @@ struct MainWindow: View {
             }
             .toolbar {
                 ToolbarItem(placement: .primaryAction) { RefreshToolbarButton() }
+                ToolbarItem(placement: .primaryAction) { UpdateButton() }
             }
         }
     }

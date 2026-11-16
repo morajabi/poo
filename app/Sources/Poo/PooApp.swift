@@ -46,6 +46,10 @@ struct PooApp: App {
                     .disabled(store.scanning)
                 Divider()
             }
+            CommandGroup(replacing: .help) {
+                Button("Poo on GitHub") { NSWorkspace.shared.open(URL(string: "https://github.com/\(ProblemReport.repo)#readme")!) }
+                Button("Report a Problem…") { ProblemReport.start() }
+            }
             CommandGroup(after: .textEditing) {
                 Button("Find") { AppDelegate.focusToolbarSearch() }
                     .keyboardShortcut("f")

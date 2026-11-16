@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import Observation
 import Sparkle
+import SwiftUI
 
 /// App updates through Sparkle 2. Releases publish an EdDSA-signed `appcast.xml`; the
 /// bundled CLI lives inside Poo.app, so updating the app updates the CLI with it.
@@ -11,8 +12,13 @@ import Sparkle
 @MainActor
 @Observable
 final class Updater: NSObject {
-    /// The version Sparkle found, while one is waiting to be installed.
-    var available: String?
+    /// A newer version, either downloaded and ready (installs and relaunches in a second)
+    /// or found while automatic downloads are off. Drives the small Update buttons.
+    var available: String? { ready ?? found }
+    /// Downloaded and waiting: Poo installs it on its own once idle, or now from the button.
+    private(set) var ready: String?
+    /// Found but not downloaded (automatic downloads off): the button opens Sparkle's flow.
+    private var found: String?
     var canCheck = false
     var status: String?
 
@@ -100,14 +106,14 @@ extension Updater: SPUUpdaterDelegate {
         let v = item.displayVersionString
         nonisolated(unsafe) let block = immediateInstallationBlock
         Task { @MainActor in
-            self.available = v
+            self.ready = v
             self.installWhenIdle(block)
         }
         return true
     }
 
     nonisolated func updaterDidNotFindUpdate(_ updater: SPUUpdater) {
-        Task { @MainActor in self.available = nil }
+        Task { @MainActor in self.found = nil }
     }
 
     nonisolated func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
@@ -117,23 +123,40 @@ extension Updater: SPUUpdaterDelegate {
 }
 
 extension Updater: SPUStandardUserDriverDelegate {
-    /// Poo is a menu bar app, so scheduled updates show as a gentle reminder
-    /// (the menu's Update button) instead of a window popping up over other work.
+    /// Updates are silent: Sparkle downloads in the background and Poo installs when idle.
+    /// Nothing pops up; a small Update button in the menu bar and window is the only sign.
     nonisolated var supportsGentleScheduledUpdateReminders: Bool { true }
 
     nonisolated func standardUserDriverShouldHandleShowingScheduledUpdate(_ update: SUAppcastItem, andInImmediateFocus immediateFocus: Bool) -> Bool {
-        immediateFocus
+        false
     }
 
     nonisolated func standardUserDriverWillHandleShowingUpdate(_ handleShowingUpdate: Bool, forUpdate update: SUAppcastItem, state: SPUUserUpdateState) {
         let v = update.displayVersionString
         Task { @MainActor in
-            self.available = v
+            self.found = v
             if handleShowingUpdate { NSApp.activate(ignoringOtherApps: true) }
         }
     }
 
     nonisolated func standardUserDriverWillFinishUpdateSession() {
-        Task { @MainActor in self.available = nil }
+        Task { @MainActor in self.found = nil }
+    }
+}
+
+/// The small "Update" button: installs a downloaded update now (Poo relaunches in a
+/// second), or opens Sparkle's flow when automatic downloads are off.
+struct UpdateButton: View {
+    @Environment(Updater.self) private var updater
+    var compact = false
+
+    var body: some View {
+        if let v = updater.available {
+            Button { Task { await updater.install() } } label: {
+                Label(compact ? "Update" : "Update to \(v)", systemImage: "arrow.down.circle.fill")
+            }
+            .help(updater.ready != nil ? "Poo \(v) is downloaded. Installs and relaunches in a second." : "Poo \(v) is available.")
+            .accessibilityLabel("Update to Poo \(v)")
+        }
     }
 }
