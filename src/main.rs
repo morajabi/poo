@@ -929,7 +929,18 @@ fn real_main(cli: Cli) -> R {
             opts.no_providers = no_providers;
             opts.full = full;
             if !root.is_empty() {
-                opts.roots = Some(root.iter().map(|r| poo::util::expand(r)).collect());
+                let mut roots = vec![];
+                for r in &root {
+                    let p = poo::util::expand(r);
+                    // Relative roots are relative to where poo runs.
+                    let p = if p.is_absolute() { p } else { std::env::current_dir().map(|d| d.join(&p)).unwrap_or(p) };
+                    if !p.is_dir() {
+                        let what = if p.exists() { "is not a folder" } else { "does not exist" };
+                        return Err(CliError::new("usage", 2, format!("--root {} {}", r, what)).hint("pass a folder to walk, e.g. --root ~/dev"));
+                    }
+                    roots.push(std::fs::canonicalize(&p).unwrap_or(p));
+                }
+                opts.roots = Some(roots);
             }
             let r = ops::report(&ctx, true, opts)?;
             clear_progress(&out);
