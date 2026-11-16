@@ -761,7 +761,7 @@ enum CommandLineTool {
         switch state {
         case .unavailable:
             alert.messageText = "This build has no bundled CLI"
-            alert.informativeText = "Install it with: curl -fsSL https://raw.githubusercontent.com/morajabi/poo/main/install.sh | sh"
+            alert.informativeText = "Install it with: curl -fsSL poo.morajabi.com/install | sh"
             return
         case .separate(let p):
             alert.messageText = "poo is already installed"
