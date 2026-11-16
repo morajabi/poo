@@ -4,8 +4,8 @@ import SwiftUI
 /// `[menubar]` in config.toml: what the status item and its panel show.
 /// Read through `poo config get menubar`, cached for an instant first frame.
 struct MenubarSettings: Codable, Equatable {
-    var title = "icon+free"
-    var warn = true
+    var title = "icon"
+    var warn = false
     var warn_below = "10%"
     var notify = false
     var sections = ["areas"]
