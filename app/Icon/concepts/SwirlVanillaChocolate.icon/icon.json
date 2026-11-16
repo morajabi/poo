@@ -1,0 +1,119 @@
+{
+  "fill": {
+    "linear-gradient": [
+      "srgb:0.55686,0.35686,0.23529,1.00000",
+      "srgb:0.35294,0.20392,0.12157,1.00000"
+    ]
+  },
+  "groups": [
+    {
+      "name": "Spark",
+      "layers": [
+        {
+          "name": "Spark",
+          "image-name": "spark.svg",
+          "fill-specializations": [
+            {
+              "value": {
+                "solid": "srgb:1.00000,1.00000,1.00000,1.00000"
+              }
+            },
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "srgb:1.00000,1.00000,1.00000,1.00000"
+              }
+            }
+          ]
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.3
+      },
+      "translucency": {
+        "enabled": false,
+        "value": 0.0
+      },
+      "specular": true
+    },
+    {
+      "name": "Face",
+      "layers": [
+        {
+          "name": "Face",
+          "image-name": "face.svg"
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.15
+      },
+      "translucency": {
+        "enabled": false,
+        "value": 0.0
+      },
+      "specular": true
+    },
+    {
+      "name": "Body",
+      "layers": [
+        {
+          "name": "Grooves",
+          "image-name": "grooves.svg",
+          "fill-specializations": [
+            {
+              "value": {
+                "solid": "srgb:0.78824,0.64706,0.47843,1.00000"
+              }
+            },
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "srgb:0.78824,0.64706,0.47843,1.00000"
+              }
+            }
+          ],
+          "opacity": 0.55
+        },
+        {
+          "name": "Body",
+          "image-name": "body.svg",
+          "fill-specializations": [
+            {
+              "value": {
+                "linear-gradient": [
+                  "srgb:1.00000,0.98431,0.95294,1.00000",
+                  "srgb:0.95294,0.88627,0.78431,1.00000"
+                ]
+              }
+            },
+            {
+              "appearance": "dark",
+              "value": {
+                "linear-gradient": [
+                  "srgb:1.00000,0.98431,0.95294,1.00000",
+                  "srgb:0.95294,0.88627,0.78431,1.00000"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.1
+      },
+      "specular": true
+    }
+  ],
+  "supported-platforms": {
+    "squares": [
+      "macOS"
+    ]
+  }
+}
