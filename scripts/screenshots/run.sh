@@ -87,6 +87,7 @@ shot menubar      "Poo Menu"     -                       1    -- --preview-menu
 shot menubar-dark "Poo Menu"     -                       1    -- --preview-menu --dark
 shot overview     "Overview"     "175 136 960 640"       1    -- --window
 shot browse       "Browse"       "120 136 1240 720"      1    -- --window --preview-section=browse --preview-inspect
+shot elsewhere    "Elsewhere on This Mac" "175 136 960 560" 1 -- --window --preview-section=elsewhere
 shot cleaning     "Poo Cleaning" -                       0.06 -- --preview-cleaning=freed
 shot freed        "Poo Cleaning" -                       3    -- --preview-cleaning=freed
 kill $CAF 2>/dev/null || true
@@ -94,5 +95,5 @@ kill $CAF 2>/dev/null || true
 mkdir -p "$OUT"
 "$W/compose" "$W/raw-menubar.png" "$OUT/menubar.png" light menubar 56 "86 GB"
 "$W/compose" "$W/raw-menubar-dark.png" "$OUT/menubar-dark.png" dark menubar 56 "86 GB"
-for n in overview browse cleaning freed; do "$W/compose" "$W/raw-$n.png" "$OUT/$n.png" light; done
+for n in overview browse elsewhere cleaning freed; do "$W/compose" "$W/raw-$n.png" "$OUT/$n.png" light; done
 ls -l "$OUT"

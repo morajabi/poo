@@ -25,7 +25,7 @@ It also covers the usual cleaner territory (app, browser and system caches, logs
 installers, Docker, Homebrew) with safety rules learned from tools like Mole.
 
 <p align="center">
-  <img src="docs/images/menubar.png" alt="The Poo menu bar panel: free space, what is safe to free by area, one Review &amp; clean button" width="49%">
+  <img src="docs/images/menubar.png" alt="The Poo menu bar panel: free space, one Clean button, the areas behind it on demand" width="49%">
   <img src="docs/images/overview.png" alt="The Poo window: disk breakdown, not-in-use space grouped by what a clean costs you" width="49%">
 </p>
 
@@ -33,6 +33,7 @@ installers, Docker, Homebrew) with safety rules learned from tools like Mole.
 |---|---|
 | ![Browse every item, with why it is there and what cleaning it costs](docs/images/browse.png) | ![Cleaning progress with a running total and Stop](docs/images/cleaning.png) |
 | ![After a clean: freed space and what was backed up](docs/images/freed.png) | ![The menu bar panel in dark mode](docs/images/menubar-dark.png) |
+| ![Elsewhere on This Mac: snapshots, purgeable space and device backups Poo explains but leaves alone](docs/images/elsewhere.png) | |
 
 The CLI has the same picture, as an interactive terminal UI (`poo`) and as plain output
 for scripts and agents (JSON when piped):
@@ -222,7 +223,9 @@ about 635 rules, 96 project stacks and 12 agent worktree homes. It covers
   Cline and friends, Ollama, LM Studio and other local model stores.
 - **macOS:** app, browser and Electron caches, logs, crash reports, installers, app
   leftovers and the Trash. Locations macOS protects (browser profiles, Safari, Mail,
-  device backups) are read only when poo has Full Disk Access.
+  device backups) are read only when poo has Full Disk Access. Poo never asks macOS
+  folder by folder: without Full Disk Access it skips folders that would show a privacy
+  prompt (Downloads, other apps' data, iCloud Drive) and says so once.
 
 Generic folder names (`dist`, `build`, `out`, `vendor`, `site`) only count when git
 ignores them. Buckets, plans, stacks, worktree homes and guards are mod data too. Add rules,
@@ -298,8 +301,7 @@ gh secret set SPARKLE_PRIVATE_KEY < sparkle-private-key.txt
 rm sparkle-private-key.txt
 ```
 
-The private key lives in your login keychain ("Private key for signing Sparkle
-updates"); back it up, because losing it means shipped apps can only update again
+The private key lives in your login keychain; back it up, because losing it means shipped apps can only update again
 through a Developer ID signed build. The public key does not need to be stored
 anywhere: the release derives it from the secret (`scripts/sparkle.sh pubkey`).
 
