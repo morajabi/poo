@@ -1,5 +1,5 @@
 #!/bin/sh
-# poo installer: curl -fsSL https://raw.githubusercontent.com/morajabi/poo/main/install.sh | sh
+# poo installer: curl -fsSL poo.morajabi.com/install | sh
 #   POO_INSTALL_DIR   where the CLI goes (default ~/.local/bin)
 #   POO_APP=1         also install Poo.app (menu bar + window) into /Applications (or ~/Applications)
 #   POO_VERSION       not supported yet; installs the latest release

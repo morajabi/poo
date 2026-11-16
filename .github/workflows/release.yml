@@ -252,7 +252,7 @@ jobs:
 
           **Poo.app** (macOS 15+, universal): [Poo.app.zip](${base}/Poo.app.zip). ${SIGNING}. Updates itself. To use the CLI from Terminal too: Poo menu › Install Command-Line Tool.
 
-          **CLI only**: \`curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/install.sh | sh\`, or a tarball below. Checksums in \`SHA256SUMS\`.
+          **CLI only**: \`curl -fsSL poo.morajabi.com/install | sh\`, or a tarball below. Checksums in \`SHA256SUMS\`.
 
           ### Changes
           ${changes:-- Maintenance}

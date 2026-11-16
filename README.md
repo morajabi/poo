@@ -26,7 +26,7 @@ and notarized by Apple.
 **CLI:**
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/morajabi/poo/main/install.sh | sh
+curl -fsSL poo.morajabi.com/install | sh
 ```
 
 Installs `poo` into `~/.local/bin` (sha256-verified). Add `POO_APP=1` before `sh` to
