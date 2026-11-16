@@ -269,7 +269,7 @@ pub fn restore(id: &str) -> Result<(String, u64)> {
                 std::fs::copy(&f, &dest)?;
                 n += 1;
             }
-            Ok((format!("restored {} into {}", crate::util::plural(n as u64, "file"), tilde(&to)), n))
+            Ok((format!("restored {} into {}", crate::util::plural(n, "file"), tilde(&to)), n))
         }
         "stash" => Ok((
             format!(

@@ -183,7 +183,7 @@ pub fn freed_total(items: &[&Item]) -> u64 {
     let paths: std::collections::HashSet<&str> = items.iter().map(|i| i.path.as_str()).collect();
     items
         .iter()
-        .filter(|i| !std::path::Path::new(&i.path).ancestors().skip(1).any(|a| a.to_str().map_or(false, |a| paths.contains(a))))
+        .filter(|i| !std::path::Path::new(&i.path).ancestors().skip(1).any(|a| a.to_str().is_some_and(|a| paths.contains(a))))
         .map(|i| i.total_bytes)
         .sum()
 }

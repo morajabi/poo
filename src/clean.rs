@@ -792,8 +792,8 @@ pub fn admit_static(item: &Item, cat: &Catalog, mode: RiskLevel, max_tier: Optio
 /// Why an item cannot be cleaned in this mode, or the warnings accepted to clean it.
 pub fn admit(item: &Item, cat: &Catalog, opts: &CleanOptions, procs_list: &[Proc]) -> Result<Vec<String>, String> {
     // Snapshots are backups: never removed by a schedule or a hook, only when someone asks.
-    let snapshot_cmd = item.action.command.as_ref().map_or(false, |c| c.iter().any(|a| a == "deletelocalsnapshots"));
-    let report_only = item.report_only || cat.rule(&item.rule).map_or(false, |r| r.report_only);
+    let snapshot_cmd = item.action.command.as_ref().is_some_and(|c| c.iter().any(|a| a == "deletelocalsnapshots"));
+    let report_only = item.report_only || cat.rule(&item.rule).is_some_and(|r| r.report_only);
     if snapshot_cmd && !report_only && (opts.actor.starts_with("schedule") || opts.actor.starts_with("hook")) {
         return Err("Time Machine snapshots are only removed when you ask, never on a schedule".into());
     }

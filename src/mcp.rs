@@ -339,16 +339,16 @@ fn catalog(ctx: &Ctx, a: &Value) -> Value {
     let rules = v["rules"].as_array().cloned().unwrap_or_default();
     let (bucket, tag, stack, id, query) = (s(a, "bucket"), s(a, "tag"), s(a, "stack"), s(a, "id"), s(a, "query").map(|q| q.to_lowercase()));
     if bucket.is_some() || tag.is_some() || stack.is_some() || id.is_some() || query.is_some() {
-        let has = |r: &Value, k: &str, x: &str| r[k].as_array().map_or(false, |l| l.iter().any(|t| t == x));
+        let has = |r: &Value, k: &str, x: &str| r[k].as_array().is_some_and(|l| l.iter().any(|t| t == x));
         let keep: Vec<Value> = rules
             .into_iter()
-            .filter(|r| bucket.as_deref().map_or(true, |b| r["bucket"] == b))
-            .filter(|r| tag.as_deref().map_or(true, |t| has(r, "tags", t)))
-            .filter(|r| stack.as_deref().map_or(true, |x| has(r, "stacks", x)))
-            .filter(|r| id.as_deref().map_or(true, |i| r["id"] == i))
+            .filter(|r| bucket.as_deref().is_none_or(|b| r["bucket"] == b))
+            .filter(|r| tag.as_deref().is_none_or(|t| has(r, "tags", t)))
+            .filter(|r| stack.as_deref().is_none_or(|x| has(r, "stacks", x)))
+            .filter(|r| id.as_deref().is_none_or(|i| r["id"] == i))
             .filter(|r| {
-                query.as_deref().map_or(true, |q| {
-                    ["id", "name", "description"].iter().any(|k| r[*k].as_str().map_or(false, |t| t.to_lowercase().contains(q)))
+                query.as_deref().is_none_or(|q| {
+                    ["id", "name", "description"].iter().any(|k| r[*k].as_str().is_some_and(|t| t.to_lowercase().contains(q)))
                 })
             })
             .collect();

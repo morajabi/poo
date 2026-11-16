@@ -1744,7 +1744,7 @@ fn print_doctor(ctx: &Ctx, roots: &[std::path::PathBuf], detected: bool, integra
             (true, true, false) => Some((false, "skill outdated")),
             (true, false, _) => Some((false, "no skill")),
         };
-        let mcp = t.mcp_config.is_some().then(|| if t.mcp_registered { (true, "MCP installed") } else { (false, "no MCP server") });
+        let mcp = t.mcp_config.is_some().then_some(if t.mcp_registered { (true, "MCP installed") } else { (false, "no MCP server") });
         let parts: Vec<(bool, &str)> = skill.into_iter().chain(mcp).collect();
         let ok = parts.iter().all(|(ok, _)| *ok);
         let text = parts.iter().map(|(_, s)| *s).collect::<Vec<_>>().join(", ");
