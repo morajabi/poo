@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Poo — free the space your dev tools leave behind</title>
+<meta name="description" content="Poo finds build output, DerivedData, caches, simulators and agent worktrees nothing is using, and frees the space safely. Free macOS menu bar app, CLI and MCP server.">
+<meta property="og:title" content="Poo — free the space your dev tools leave behind">
+<meta property="og:description" content="Build output, DerivedData, caches, simulators and agent worktrees. Free macOS menu bar app, CLI and MCP server.">
+<meta property="og:image" content="https://poo.morajabi.com/images/og.png">
+<meta property="og:url" content="https://poo.morajabi.com/">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="images/icon.png">
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1d1d1f;
+    --muted: #6e6e73;
+    --faint: #a1a1a6;
+    --line: rgba(0, 0, 0, 0.08);
+    --code: #f5f5f7;
+    --accent: #1f9d55;
+    --accent-hover: #198a4a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f0f10;
+      --fg: #f5f5f7;
+      --muted: #a1a1a6;
+      --faint: #6e6e73;
+      --line: rgba(255, 255, 255, 0.1);
+      --code: #1c1c1e;
+      --accent: #2fb866;
+      --accent-hover: #3cc874;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 16px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 0 20px; }
+  header { display: flex; align-items: center; justify-content: space-between; height: 64px; }
+  .brand { display: flex; align-items: center; gap: 8px; font-weight: 600; text-decoration: none; }
+  .brand img { width: 26px; height: 26px; }
+  nav a { color: var(--muted); text-decoration: none; font-size: 14px; margin-left: 18px; }
+  nav a:hover { color: var(--fg); }
+  .hero { text-align: center; padding: 56px 0 28px; }
+  h1 {
+    font-size: clamp(32px, 5.4vw, 52px);
+    line-height: 1.08;
+    letter-spacing: -0.025em;
+    font-weight: 700;
+    margin: 0 auto 14px;
+    max-width: 14em;
+  }
+  .lede { color: var(--muted); font-size: clamp(17px, 2.2vw, 20px); max-width: 32em; margin: 0 auto 28px; }
+  .download {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--accent); color: #fff; text-decoration: none;
+    font-weight: 600; font-size: 16px; padding: 12px 22px; border-radius: 999px;
+    transition: background 0.15s;
+  }
+  .download:hover { background: var(--accent-hover); }
+  .download svg { width: 16px; height: 16px; }
+  .meta { color: var(--faint); font-size: 13px; margin: 12px 0 0; }
+  .meta span + span::before { content: "·"; margin: 0 7px; }
+  .meta span:empty { display: none; }
+  .cli {
+    display: flex; align-items: center; gap: 10px;
+    max-width: 640px; margin: 26px auto 0; padding: 10px 10px 10px 16px;
+    background: var(--code); border: 1px solid var(--line); border-radius: 12px;
+    font: 13.5px/1.4 ui-monospace, "SF Mono", Menlo, monospace; text-align: left;
+  }
+  .cli code { flex: 1; overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
+  .cli code::-webkit-scrollbar { display: none; }
+  .cli .p { color: var(--faint); user-select: none; margin-right: 8px; }
+  .copy {
+    flex: none; border: 1px solid var(--line); background: var(--bg); color: var(--muted);
+    font: 500 12px -apple-system, sans-serif; padding: 6px 10px; border-radius: 8px; cursor: pointer;
+  }
+  .copy:hover { color: var(--fg); }
+  .shot { margin: 48px auto 0; }
+  .shot img { display: block; width: 100%; height: auto; border-radius: 14px; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
+  .points { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin: 64px 0 0; }
+  .points h3 { font-size: 15px; margin: 0 0 4px; }
+  .points p { margin: 0; color: var(--muted); font-size: 14px; }
+  footer {
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+    color: var(--faint); font-size: 13px; padding: 56px 0 40px; margin-top: 64px; border-top: 1px solid var(--line);
+  }
+  footer a { color: var(--muted); text-decoration: none; }
+  footer a:hover { color: var(--fg); }
+  @media (max-width: 680px) {
+    .hero { padding-top: 32px; }
+    .pair, .points { grid-template-columns: 1fr; }
+    .points { gap: 18px; margin-top: 44px; }
+    nav a.optional { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <a class="brand" href="./"><img src="images/icon.png" alt="">Poo</a>
+    <nav>
+      <a class="optional" href="https://github.com/morajabi/poo#readme">Docs</a>
+      <a href="https://github.com/morajabi/poo">GitHub</a>
+    </nav>
+  </header>
+
+  <section class="hero">
+    <h1>Free the space your dev tools leave behind</h1>
+    <p class="lede">Build output, DerivedData, caches, simulators and agent worktrees. Poo finds what nothing is using and frees it, safely.</p>
+    <a class="download" href="https://github.com/morajabi/poo/releases/latest/download/Poo.app.zip">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v9M4 7.5 8 11.5 12 7.5M3 14h10"/></svg>
+      Download for macOS
+    </a>
+    <p class="meta"><span>macOS 15+</span><span>Apple silicon and Intel</span><span>Free and open source</span><span id="version"></span></p>
+    <div class="cli" aria-label="Install the command-line tool">
+      <code><span class="p">$</span>curl -fsSL poo.morajabi.com/install | sh</code>
+      <button class="copy" type="button" data-copy="curl -fsSL poo.morajabi.com/install | sh">Copy</button>
+    </div>
+  </section>
+
+  <div class="shot">
+    <img src="images/menubar-expanded.png" width="1520" height="994" alt="The Poo menu bar panel: free space, one Clean button and the areas behind it">
+  </div>
+  <div class="pair">
+    <img src="images/overview.png" width="2080" height="1440" alt="The Poo window: what is not in use, grouped by what a clean costs" loading="lazy">
+    <img src="images/cli-overview.png" alt="The poo terminal UI" loading="lazy">
+  </div>
+
+  <section class="points">
+    <div><h3>Nothing goes without your review</h3><p>Anything running, recent or uncommitted stays. Worktrees are backed up first.</p></div>
+    <div><h3>Knows your stack</h3><p>About 650 rules for Xcode, Rust, Node, Python, Docker, AI tools and more.</p></div>
+    <div><h3>Works with your agent</h3><p>An MCP server and skill for Claude Code, Codex, Cursor and others.</p></div>
+  </section>
+
+  <footer>
+    <span>Poo · MIT licensed · Updates itself</span>
+    <span><a href="https://github.com/morajabi/poo/releases">Releases</a> &nbsp; <a href="https://github.com/morajabi/poo/issues">Feedback</a></span>
+  </footer>
+</div>
+<script>
+  document.querySelectorAll(".copy").forEach(function (b) {
+    b.addEventListener("click", function () {
+      navigator.clipboard.writeText(b.dataset.copy).then(function () {
+        b.textContent = "Copied";
+        setTimeout(function () { b.textContent = "Copy"; }, 1500);
+      });
+    });
+  });
+  fetch("https://api.github.com/repos/morajabi/poo/releases/latest")
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (j) { if (j && j.tag_name) document.getElementById("version").textContent = j.tag_name; })
+    .catch(function () {});
+</script>
+</body>
+</html>
