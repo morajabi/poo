@@ -47,14 +47,14 @@ jobs:
           SHA: ${{ steps.v.outputs.sha }}
         run: |
           set -eu
-          for i in $(seq 1 80); do
-            state="$(gh run list -R "$GITHUB_REPOSITORY" -w ci -c "$SHA" -L 1 --json status,conclusion -q '.[0] | "\(.status) \(.conclusion)"' || true)"
-            case "$state" in
-              "completed success") echo "ci passed for $SHA"; exit 0 ;;
-              completed*) echo "::error::ci did not pass for $SHA ($state)"; exit 1 ;;
-              "") echo "no ci run for $SHA yet" ;;
-              *) echo "ci: $state" ;;
-            esac
+          # Any green ci run on this commit counts (main's, or the tag's own). Runs on main
+          # can be cancelled by newer pushes, so only fail when nothing passed and nothing is left running.
+          for i in $(seq 1 90); do
+            runs="$(gh run list -R "$GITHUB_REPOSITORY" -w ci -c "$SHA" -L 20 --json status,conclusion -q '.[] | "\(.status)/\(.conclusion)"' || true)"
+            if printf '%s\n' "$runs" | grep -qx 'completed/success'; then echo "ci passed for $SHA"; exit 0; fi
+            if printf '%s\n' "$runs" | grep -qv '^completed/'; then echo "ci still running for $SHA"
+            elif [ -n "$runs" ]; then echo "::error::no passing ci run for $SHA: $(echo $runs)"; exit 1
+            else echo "no ci run for $SHA yet"; fi
             sleep 30
           done
           echo "::error::timed out waiting for ci on $SHA"; exit 1
@@ -261,16 +261,23 @@ jobs:
           (cd artifacts && sha256sum *.tar.gz Poo.app.zip latest.json $(ls appcast.xml 2>/dev/null) > SHA256SUMS)
           cat artifacts/latest.json artifacts/SHA256SUMS
           [ -f artifacts/appcast.xml ] || echo "::warning::no appcast.xml in this release (SPARKLE_PRIVATE_KEY missing)"
-      - uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ needs.version.outputs.version }}
-          target_commitish: ${{ needs.version.outputs.sha }}
-          name: poo ${{ needs.version.outputs.version }}
-          body_path: notes.md
-          make_latest: true
-          files: |
-            artifacts/*.tar.gz
-            artifacts/Poo.app.zip
-            artifacts/latest.json
-            artifacts/appcast.xml
-            artifacts/SHA256SUMS
+      - name: publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v${{ needs.version.outputs.version }}
+          SHA: ${{ needs.version.outputs.sha }}
+        run: |
+          set -eu
+          files="$(ls artifacts/*.tar.gz artifacts/Poo.app.zip artifacts/latest.json artifacts/SHA256SUMS $(ls artifacts/appcast.xml 2>/dev/null))"
+          # The releases API sometimes answers 403 for a moment; retry before giving up.
+          for i in 1 2 3 4 5; do
+            if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              gh release upload "$TAG" $files -R "$GITHUB_REPOSITORY" --clobber &&
+                gh release edit "$TAG" -R "$GITHUB_REPOSITORY" --title "poo ${TAG#v}" --notes-file notes.md --latest && exit 0
+            else
+              gh release create "$TAG" $files -R "$GITHUB_REPOSITORY" --target "$SHA" --title "poo ${TAG#v}" --notes-file notes.md --latest && exit 0
+            fi
+            echo "attempt $i failed; retrying in $((i * 20)) s"
+            sleep $((i * 20))
+          done
+          echo "::error::could not publish $TAG"; exit 1

@@ -1,6 +1,7 @@
 name: ci
 
-# A green run of this workflow on main triggers release.yml.
+# Runs on main, on pull requests and on release tags. release.yml waits for a green run on
+# the tagged commit; the tag's own run is never cancelled by later pushes to main.
 #
 # macOS runners are scarce: a job on the macos-15 arm64 pool once sat unassigned for 15
 # minutes until GitHub gave up ("not acquired by Runner of type hosted"), which cancelled
@@ -10,6 +11,7 @@ name: ci
 on:
   push:
     branches: [main]
+    tags: ['v*.*.*']
   pull_request:
 
 concurrency:
