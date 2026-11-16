@@ -1,6 +1,6 @@
 $ poo --text
 poo  92.5 GB free of 494 GB  █████████████···  81% used   updated just now
-     other 156 GB  ·  dev in use 243 GB  ·  not in use 2.62 GB
+     other 156 GB  ·  dev in use 246 GB  ·  not in use 238 MB
      found: bazel · bun · claude · cmake · codex · docker · fastlane · go · homebrew · nix · node · pnpm · python · rub…
 
 Areas
@@ -13,9 +13,9 @@ Areas
   AI tools & models        5.34 GB  █·······················           –      44
   Apps & system caches     1.83 GB  ▍·······················           –      14
   Logs, temp & trash       1.27 MB  ························     1.27 MB       1
-  Elsewhere on this Mac    2.89 GB  ▌·······················     2.39 GB       4
   Unclassified             2.47 GB  ▌·······················           –       9
                             246 GB
+  Elsewhere on this Mac    2.89 GB  ·  manage in their apps: Use the app's Sound Library > Relocate or Remove Sound Lib…
 
 Plans
   quick           1.27 MB    1 items  Logs, temp files, crash reports and broken simulators. Nothing to rebuild.
@@ -33,6 +33,6 @@ id                 size              status            used  name               
 af000c54be10     118 MB  ██████████  unused          4h ago  review-search/atlas                   worktrees / Worktrees
 a78b6b0c75c4     114 MB  █████████▋  unused          2h ago  harbor/apple/App/.build               build / Swift
 fc729110ed0b    3.83 MB  ▍·········  idle           10d ago  ~/Library/Caches/com.apple.dt.Xcode   xcode / Xcode caches
-7cb800dfea91    1.27 MB  ▏·········  junk           16m ago  -Users-you                            junk / Logs
+7cb800dfea91    1.27 MB  ▏·········  junk           42m ago  -Users-you                            junk / Logs
 ec7524183965     721 KB  ··········  unused          4h ago  bump-sync                             worktrees / Worktrees
 5 items · 238 MB · 238 MB not in use
