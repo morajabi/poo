@@ -5,7 +5,7 @@ use poo::ops::{self, BucketEdit, Ctx};
 use poo::plan::{Admission, Filter};
 use poo::render;
 use poo::scan::{Progress, ScanOptions};
-use poo::util::{bytes, is_tty, parse_bytes, tilde};
+use poo::util::{bytes, is_tty, parse_bytes, plural, tilde};
 use serde_json::{json, Value};
 use std::io::Write;
 use std::process::ExitCode;
@@ -802,7 +802,7 @@ fn run_clean_p(ctx: &Ctx, out: &Out, report: &mut poo::model::Report, items: Vec
     };
     if !dry && !yes {
         if !is_tty(0) || out.json {
-            return Err(CliError::new("needs_approval", 5, format!("cleaning {} items ({}) needs confirmation", items.len(), bytes(total)))
+            return Err(CliError::new("needs_approval", 5, format!("cleaning {} ({}) needs confirmation", plural(items.len() as u64, "item"), bytes(total)))
                 .hint("show the items to the user, then pass --yes (or use --dry-run to preview)"));
         }
         let refs: Vec<&poo::model::Item> = items.iter().collect();
@@ -825,7 +825,7 @@ fn run_clean_p(ctx: &Ctx, out: &Out, report: &mut poo::model::Report, items: Vec
             }
         }
         if mode == RiskLevel::Danger {
-            eprint!("Including protected items: {} item(s) carry warnings above. Type \"dangerous\" to clean {}: ", risky, bytes(total));
+            eprint!("Including protected items: {} {} warnings above. Type \"dangerous\" to clean {}: ", plural(risky as u64, "item"), if risky == 1 { "carries" } else { "carry" }, bytes(total));
             let _ = std::io::stderr().flush();
             let mut s = String::new();
             let _ = std::io::stdin().read_line(&mut s);
@@ -833,7 +833,7 @@ fn run_clean_p(ctx: &Ctx, out: &Out, report: &mut poo::model::Report, items: Vec
                 println!("Cancelled.");
                 return Ok(());
             }
-        } else if !confirm(&format!("Clean {} items, {}{}?", items.len(), bytes(total), if risky > 0 { format!(" ({} with warnings)", risky) } else { String::new() })) {
+        } else if !confirm(&format!("Clean {}, {}{}?", plural(items.len() as u64, "item"), bytes(total), if risky > 0 { format!(" ({} with warnings)", risky) } else { String::new() })) {
             println!("Cancelled.");
             return Ok(());
         }
@@ -880,7 +880,7 @@ fn run_clean_p(ctx: &Ctx, out: &Out, report: &mut poo::model::Report, items: Vec
         }
     }
     if res.failed > 0 && !dry {
-        return Err(CliError::new("partial", 6, format!("{} item(s) failed", res.failed)));
+        return Err(CliError::new("partial", 6, format!("{} failed", plural(res.failed as u64, "item"))));
     }
     Ok(())
 }
@@ -1740,7 +1740,7 @@ fn schedule_summary(ctx: &mut Ctx, s: &poo::config::Schedule) -> String {
         Ok(v) => {
             let w = &v["would_clean_now"];
             let names: Vec<&str> = w["items"].as_array().map(|a| a.iter().take(8).filter_map(|i| i["name"].as_str()).collect()).unwrap_or_default();
-            format!("schedule `{}` runs plan `{}` {}; right now it would clean {} in {} items ({}). Scheduled runs skip items with risks", s.id, s.plan, when, bytes(w["bytes"].as_u64().unwrap_or(0)), w["count"], names.join(", "))
+            format!("schedule `{}` runs plan `{}` {}; right now it would clean {} in {} ({}). Scheduled runs skip items with risks", s.id, s.plan, when, bytes(w["bytes"].as_u64().unwrap_or(0)), plural(w["count"].as_u64().unwrap_or(0), "item"), names.join(", "))
         }
         Err(_) => format!("schedule `{}` runs plan `{}` {}", s.id, s.plan, when),
     }

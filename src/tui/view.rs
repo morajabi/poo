@@ -274,7 +274,7 @@ fn overview(f: &mut Frame, area: Rect, app: &mut App, th: &Theme) {
     // Freshness.
     let mut l = vec![
         Span::styled(format!("Updated {}", age(r.scanned_at)), th.dim()),
-        Span::styled(format!("  ·  {} items in {} projects", thousands(r.items.len() as u64), r.projects.len()), th.dim()),
+        Span::styled(format!("  ·  {} item{} in {}", thousands(r.items.len() as u64), if r.items.len() == 1 { "" } else { "s" }, crate::util::plural(r.projects.len() as u64, "project")), th.dim()),
     ];
     if app.live {
         l.push(Span::styled("  ·  following file changes", th.dim()));
@@ -562,7 +562,7 @@ fn browse_detail(f: &mut Frame, area: Rect, app: &App, row: Option<BRow>, th: &T
                 lines.push(Line::from(Span::styled(b.description.clone(), th.dim())));
             }
             lines.push(Line::raw(""));
-            lines.push(kv("size", Span::raw(format!("{} in {} items", bytes(b.bytes), b.count)), th));
+            lines.push(kv("size", Span::raw(format!("{} in {}", bytes(b.bytes), crate::util::plural(b.count as u64, "item"))), th));
             lines.push(Line::raw(""));
             lines.extend(tier_breakdown(&b.tiers, w, th));
             lines.push(Line::raw(""));
@@ -577,7 +577,7 @@ fn browse_detail(f: &mut Frame, area: Rect, app: &App, row: Option<BRow>, th: &T
             let items: Vec<&Item> = r.items.iter().filter(|i| &i.bucket == bucket && &i.group == group).collect();
             lines.push(Line::from(Span::styled(group.clone(), th.bold())));
             lines.push(Line::raw(""));
-            lines.push(kv("size", Span::raw(format!("{} in {} items", bytes(row.bytes), items.len())), th));
+            lines.push(kv("size", Span::raw(format!("{} in {}", bytes(row.bytes), crate::util::plural(items.len() as u64, "item"))), th));
             if let Some(rule) = items.first().and_then(|i| app.ctx.cat.rule(&i.rule)) {
                 if !rule.description.is_empty() {
                     lines.push(Line::raw(""));
@@ -749,7 +749,7 @@ fn projects(f: &mut Frame, area: Rect, app: &mut App, th: &Theme) {
             kv("kind", Span::raw(p.kind.clone()), th),
             kv("status", Span::styled(p.status.clone(), status_style(&p.status, th)), th),
             kv("policy", Span::raw(format!("{:?}", p.policy).to_lowercase()), th),
-            kv("build", Span::raw(format!("{} in {} items", bytes(p.artifact_bytes), p.item_count)), th),
+            kv("build", Span::raw(format!("{} in {}", bytes(p.artifact_bytes), crate::util::plural(p.item_count as u64, "item"))), th),
         ];
         if let Some(b) = &p.branch {
             lines.push(kv("branch", Span::raw(b.clone()), th));
@@ -856,7 +856,7 @@ fn plans(f: &mut Frame, area: Rect, app: &mut App, th: &Theme) {
     f.render_widget(block, d);
     let w = inner.width as usize;
     let mut lines = vec![Line::from(Span::styled(p.description.clone(), th.dim())), Line::raw("")];
-    lines.push(Line::from(vec![Span::styled(bytes(p.bytes), th.good().add_modifier(Modifier::BOLD)), Span::styled(format!(" in {} items", p.count), th.dim())]));
+    lines.push(Line::from(vec![Span::styled(bytes(p.bytes), th.good().add_modifier(Modifier::BOLD)), Span::styled(format!(" in {}", crate::util::plural(p.count as u64, "item")), th.dim())]));
     if let Some(t) = p.target_bytes {
         lines.push(Line::from(Span::styled(format!("aims to free {}", bytes(t)), th.dim())));
     }
@@ -992,7 +992,7 @@ fn review(f: &mut Frame, area: Rect, app: &mut App, th: &Theme) {
     if rv.confirming {
         let verb = if rv.dry { "Preview cleaning" } else if rv.trash { "Move to Trash" } else { "Clean" };
         fl.push(Line::from(vec![
-            Span::styled(format!("{} {} items, {}?  ", verb, n, bytes(b)), th.bold()),
+            Span::styled(format!("{} {}, {}?  ", verb, crate::util::plural(n as u64, "item"), bytes(b)), th.bold()),
             Span::styled("y", th.accent()),
             Span::styled(" yes   ", th.dim()),
             Span::styled("n", th.accent()),
@@ -1036,7 +1036,7 @@ fn cleaning(f: &mut Frame, area: Rect, app: &mut App, th: &Theme) {
     lines.push(Line::from(b));
     lines.push(Line::from(vec![
         Span::styled(format!("{} ", bytes(freed)), th.good().add_modifier(Modifier::BOLD)),
-        Span::styled(format!("of {}  ·  {} of {} items  ·  {}s", bytes(c.total_bytes), done, c.total, c.started.elapsed().as_secs()), th.dim()),
+        Span::styled(format!("of {}  ·  {} of {}  ·  {}s", bytes(c.total_bytes), done, crate::util::plural(c.total as u64, "item"), c.started.elapsed().as_secs()), th.dim()),
     ]));
     lines.push(Line::raw(""));
     lines.push(Line::from(Span::styled(fit(&cur, w), th.text())));

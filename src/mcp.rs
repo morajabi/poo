@@ -182,7 +182,7 @@ fn call(ctx: &mut Ctx, name: &str, a: &Value) -> Result<Value> {
             if !dry && !needs.is_empty() && !approved {
                 return Ok(json!({
                     "status": "needs_approval",
-                    "message": format!("{} item(s) are above the autonomy tier `{}`. Show them to the user; call again with approved_by_user: true only after they approve.", needs.len(), limit.as_str()),
+                    "message": format!("{} above the autonomy tier `{}`. Show them to the user; call again with approved_by_user: true only after they approve.", if needs.len() == 1 { "1 item is".to_string() } else { format!("{} items are", needs.len()) }, limit.as_str()),
                     "items": needs.iter().map(|i| ops::compact(i)).collect::<Vec<_>>(),
                 }));
             }
@@ -392,7 +392,7 @@ pub fn schedule_preview(ctx: &mut Ctx, x: &crate::config::Schedule) -> Result<Va
     let p = ops::make_plan(ctx, &r, &x.plan, None, &filter, Admission::default())?;
     Ok(json!({
         "status": "needs_approval",
-        "message": format!("Not saved. Show the user this schedule and what it would clean right now ({} in {} items; scheduled runs skip items with risks), then call again with approved_by_user: true after they say yes.", crate::util::bytes(p.bytes), p.count),
+        "message": format!("Not saved. Show the user this schedule and what it would clean right now ({} in {}; scheduled runs skip items with risks), then call again with approved_by_user: true after they say yes.", crate::util::bytes(p.bytes), crate::util::plural(p.count as u64, "item")),
         "schedule": x,
         "would_clean_now": {"plan": p.plan, "bytes": p.bytes, "count": p.count, "items": p.items.iter().take(15).map(ops::compact).collect::<Vec<_>>()},
     }))

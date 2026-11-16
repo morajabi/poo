@@ -573,7 +573,7 @@ fn remove_worktree(item: &Item, opts: &CleanOptions, notes: &mut Vec<String>) ->
                     bytes: total,
                     exists: true,
                 });
-                notes.push(format!("backed up {} ignored config file(s) to {} (backup {})", copied, tilde(&dest), b.id));
+                notes.push(format!("backed up {} to {} (backup {})", crate::util::plural(copied, "ignored config file"), tilde(&dest), b.id));
             }
         }
     }
@@ -962,8 +962,8 @@ pub fn snapshot_hint() -> Option<String> {
     let n = out.lines().filter(|l| l.contains("com.apple")).count();
     (n > 0).then(|| {
         format!(
-            "{} local Time Machine snapshot(s) still reference deleted files, so free space grows only after macOS thins them. To reclaim it now: tmutil thinlocalsnapshots / 999999999999 4",
-            n
+            "{} still reference deleted files, so free space grows only after macOS thins them. To reclaim it now: tmutil thinlocalsnapshots / 999999999999 4",
+            crate::util::plural(n as u64, "local Time Machine snapshot")
         )
     })
 }
