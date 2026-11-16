@@ -33,7 +33,7 @@ fn tools() -> Value {
     plan_props["plan"] = json!({"type": "string", "description": "quick, stale, deep or emergency (plans are configurable)"});
     plan_props["free"] = json!({"type": "string", "description": "Target to free, e.g. 30G. Makes the plan pick least-regret items until reached."});
     plan_props["mode"] = json!({"type": "string", "enum": ["safe", "in-use", "dangerous"], "default": "safe", "description": "Preview what clean would take in this mode; items it would refuse are left out."});
-    json!([
+    let tools = json!([
         {"name": "overview", "description": "Disk usage, buckets with tier breakdown, plan sizes and the biggest items. Uses the cached scan when fresh.",
          "inputSchema": {"type": "object", "properties": {"rescan": {"type": "boolean", "description": "Update the report now (from the file-change journal, usually under a second; a full walk when the journal cannot help)"}, "full": {"type": "boolean", "description": "Walk everything (10-60s)"}}}},
         {"name": "list_items", "description": "Items (folders, simulators, images...) with size, tier, reasons. Filter by bucket, tier, project, size or text.",
@@ -53,8 +53,14 @@ fn tools() -> Value {
          }}},
         {"name": "projects", "description": "Projects and worktrees with size, activity status and policy; plus repos grouped with their worktrees.",
          "inputSchema": {"type": "object", "properties": {}}},
-        {"name": "catalog", "description": "Everything poo knows: buckets, plans, rules with descriptions and recommendations, providers, stacks, worktree homes, guards, mods.",
-         "inputSchema": {"type": "object", "properties": {"bucket": {"type": "string"}}}},
+        {"name": "catalog", "description": "What poo knows. Without arguments: a summary (buckets with rule counts, plans, providers, stack ids, worktree homes, guards, mods). With bucket, tag, stack, id or query: the matching rules in full, with descriptions, recommendations and matchers.",
+         "inputSchema": {"type": "object", "properties": {
+            "bucket": {"type": "string", "description": "Rules in this bucket"},
+            "tag": {"type": "string", "description": "Rules with this tag"},
+            "stack": {"type": "string", "description": "Rules for this stack id"},
+            "id": {"type": "string", "description": "One rule by id"},
+            "query": {"type": "string", "description": "Text to match in rule id, name or description"}
+         }}},
         {"name": "explain_path", "description": "Which rules match a path, whether git ignores it, and how it appears in the report.",
          "inputSchema": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}},
         {"name": "configure", "description": "Change poo's configuration. Actions: add_root, remove_root, set_project_policy (path, policy: active|stale|protected|auto), disable_rule / enable_rule (id, or tag/group/bucket/stack for many), set_rule (id, values: [\"warm_days=7\", \"bucket=work\"]), add_bucket / set_bucket (id, name, order, color, symbol, description, hidden), remove_bucket (id, move_to), set (key, value) for config keys like agents.auto_clean_max_tier (raising it needs approved_by_user), setup_done (by, notes). Propose changes to the user before applying them.",
@@ -91,7 +97,38 @@ fn tools() -> Value {
          "inputSchema": {"type": "object", "properties": {"since": {"type": "string", "description": "24h, 7d (default), 2w"}}}},
         {"name": "history", "description": "What poo cleaned before, newest first.",
          "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer", "default": 50}}}}
-    ])
+    ]);
+    annotate(tools)
+}
+
+/// MCP tool annotations: what each tool may change. Everything stays on this Mac.
+fn annotate(mut tools: Value) -> Value {
+    for t in tools.as_array_mut().into_iter().flatten() {
+        let (title, read_only) = match t["name"].as_str().unwrap_or("") {
+            "overview" => ("Disk overview", true),
+            "list_items" => ("List items", true),
+            "inspect" => ("Inspect an item", true),
+            "plan" => ("Preview a cleaning plan", true),
+            "projects" => ("Projects and worktrees", true),
+            "catalog" => ("Rules and buckets", true),
+            "explain_path" => ("Explain a path", true),
+            "setup_brief" => ("Setup brief", true),
+            "growth" => ("Growth and forecast", true),
+            "history" => ("Cleaning history", true),
+            "clean" => ("Clean items", false),
+            "configure" => ("Change configuration", false),
+            "schedules" => ("Scheduled cleanups", false),
+            "backups" => ("Backups", false),
+            _ => ("", true),
+        };
+        let mut a = json!({"title": title, "readOnlyHint": read_only, "openWorldHint": false});
+        if !read_only {
+            a["destructiveHint"] = json!(true);
+            a["idempotentHint"] = json!(false);
+        }
+        t["annotations"] = a;
+    }
+    tools
 }
 
 fn s(v: &Value, k: &str) -> Option<String> {
@@ -201,15 +238,7 @@ fn call(ctx: &mut Ctx, name: &str, a: &Value) -> Result<Value> {
             let r = ops::report(ctx, false, ScanOptions::default())?;
             Ok(json!({"projects": r.projects, "worktrees": ops::worktrees(&r)["repos"]}))
         }
-        "catalog" => {
-            let mut v = ops::catalog_json(&ctx.cat);
-            if let Some(b) = s(a, "bucket") {
-                if let Some(rules) = v["rules"].as_array() {
-                    v["rules"] = json!(rules.iter().filter(|r| r["bucket"] == b.as_str()).cloned().collect::<Vec<_>>());
-                }
-            }
-            Ok(v)
-        }
+        "catalog" => Ok(catalog(ctx, a)),
         "explain_path" => {
             let p = s(a, "path").ok_or_else(|| anyhow!("path is required"))?;
             let r = crate::scan::load_report();
@@ -301,6 +330,45 @@ fn call(ctx: &mut Ctx, name: &str, a: &Value) -> Result<Value> {
         }
         _ => Err(anyhow!("unknown tool `{}`", name)),
     }
+}
+
+/// The catalog for agents: a summary by default (all rules are over a megabyte), the
+/// matching rules in full when filtered.
+fn catalog(ctx: &Ctx, a: &Value) -> Value {
+    let mut v = ops::catalog_json(&ctx.cat);
+    let rules = v["rules"].as_array().cloned().unwrap_or_default();
+    let (bucket, tag, stack, id, query) = (s(a, "bucket"), s(a, "tag"), s(a, "stack"), s(a, "id"), s(a, "query").map(|q| q.to_lowercase()));
+    if bucket.is_some() || tag.is_some() || stack.is_some() || id.is_some() || query.is_some() {
+        let has = |r: &Value, k: &str, x: &str| r[k].as_array().map_or(false, |l| l.iter().any(|t| t == x));
+        let keep: Vec<Value> = rules
+            .into_iter()
+            .filter(|r| bucket.as_deref().map_or(true, |b| r["bucket"] == b))
+            .filter(|r| tag.as_deref().map_or(true, |t| has(r, "tags", t)))
+            .filter(|r| stack.as_deref().map_or(true, |x| has(r, "stacks", x)))
+            .filter(|r| id.as_deref().map_or(true, |i| r["id"] == i))
+            .filter(|r| {
+                query.as_deref().map_or(true, |q| {
+                    ["id", "name", "description"].iter().any(|k| r[*k].as_str().map_or(false, |t| t.to_lowercase().contains(q)))
+                })
+            })
+            .collect();
+        return json!({"count": keep.len(), "rules": keep});
+    }
+    let mut per_bucket: std::collections::BTreeMap<String, usize> = Default::default();
+    for r in &rules {
+        *per_bucket.entry(r["bucket"].as_str().unwrap_or("").to_string()).or_default() += 1;
+    }
+    if let Some(bs) = v["buckets"].as_array_mut() {
+        for b in bs {
+            b["rule_count"] = json!(per_bucket.get(b["id"].as_str().unwrap_or("")).copied().unwrap_or(0));
+        }
+    }
+    let obj = v.as_object_mut().unwrap();
+    obj.remove("rules");
+    obj.insert("rule_count".into(), json!(rules.len()));
+    obj.insert("stacks".into(), json!(ctx.cat.stacks.iter().map(|x| x.id.clone()).collect::<Vec<_>>()));
+    obj.insert("note".into(), json!("Rules are left out of this summary; call catalog with bucket, tag, stack, id or query for them in full."));
+    v
 }
 
 fn schedules_tool(ctx: &mut Ctx, a: &Value) -> Result<Value> {
