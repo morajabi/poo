@@ -140,13 +140,13 @@ pub fn overview(r: &Report) {
     }
 
     section(&st, "Areas");
-    let shown: Vec<&BucketSummary> = r.buckets.iter().filter(|b| !b.hidden && b.count > 0).collect();
+    let shown: Vec<&BucketSummary> = r.buckets.iter().filter(|b| !b.hidden && !b.report_only && b.count > 0).collect();
     let max = shown.iter().map(|b| b.bytes).max().unwrap_or(1).max(1);
     let name_w = shown.iter().map(|b| cells(&b.name)).max().unwrap_or(10).clamp(10, 26);
     let bar_w = if w >= 100 { 24 } else { 12 };
     println!("{}", st.dim(&format!("  {}  {:>9}  {}  {:>10}  {:>6}", pad("", name_w), "size", " ".repeat(bar_w), "not in use", "items")));
     for b in &shown {
-        let cold = crate::tui::app::not_in_use(&b.tiers);
+        let cold = crate::tui::app::bucket_not_in_use(b);
         println!(
             "  {}  {:>9}  {}  {}  {}",
             pad(&b.name, name_w),
@@ -161,6 +161,14 @@ pub fn overview(r: &Report) {
         println!("  {}  {}", st.dim(&pad("hidden areas", name_w)), st.dim(&rpad(&bytes(hidden), 9)));
     }
     println!("  {}  {}", pad("", name_w), st.bold(&rpad(&bytes(r.total_bytes), 9)));
+    // Report-only areas: shown for context, never counted or cleaned by poo.
+    for (name, b, hint) in crate::tui::app::elsewhere(r) {
+        let tail = match hint {
+            Some(h) => format!("  ·  manage in their apps: {}", h),
+            None => "  ·  manage in their apps".into(),
+        };
+        println!("{}", st.dim(&fit(&format!("  {}  {:>9}{}", pad(&name, name_w), bytes(b), tail), w)));
+    }
 
     section(&st, "Plans");
     let desc_w = w.saturating_sub(2 + 12 + 2 + 9 + 2 + 9 + 2);
@@ -225,14 +233,14 @@ pub fn items(list: &[&Item], show_bucket: bool) {
             st.dim(&pad(&i.id, id_w)),
             st.bold(&rpad(&size, 9)),
             bar,
-            st.tier(i.tier),
+            if i.report_only { st.dim(&pad("in its app", 11)) } else { st.tier(i.tier) },
             st.dim(&rpad(&used, 9)),
             pad(&i.name, name_w),
             if grp_w > 4 { format!("  {}", st.dim(&fit(&grp, grp_w))) } else { String::new() }
         );
     }
     let total: u64 = list.iter().map(|i| i.bytes).sum();
-    let free: u64 = list.iter().filter(|i| matches!(i.tier, Tier::Junk | Tier::Cold | Tier::Idle)).map(|i| i.bytes).sum();
+    let free: u64 = list.iter().filter(|i| crate::tui::app::cleanable(i)).map(|i| i.bytes).sum();
     println!(
         "{}",
         st.dim(&format!("{} items · {}{}", list.len(), bytes(total), if free > 0 { format!(" · {} not in use", bytes(free)) } else { String::new() }))
@@ -251,7 +259,11 @@ pub fn item_detail(i: &Item, rule: Option<&crate::catalog::Rule>) {
     println!();
     let nested = if i.total_bytes > i.bytes { format!("  ({} with nested items)", bytes(i.total_bytes)) } else { String::new() };
     kv(&st, "size", &format!("{}  {}{}", st.bold(&bytes(i.bytes)), st.dim(&format!("{} files", crate::tui::view::thousands(i.files))), st.dim(&nested)));
-    kv(&st, "status", &format!("{}{}", st.tier_w(i.tier, cells(i.tier.label()) + 2), st.dim(i.tier.describe())));
+    if i.report_only {
+        kv(&st, "status", &st.dim("report only: poo shows it for context and never cleans it; manage it in its app"));
+    } else {
+        kv(&st, "status", &format!("{}{}", st.tier_w(i.tier, cells(i.tier.label()) + 2), st.dim(i.tier.describe())));
+    }
     if let Some(t) = i.last_used {
         kv(&st, "used", &age(t));
     }

@@ -208,7 +208,7 @@ pub fn thousands(n: u64) -> String {
 
 /// Disk parts: other files, found by poo and in use, found and not in use, free.
 pub fn disk_parts(r: &Report) -> [u64; 4] {
-    let not_used: u64 = r.buckets.iter().map(|b| not_in_use(&b.tiers)).sum();
+    let not_used: u64 = r.buckets.iter().map(bucket_not_in_use).sum();
     let found = r.total_bytes.min(r.disk.used);
     let in_use = found.saturating_sub(not_used);
     let other = r.disk.used.saturating_sub(found);
@@ -251,21 +251,22 @@ fn overview(f: &mut Frame, area: Rect, app: &mut App, th: &Theme) {
     let [disk, _g, rest, fresh] = Layout::vertical([Constraint::Length(3), Constraint::Length(1), Constraint::Min(4), Constraint::Length(2)]).areas(area);
     f.render_widget(Paragraph::new(disk_block(r, disk.width as usize, th)), disk);
 
-    let mut bs: Vec<&BucketSummary> = r.buckets.iter().filter(|b| !b.hidden && not_in_use(&b.tiers) > 0).collect();
-    bs.sort_by_key(|b| std::cmp::Reverse(not_in_use(&b.tiers)));
-    let area_h = (bs.len().max(1) + 2) as u16;
+    let mut bs: Vec<&BucketSummary> = r.buckets.iter().filter(|b| !b.hidden && bucket_not_in_use(b) > 0).collect();
+    bs.sort_by_key(|b| std::cmp::Reverse(bucket_not_in_use(b)));
+    let away = elsewhere(r);
+    let area_h = (bs.len().max(1) + 2 + if away.is_empty() { 0 } else { away.len() + 1 }) as u16;
     let plans_h = (r.plans.len() * 2 + 2) as u16;
     if rest.width >= 100 {
         let [left, _, right] = Layout::horizontal([Constraint::Percentage(55), Constraint::Length(2), Constraint::Percentage(45)]).areas(rest);
         let [a, b] = Layout::vertical([Constraint::Length(area_h.min(left.height / 2)), Constraint::Min(3)]).areas(left);
         let [c, d] = Layout::vertical([Constraint::Length(plans_h.min(right.height / 2)), Constraint::Min(3)]).areas(right);
-        areas_panel(f, a, &bs, th);
+        areas_panel(f, a, &bs, &away, th);
         largest_panel(f, b, r, th);
         plans_panel(f, c, r, th);
         projects_panel(f, d, r, th);
     } else {
         let [a, c, b] = Layout::vertical([Constraint::Length(area_h.min(rest.height / 3)), Constraint::Length((r.plans.len() as u16 + 2).min(rest.height / 2)), Constraint::Min(3)]).areas(rest);
-        areas_panel(f, a, &bs, th);
+        areas_panel(f, a, &bs, &away, th);
         plans_panel(f, c, r, th);
         largest_panel(f, b, r, th);
     }
@@ -285,17 +286,17 @@ fn overview(f: &mut Frame, area: Rect, app: &mut App, th: &Theme) {
     f.render_widget(Paragraph::new(lines), fresh);
 }
 
-fn areas_panel(f: &mut Frame, area: Rect, bs: &[&BucketSummary], th: &Theme) {
+fn areas_panel(f: &mut Frame, area: Rect, bs: &[&BucketSummary], away: &[(String, u64, Option<String>)], th: &Theme) {
     let block = panel("Not in use, by area", th, false);
     let inner = block.inner(area);
     f.render_widget(block, area);
-    let max = bs.first().map(|b| not_in_use(&b.tiers)).unwrap_or(1).max(1);
+    let max = bs.first().map(|b| bucket_not_in_use(b)).unwrap_or(1).max(1);
     let w = inner.width as usize;
     let name_w = (w / 3).clamp(10, 24);
     let bar_w = w.saturating_sub(name_w + 10 + 12 + 3).min(30);
     let mut lines = vec![];
     for b in bs {
-        let n = not_in_use(&b.tiers);
+        let n = bucket_not_in_use(b);
         let mut l = vec![Span::raw(pad(&b.name, name_w)), Span::raw(" ")];
         if bar_w >= 4 {
             l.extend(bar_spans(n as f64 / max as f64, bar_w, th.hex(&b.color), th));
@@ -310,6 +311,16 @@ fn areas_panel(f: &mut Frame, area: Rect, bs: &[&BucketSummary], th: &Theme) {
     if bs.is_empty() {
         lines.push(Line::from(Span::styled("Nothing idle right now.", th.dim())));
     }
+    // Report-only areas: context, never counted as cleanable.
+    if !away.is_empty() && (lines.len() + 1) < inner.height as usize {
+        lines.push(Line::raw(""));
+    }
+    for (name, b, _) in away {
+        lines.push(Line::from(vec![
+            Span::styled(pad(name, name_w), th.dim()),
+            Span::styled(fit(&format!(" {} · manage in their apps", bytes(*b)), w.saturating_sub(name_w)), th.dim()),
+        ]));
+    }
     f.render_widget(Paragraph::new(lines), inner);
 }
 
@@ -317,7 +328,7 @@ fn largest_panel(f: &mut Frame, area: Rect, r: &Report, th: &Theme) {
     let block = panel("Largest, not in use", th, false);
     let inner = block.inner(area);
     f.render_widget(block, area);
-    let mut items: Vec<&Item> = r.items.iter().filter(|i| cleanable_tier(i.tier)).collect();
+    let mut items: Vec<&Item> = r.items.iter().filter(|i| cleanable(i)).collect();
     items.sort_by_key(|i| std::cmp::Reverse(i.total_bytes));
     let w = inner.width as usize;
     let mut lines = vec![];
@@ -483,6 +494,7 @@ fn browse(f: &mut Frame, area: Rect, app: &mut App, th: &Theme) {
             l.push(Span::raw(" "));
             let fill = match (r.color.as_deref(), r.tier) {
                 (Some(c), _) => th.hex(c),
+                (None, Some(_)) if r.report_only => th.dim(),
                 (None, Some(t)) if cleanable_tier(t) => th.good(),
                 (None, Some(_)) => th.dim(),
                 (None, None) => th.good(),
@@ -493,6 +505,7 @@ fn browse(f: &mut Frame, area: Rect, app: &mut App, th: &Theme) {
         l.push(Span::styled(rpad(&bytes(r.bytes), 9), th.bold()));
         l.push(Span::raw("  "));
         match r.tier {
+            _ if r.report_only => l.push(Span::styled(pad("in its app", 11), th.dim())),
             Some(t) => l.push(tier_span(t, 11, th)),
             None => l.push(Span::styled(pad(&if r.free_bytes > 0 { bytes(r.free_bytes) } else { "–".into() }, 11), if r.free_bytes > 0 { th.good() } else { th.dim() })),
         }
@@ -518,7 +531,7 @@ fn partial_sel(app: &App, pred: impl Fn(&Item) -> bool) -> (bool, bool) {
     let mut any = false;
     let mut all = true;
     let mut n = 0;
-    for i in r.items.iter().filter(|i| pred(i) && cleanable_tier(i.tier)) {
+    for i in r.items.iter().filter(|i| pred(i) && cleanable(i)) {
         n += 1;
         if app.selected.contains(&i.id) {
             any = true;
@@ -608,7 +621,11 @@ pub fn item_lines(i: &Item, app: &App, w: usize, th: &Theme) -> Vec<Line<'static
     ];
     let size = if i.total_bytes > i.bytes { format!("{}  ({} with nested)", bytes(i.bytes), bytes(i.total_bytes)) } else { bytes(i.bytes) };
     lines.push(kv("size", Span::raw(format!("{}  ·  {} files", size, thousands(i.files))), th));
-    lines.push(Line::from(vec![Span::styled(format!("{:<10}", "status"), th.dim()), Span::styled(i.tier.label().to_string(), th.tier(i.tier)), Span::styled(format!("  {}", i.tier.describe()), th.dim())]));
+    if i.report_only {
+        lines.push(Line::from(vec![Span::styled(format!("{:<10}", "status"), th.dim()), Span::styled("report only  shown for context; manage it in its app".to_string(), th.dim())]));
+    } else {
+        lines.push(Line::from(vec![Span::styled(format!("{:<10}", "status"), th.dim()), Span::styled(i.tier.label().to_string(), th.tier(i.tier)), Span::styled(format!("  {}", i.tier.describe()), th.dim())]));
+    }
     if let Some(t) = i.last_used {
         lines.push(kv("used", Span::raw(age(t)), th));
     }
@@ -1130,6 +1147,23 @@ mod tests {
         let p = disk_parts(&r);
         assert_eq!(p[0], 0);
         assert_eq!(p[3], 300);
+    }
+
+    #[test]
+    fn report_only_is_never_not_in_use() {
+        let bucket = |id: &str, report_only: bool| {
+            serde_json::json!({"id": id, "name": id, "order": 0, "color": "#888888", "symbol": "", "description": "",
+                "hidden": false, "report_only": report_only, "bytes": 100, "count": 1, "tiers": {"cold": 100}, "groups": []})
+        };
+        let r: Report = serde_json::from_value(serde_json::json!({
+            "schema": SCHEMA, "version": "x", "scanned_at": 0, "duration_ms": 0,
+            "disk": {"total": 1000, "free": 300, "used": 700}, "roots": [], "total_bytes": 100,
+            "buckets": [bucket("build", false), bucket("elsewhere", true)], "plans": [], "projects": [], "items": [], "warnings": []
+        }))
+        .unwrap();
+        assert_eq!(disk_parts(&r)[2], 100);
+        assert_eq!(bucket_not_in_use(&r.buckets[1]), 0);
+        assert_eq!(elsewhere(&r).len(), 1);
     }
 
     #[test]

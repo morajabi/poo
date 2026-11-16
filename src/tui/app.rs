@@ -83,6 +83,8 @@ pub struct BRow {
     pub count: usize,
     /// Bytes not in use (junk, unused, idle) for buckets and groups.
     pub free_bytes: u64,
+    /// Shown for context only; managed in its own app, never cleaned by poo.
+    pub report_only: bool,
     pub tier: Option<Tier>,
     pub last_used: Option<i64>,
     pub color: Option<String>,
@@ -297,7 +299,8 @@ impl App {
                     name: b.name.clone(),
                     bytes: b.bytes,
                     count: b.count,
-                    free_bytes: not_in_use(&b.tiers),
+                    free_bytes: bucket_not_in_use(b),
+                    report_only: b.report_only,
                     tier: None,
                     last_used: None,
                     color: Some(b.color.clone()),
@@ -313,6 +316,7 @@ impl App {
                         bytes: 0,
                         count: 0,
                         free_bytes: 0,
+                        report_only: i.report_only,
                         tier: None,
                         last_used: None,
                         color: None,
@@ -320,7 +324,7 @@ impl App {
                     });
                     g.bytes += i.bytes;
                     g.count += 1;
-                    if matches!(i.tier, Tier::Junk | Tier::Cold | Tier::Idle) {
+                    if cleanable(i) {
                         g.free_bytes += i.bytes;
                     }
                     g.last_used = match (g.last_used, i.last_used) {
@@ -341,6 +345,7 @@ impl App {
                         bytes: i.total_bytes,
                         count: 1,
                         free_bytes: 0,
+                        report_only: i.report_only,
                         tier: Some(i.tier),
                         last_used: i.last_used,
                         color: None,
@@ -505,13 +510,13 @@ impl App {
         let (c, _) = self.cursor();
         match self.tab {
             Tab::Browse => match self.browse_rows().get(c).map(|r| r.kind.clone()) {
-                Some(BKind::Item(i)) => self.item(i).map(|x| vec![x.id.clone()]).unwrap_or_default(),
-                Some(BKind::Bucket(b)) => self.report.iter().flat_map(|r| r.items.iter()).filter(|i| i.bucket == b && cleanable_tier(i.tier)).map(|i| i.id.clone()).collect(),
+                Some(BKind::Item(i)) => self.item(i).filter(|x| !x.report_only).map(|x| vec![x.id.clone()]).unwrap_or_default(),
+                Some(BKind::Bucket(b)) => self.report.iter().flat_map(|r| r.items.iter()).filter(|i| i.bucket == b && cleanable(i)).map(|i| i.id.clone()).collect(),
                 Some(BKind::Group { bucket, group }) => self
                     .report
                     .iter()
                     .flat_map(|r| r.items.iter())
-                    .filter(|i| i.bucket == bucket && i.group == group && cleanable_tier(i.tier))
+                    .filter(|i| i.bucket == bucket && i.group == group && cleanable(i))
                     .map(|i| i.id.clone())
                     .collect(),
                 None => vec![],
@@ -520,7 +525,7 @@ impl App {
                 let rows = self.project_rows();
                 let Some(p) = rows.get(c) else { return vec![] };
                 let f = Filter { project: Some(p.path.clone()), ..Default::default() };
-                self.report.iter().flat_map(|r| r.items.iter()).filter(|i| f.matches(i) && cleanable_tier(i.tier)).map(|i| i.id.clone()).collect()
+                self.report.iter().flat_map(|r| r.items.iter()).filter(|i| f.matches(i) && cleanable(i)).map(|i| i.id.clone()).collect()
             }
             Tab::Worktrees => self.worktree_rows().get(c).and_then(|w| w.item_id.clone()).into_iter().collect(),
             Tab::Plans => self.plans.get(c).map(|p| p.items.iter().map(|i| i.id.clone()).collect()).unwrap_or_default(),
@@ -551,7 +556,7 @@ impl App {
         for r in rows {
             if let BKind::Item(i) = r.kind {
                 if let Some(it) = self.item(i) {
-                    if cleanable_tier(it.tier) {
+                    if cleanable(it) {
                         let id = it.id.clone();
                         self.selected.insert(id);
                     }
@@ -877,4 +882,31 @@ pub fn cleanable_tier(t: Tier) -> bool {
 
 pub fn not_in_use(tiers: &std::collections::BTreeMap<String, u64>) -> u64 {
     ["junk", "cold", "idle"].iter().filter_map(|t| tiers.get(*t)).sum()
+}
+
+/// Whether poo would offer this item for cleaning: not in use, and not report-only
+/// (those are managed in their own apps and never cleaned by poo).
+pub fn cleanable(i: &Item) -> bool {
+    !i.report_only && cleanable_tier(i.tier)
+}
+
+/// Bytes not in use in an area; report-only areas never count.
+pub fn bucket_not_in_use(b: &crate::model::BucketSummary) -> u64 {
+    if b.report_only {
+        0
+    } else {
+        not_in_use(&b.tiers)
+    }
+}
+
+/// Report-only areas with something in them: (name, bytes, owner hint from the largest item).
+pub fn elsewhere(r: &crate::model::Report) -> Vec<(String, u64, Option<String>)> {
+    r.buckets
+        .iter()
+        .filter(|b| b.report_only && b.bytes > 0)
+        .map(|b| {
+            let hint = r.items.iter().filter(|i| i.bucket == b.id && i.recommend.is_some()).max_by_key(|i| i.bytes).and_then(|i| i.recommend.clone());
+            (b.name.clone(), b.bytes, hint)
+        })
+        .collect()
 }
