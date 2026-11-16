@@ -104,6 +104,7 @@ struct SelectBox: View {
         ))
         .toggleStyle(.checkbox)
         .labelsHidden()
+        .accessibilityLabel("Select \(item.name)")
         .disabled(!item.isCleanable)
         .help(item.isCleanable ? "Select to clean" : "Poo leaves this for you to manage")
     }
@@ -115,19 +116,24 @@ struct ItemRow: View {
     var subtitle: String?
 
     var body: some View {
-        // Narrow (inspector open, small window): the age column goes before the name shrinks.
+        // Narrow (inspector open, small window): the age column goes first, then the badge
+        // shrinks to a dot, so the name keeps its room.
         ViewThatFits(in: .horizontal) {
             row(showsAge: true)
             row(showsAge: false)
+            row(showsAge: false, compact: true)
         }
         .padding(.vertical, 2)
     }
 
-    private func row(showsAge: Bool) -> some View {
+    private func row(showsAge: Bool, compact: Bool = false) -> some View {
         HStack(spacing: 10) {
             SelectBox(item: item)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
+                    if compact {
+                        Circle().fill(item.tier.color).frame(width: 7, height: 7).help(item.tier.label)
+                    }
                     Text(item.name).lineLimit(1).truncationMode(.middle).layoutPriority(1)
                     if let a = item.agent {
                         Text(a).font(.caption2).padding(.horizontal, 4).background(.quaternary, in: Capsule()).fixedSize()
@@ -139,10 +145,14 @@ struct ItemRow: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
-            .frame(minWidth: showsAge ? 180 : 0, maxWidth: .infinity, alignment: .leading)
+            // ViewThatFits compares ideal widths: pin the ideal to the minimum, so the choice
+            // follows the space there is, not how long this row's subtitle happens to be.
+            .frame(minWidth: compact ? 0 : showsAge ? 180 : 140, idealWidth: compact ? 0 : showsAge ? 180 : 140, maxWidth: .infinity, alignment: .leading)
             .layoutPriority(1)
-            TierBadge(tier: item.tier)
-                .fixedSize()
+            if !compact {
+                TierBadge(tier: item.tier)
+                    .fixedSize()
+            }
             if showsAge {
                 Text(Fmt.ago(item.lastUsedDate))
                     .font(.caption)
@@ -151,9 +161,9 @@ struct ItemRow: View {
                     .frame(width: 64, alignment: .trailing)
             }
             SizeLabel(item: item)
-                .frame(width: 96, alignment: .trailing)
+                .frame(width: compact ? 76 : 96, alignment: .trailing)
         }
-        .help(showsAge ? "" : "Used \(Fmt.ago(item.lastUsedDate))")
+        .help(showsAge ? "" : "\(item.tier.label) · used \(Fmt.ago(item.lastUsedDate))")
     }
 }
 

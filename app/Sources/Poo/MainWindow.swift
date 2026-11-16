@@ -13,7 +13,7 @@ struct MainWindow: View {
                     HStack {
                         Label(s.title, systemImage: s.symbol)
                         Spacer()
-                        if s.section == .elsewhere, let r = store.report, case let b = ElsewhereView.bytes(r, purgeable: store.purgeable), b > 0 {
+                        if s.section == .elsewhere, let r = store.report, case let b = ElsewhereView.bytes(r, items: store.reportOnly, purgeable: store.purgeable), b > 0 {
                             Text(Fmt.bytes(b)).font(.caption).monospacedDigit().foregroundStyle(.secondary)
                         }
                     }
@@ -33,7 +33,7 @@ struct MainWindow: View {
                     }
                 }
             }
-            .navigationSplitViewColumnWidth(min: 240, ideal: 270)
+            .navigationSplitViewColumnWidth(min: 200, ideal: 230, max: 320)
         } detail: {
             Group {
                 switch nav.section ?? .overview {
@@ -50,6 +50,12 @@ struct MainWindow: View {
                 if nav.section != .backups { SelectionBar() }
             }
             .safeAreaInset(edge: .top, spacing: 0) {
+                // Something the CLI refused or failed: say it once, quietly, until dismissed.
+                // Without a report the empty state shows the error instead.
+                if store.report != nil, let e = store.error, !store.scanning {
+                    ErrorBanner(message: e) { store.error = nil }
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
                 // A full rescan with numbers on screen: say what it's doing, quietly.
                 if store.report != nil, store.scanning, store.progress != nil {
                     VStack(spacing: 0) {
@@ -63,6 +69,7 @@ struct MainWindow: View {
                 }
             }
             .animation(.smooth, value: store.scanning && store.progress != nil)
+            .animation(.smooth, value: store.error)
             .overlay(alignment: .bottom) { ToastOverlay().animation(.default, value: store.toast) }
             .onDeleteCommand {
                 if nav.section != .backups { nav.review(items: store.selectedItems) }
@@ -128,7 +135,6 @@ struct ItemInspector: View {
                     row("Comes back", item.comesBack)
                     row("Files", item.files.formatted())
                     row("Used", Fmt.ago(item.lastUsedDate))
-                    row("Cost", item.cost)
                     if let p = item.project { row("Project", Fmt.tilde(p)) }
                     if let a = item.agent { row("Agent", a) }
                     if let rb = item.rebuild { row("Rebuild", rb) }
@@ -192,10 +198,10 @@ struct ProjectsView: View {
 
     var body: some View {
         let projects = (store.report?.projects ?? []).sorted { $0.artifact_bytes > $1.artifact_bytes }
-        let byProject = Dictionary(grouping: store.report?.items.filter { $0.project != nil } ?? [], by: { $0.project! })
+        let byProject = store.itemsByProject
         List {
             ForEach(projects) { p in
-                let items = (byProject[p.path] ?? []).sorted { $0.total_bytes > $1.total_bytes }
+                let items = byProject[p.path] ?? []
                 if items.isEmpty {
                     ProjectRow(project: p, items: items)
                 } else {
@@ -212,11 +218,21 @@ struct ProjectsView: View {
         }
         .listStyle(.inset)
         .overlay {
-            if projects.isEmpty { ContentUnavailableView("No projects yet", systemImage: "folder", description: Text("Add your dev folders in Settings.")) }
+            if store.report == nil {
+                NoReportView()
+            } else if projects.isEmpty {
+                ContentUnavailableView {
+                    Label("No projects found", systemImage: "folder")
+                } description: {
+                    Text("Poo looks for projects in your dev folders.")
+                } actions: {
+                    DevFoldersButton()
+                }
+            }
         }
         .navigationTitle("Projects")
         .toolbar { ToolbarItem { AskAgentButton(target: "projects", title: "Ask") } }
-        .freshSubtitle("\(projects.count) projects")
+        .freshSubtitle(Fmt.count(projects.count, "project"))
     }
 }
 
@@ -328,23 +344,36 @@ struct WorktreesView: View {
     }
 
     var body: some View {
-        let wtItems = store.report?.items.filter(\.isWorktree) ?? []
+        let wtItems = Dictionary(store.report?.items.filter(\.isWorktree).map { ($0.path, $0) } ?? [], uniquingKeysWith: { a, _ in a })
+        let groups = self.groups
         List {
             ForEach(groups) { g in
                 Section {
                     ForEach(g.checkouts) { p in
-                        WorktreeRow(project: p, item: wtItems.first { $0.path == p.path })
+                        WorktreeRow(project: p, item: wtItems[p.path])
                     }
                 } header: {
                     HStack {
-                        Text(Fmt.tilde(g.id)).font(.headline)
+                        Text(Fmt.tilde(g.id)).font(.headline).lineLimit(1).truncationMode(.middle)
                         Spacer()
-                        Text("\(Fmt.bytes(g.bytes)) across \(g.checkouts.count) checkouts")
+                        Text("\(Fmt.count(g.checkouts.count, "checkout")) · \(Fmt.bytes(g.bytes))")
+                            .monospacedDigit()
+                            .fixedSize()
                     }
                 }
             }
         }
+        .listStyle(.inset)
+        .overlay {
+            if store.report == nil {
+                NoReportView()
+            } else if groups.isEmpty {
+                ContentUnavailableView("No extra worktrees", systemImage: "arrow.triangle.branch",
+                                       description: Text("Repos with more than one checkout show up here."))
+            }
+        }
         .navigationTitle("Worktrees")
+        .freshSubtitle(Fmt.count(groups.reduce(0) { $0 + $1.checkouts.count - 1 }, "worktree"))
         .toolbar { ToolbarItem { AskAgentButton(target: "worktrees", title: "Ask") } }
     }
 }
@@ -371,25 +400,73 @@ struct WorktreeRow: View {
                 if let item { SelectBox(item: item) } else { Color.clear }
             }
             .frame(width: 18)
-            Image(systemName: project.kind == "repo" ? "house" : "arrow.triangle.branch").foregroundStyle(.secondary)
-            VStack(alignment: .leading) {
+            Image(systemName: project.kind == "repo" ? "house" : "arrow.triangle.branch")
+                .foregroundStyle(.secondary)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 2) {
                 HStack {
-                    Text(title)
+                    Text(title).lineLimit(1).truncationMode(.middle)
                     if let a = project.agent {
                         Text(a).font(.caption2).padding(.horizontal, 4).background(.quaternary, in: Capsule())
                     }
                 }
-                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
-            Spacer()
+            Spacer(minLength: 8)
             Group {
                 if let item { TierBadge(tier: item.tier) } else { Color.clear }
             }
             .frame(width: 92, height: 16, alignment: .leading)
             Text(Fmt.bytes(item?.total_bytes ?? project.artifact_bytes)).monospacedDigit().frame(width: 80, alignment: .trailing)
         }
+        .padding(.vertical, 2)
         .contextMenu {
             if let item { ItemContextMenu(item: item) } else { ProjectRow.menu(project.path) }
+        }
+    }
+}
+
+/// A dismissible line for the last error, under the toolbar.
+struct ErrorBanner: View {
+    var message: String
+    var onDismiss: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                Text(message)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Button("Copy") { Pasteboard.copy(message) }
+                    .buttonStyle(.borderless)
+                Button(action: onDismiss) { Image(systemName: "xmark") }
+                    .buttonStyle(.borderless)
+                    .keyboardShortcut(.cancelAction)
+                    .accessibilityLabel("Dismiss")
+            }
+            .font(.callout)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 7)
+            Divider()
+        }
+        .background(.bar)
+        .help(message)
+    }
+}
+
+/// Opens Settings › General, where the dev folders are.
+struct DevFoldersButton: View {
+    @Environment(\.openSettings) private var openSettings
+    var title = "Add Dev Folders…"
+
+    var body: some View {
+        Button(title) {
+            UserDefaults.standard.set("general", forKey: "settingsTab")
+            NSApp.activate()
+            openSettings()
         }
     }
 }

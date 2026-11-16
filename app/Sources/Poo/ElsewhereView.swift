@@ -7,7 +7,7 @@ struct ElsewhereView: View {
 
     var body: some View {
         let r = store.report
-        let items = (r?.items.filter(\.isReportOnly) ?? []).sorted { $0.total_bytes > $1.total_bytes }
+        let items = store.reportOnly
         let snaps = r?.snapshots.flatMap { $0.count > 0 ? $0 : nil }
         let purgeable = store.purgeable >= 1_000_000_000 ? store.purgeable : 0
         let access = r?.warnings.filter { $0.contains("Full Disk Access") } ?? []
@@ -69,8 +69,8 @@ struct ElsewhereView: View {
     }
 
     /// Size shown in the sidebar.
-    static func bytes(_ r: Report, purgeable: UInt64) -> UInt64 {
-        let items = r.items.filter(\.isReportOnly).reduce(UInt64(0)) { $0 + $1.total_bytes }
+    static func bytes(_ r: Report, items reportOnly: [Item], purgeable: UInt64) -> UInt64 {
+        let items = reportOnly.reduce(UInt64(0)) { $0 + $1.total_bytes }
         let snaps = r.snapshots.flatMap { $0.count > 0 ? $0.bytes : nil } ?? 0
         return items + snaps + (purgeable >= 1_000_000_000 ? purgeable : 0)
     }

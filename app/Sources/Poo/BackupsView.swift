@@ -5,6 +5,7 @@ import SwiftUI
 /// rescue branches. Kept until you prune them (or the auto-prune setting does).
 struct BackupsView: View {
     @Environment(Store.self) private var store
+    @Environment(\.openSettings) private var openSettings
     @State private var selection: Set<String> = []
     @State private var confirmPrune: [String]?
     @State private var confirmOld = false
@@ -21,14 +22,16 @@ struct BackupsView: View {
             }
         }
         .listStyle(.inset)
+        .onDeleteCommand { if !selection.isEmpty { confirmPrune = Array(selection) } }
         .overlay { empty }
         .topBar { header }
         .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
         .navigationTitle("Backups")
         .toolbar {
             ToolbarItemGroup {
-                Button("Prune older than 30 days…") { confirmOld = true }
+                Button("Prune Older Than 30 Days…") { confirmOld = true }
                     .disabled(backups.isEmpty || store.busy)
+                    .help("Delete backups made more than 30 days ago")
             }
         }
         .task {
@@ -64,32 +67,39 @@ struct BackupsView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Group {
                     if let budget = list?.budget_bytes ?? cfg?.max_backup_bytes, budget > 0 {
-                        Text("Using \(Fmt.bytes(total)) of \(Fmt.bytes(budget)) budget")
+                        Text("\(Fmt.bytes(total)) of \(Fmt.bytes(budget))")
                     } else {
                         Text("\(Fmt.bytes(total)) of backups")
                     }
                 }
                 .font(.headline)
                 .monospacedDigit()
+                .help("Backups use this much of their budget. The oldest file backups go first past it.")
                 Text(keepSentence(days: list?.auto_prune_days ?? cfg?.auto_prune_days, git: cfg?.auto_prune_git == true)).font(.callout).foregroundStyle(.secondary)
             }
             Spacer()
             if let dir = list?.dir {
-                Button("Open folder") { NSWorkspace.shared.open(URL(fileURLWithPath: dir)) }
+                Button("Open Folder") { NSWorkspace.shared.open(URL(fileURLWithPath: dir)) }
                     .controlSize(.small)
             }
-            SettingsLink { Text("Backup settings…") }
-                .controlSize(.small)
+            Button("Settings…") {
+                UserDefaults.standard.set("safety", forKey: "settingsTab")
+                NSApp.activate()
+                openSettings()
+            }
+            .controlSize(.small)
+            .help("Backup budget and pruning")
         }
+        .lineLimit(1)
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
     }
 
     private func keepSentence(days: Int?, git: Bool) -> String {
         if let d = days, d > 0 {
-            return "Poo keeps these for \(d) days, then prunes them\(git ? ", stashes and branches too" : " (stashes and branches stay)")."
+            return "Kept \(d) days\(git ? "" : ", stashes and branches until you prune them")"
         }
-        return "Poo keeps these until you prune them."
+        return "Kept until you prune them"
     }
 
     @ViewBuilder
@@ -129,7 +139,7 @@ struct BackupsView: View {
             Button("Restore…") { confirmRestore = b }.disabled(b.exists == false)
         }
         if let ref = b.ref {
-            Button("Copy \(b.kind == "stash" ? "stash message" : "branch name")") {
+            Button("Copy \(b.kind == "stash" ? "Stash Message" : "Branch Name")") {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(ref, forType: .string)
             }
@@ -178,6 +188,7 @@ struct BackupRow: View {
                 Button { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) } label: { Image(systemName: "magnifyingglass") }
                     .buttonStyle(.borderless)
                     .help("Reveal in Finder")
+                    .accessibilityLabel("Reveal in Finder")
                     .disabled(b.exists == false)
                 Button("Restore") { confirmRestore = true }
                     .controlSize(.small)

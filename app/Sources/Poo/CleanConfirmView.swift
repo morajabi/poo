@@ -21,10 +21,11 @@ struct CleanConfirmView: View {
     @State private var session: CleanSession?
     var onShowBackups: (() -> Void)? = nil
 
+    /// Biggest first, so what matters most is on top.
     private var list: [Item] {
-        let all = items ?? plan?.items ?? []
-        guard let areas else { return all }
-        return all.filter { areas.contains(AreaSummary.key($0)) }
+        var all = items ?? plan?.items ?? []
+        if let areas { all = all.filter { areas.contains(AreaSummary.key($0)) } }
+        return all.sorted { $0.total_bytes > $1.total_bytes }
     }
     private var needed: CleanMode { CleanMode.needed(for: list) }
     private var allowed: [Item] {
@@ -53,18 +54,21 @@ struct CleanConfirmView: View {
     private var review: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(title).font(.title3.weight(.semibold))
-            if let d = plan?.description { Text(d).foregroundStyle(.secondary) }
+            if let d = plan?.description {
+                Text(d).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
             if loading && items == nil {
                 ProgressView().frame(maxWidth: .infinity, minHeight: 200)
             } else if list.isEmpty {
                 Text("Nothing to clean.").foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 120)
             } else {
+                let allowedIDs = Set(allowed.map(\.id))
                 List(list) { i in
-                    let blocked = !allowed.contains(i)
+                    let blocked = !allowedIDs.contains(i.id)
                     VStack(alignment: .leading, spacing: 3) {
                         HStack {
                             Text(i.name).lineLimit(1).truncationMode(.middle)
-                            Spacer()
+                            Spacer(minLength: 8)
                             TierBadge(tier: i.tier)
                             Text(Fmt.bytes(i.total_bytes)).monospacedDigit().frame(width: 72, alignment: .trailing)
                         }
@@ -136,12 +140,12 @@ struct WhatHappensView: View {
     var body: some View {
         let lines = SafeguardSummary.lines(for: items)
         // Say "deleted permanently" once instead of on every line.
-        let allDelete = !lines.isEmpty && lines.allSatisfy { $0.detail.hasPrefix("Deleted permanently") }
+        let anyDelete = lines.contains { $0.detail.hasPrefix("Deleted permanently") }
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
                 Text("What happens").font(.headline)
-                if allDelete {
-                    Text("Deleted permanently, not moved to the Trash").font(.caption).foregroundStyle(.secondary)
+                if anyDelete {
+                    Text("Deleted folders skip the Trash").font(.caption).foregroundStyle(.secondary)
                 }
             }
             if lines.isEmpty {
@@ -160,7 +164,7 @@ struct WhatHappensView: View {
                                         Spacer()
                                         Text(Fmt.bytes(l.bytes)).font(.caption).monospacedDigit().foregroundStyle(.secondary)
                                     }
-                                    Text(allDelete ? Self.short(l.detail) : l.detail).font(.caption).foregroundStyle(.secondary)
+                                    Text(Self.short(l.detail)).font(.caption).foregroundStyle(.secondary)
                                         .fixedSize(horizontal: false, vertical: true)
                                 }
                             }
@@ -224,8 +228,10 @@ enum SafeguardSummary {
     }
 
     static func title(for item: Item, count: Int) -> String {
-        if item.isWorktree { return "\(count) worktree\(count == 1 ? "" : "s")" }
-        return "\(item.group) · \(count) item\(count == 1 ? "" : "s")"
+        if item.isWorktree { return Fmt.count(count, "worktree") }
+        // The same names as the overview's areas: "Rust build output", not just "Rust".
+        let name = AreaSummary.title(bucket: item.bucket, group: item.group)
+        return count == 1 ? name : "\(name) · \(count) items"
     }
 
     /// Drops per-item counts ("Backs up 3 files" -> "Backs up files") so items group together.

@@ -25,8 +25,8 @@ struct BrowseView: View {
         let filter = nav.browse
         let report = store.report
         let bucket = (lockedBucket ?? filter.bucket).flatMap { id in report?.buckets.first { $0.id == id } }
-        let groups = Self.groups(report: report, filter: filter, bucket: lockedBucket ?? filter.bucket)
-        let byID = inspected.flatMap { id in report?.items.first { $0.id == id } }
+        let groups = store.groups(filter: filter, bucket: lockedBucket ?? filter.bucket)
+        let byID = inspected.flatMap(store.item)
 
         List(selection: $inspected) {
             ForEach(groups) { g in
@@ -52,7 +52,7 @@ struct BrowseView: View {
                     ContentUnavailableView {
                         Label("Nothing matches these filters", systemImage: "line.3.horizontal.decrease.circle")
                     } actions: {
-                        Button("Show everything") {
+                        Button("Show Everything") {
                             nav.browse.statuses = []
                             nav.browse.group = nil
                             if lockedBucket == nil { nav.browse.bucket = nil }
@@ -107,7 +107,7 @@ struct BrowseView: View {
         }
         .onKeyPress(.space) {
             // Space ticks the highlighted row, like Mail's and Finder's checkbox lists.
-            guard let id = inspected, let i = report?.items.first(where: { $0.id == id }), i.isCleanable else { return .ignored }
+            guard let id = inspected, let i = store.item(id), i.isCleanable else { return .ignored }
             store.toggle(i.id)
             return .handled
         }
@@ -116,7 +116,7 @@ struct BrowseView: View {
     private func subtitle(_ groups: [ItemGroup]) -> String {
         let n = groups.reduce(0) { $0 + $1.items.count }
         let b = groups.reduce(UInt64(0)) { $0 + $1.bytes }
-        return "\(n) items · \(Fmt.bytes(b))"
+        return "\(Fmt.count(n, "item")) · \(Fmt.bytes(b))"
     }
 
     private func subtitle(_ i: Item, _ g: BrowseFilter.Grouping) -> String {
@@ -151,6 +151,7 @@ struct BrowseView: View {
                         .frame(width: 12)
                 }
                 .buttonStyle(.borderless)
+                .accessibilityLabel(isCollapsed ? "Expand \(g.title)" : "Collapse \(g.title)")
             }
             if let sym = g.symbol {
                 Image(systemName: sym).foregroundStyle(g.color ?? .secondary)
@@ -170,7 +171,7 @@ struct BrowseView: View {
         .contentShape(Rectangle())
         .contextMenu {
             if !g.notInUse.isEmpty {
-                Button("Review & Clean Not in Use…") { nav.review(items: g.notInUse.filter(\.isCleanable)) }
+                Button("Clean Not in Use…") { nav.review(items: g.notInUse.filter(\.isCleanable)) }
                 Button("Select Not in Use") { store.select(g.notInUse, true) }
             }
             Button("Deselect All") { store.select(g.items, false) }
@@ -178,7 +179,7 @@ struct BrowseView: View {
             Button(isCollapsed ? "Expand" : "Collapse") {
                 if isCollapsed { collapsed.remove(g.id) } else { collapsed.insert(g.id) }
             }
-            Button("Collapse All") { collapsed = Set(Self.groups(report: store.report, filter: nav.browse, bucket: lockedBucket ?? nav.browse.bucket).map(\.id)) }
+            Button("Collapse All") { collapsed = Set(store.groups(filter: nav.browse, bucket: lockedBucket ?? nav.browse.bucket).map(\.id)) }
             Button("Expand All") { collapsed = [] }
         }
         .onTapGesture(count: 2) {
@@ -344,15 +345,15 @@ struct SelectionBar: View {
         let items = store.selectedItems
         if !items.isEmpty {
             HStack(spacing: 12) {
-                Text("\(items.count) selected").foregroundStyle(.secondary)
-                Button("Deselect all") { store.selection.removeAll() }
+                Text("\(items.count) selected").foregroundStyle(.secondary).monospacedDigit()
+                Button("Deselect All") { store.selection.removeAll() }
                     .buttonStyle(.link)
                 Spacer()
                 AskAgentButton(target: "items:" + items.prefix(60).map(\.id).joined(separator: ","), title: "Ask about selected")
-                Button("Clean \(items.count) selected (\(Fmt.bytes(items.reduce(0) { $0 + $1.total_bytes })))…") { nav.review(items: items) }
+                Button("Clean \(Fmt.bytes(items.reduce(0) { $0 + $1.total_bytes }))…") { nav.review(items: items) }
                     .buttonStyle(.borderedProminent)
                     .disabled(store.busy)
-                    .help("Review first (⌫)")
+                    .help("Opens a review first (⌘⌫)")
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)

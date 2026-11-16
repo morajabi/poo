@@ -56,10 +56,70 @@ final class Store {
     /// A scan or a watched change is being picked up.
     var refreshing: Bool { scanning || pendingChanges }
 
+    // MARK: Derived from the report, computed once per report instead of in every view body
+
+    /// Areas with something not in use, biggest first (overview, menu bar panel).
+    private(set) var areas: [AreaSummary] = []
+    /// Cleanable items nothing is using, biggest first.
+    private(set) var notInUse: [Item] = []
+    /// The biggest items Poo can act on, for the overview.
+    private(set) var largest: [Item] = []
+    /// Report-only items (Elsewhere on This Mac), biggest first.
+    private(set) var reportOnly: [Item] = []
+    /// Items by id, for selection and inspector lookups.
+    @ObservationIgnored private var itemIndex: [String: Int] = [:]
+    /// Bumps with every new report, so caches keyed on it go stale.
+    @ObservationIgnored private var generation = 0
+    @ObservationIgnored private var groupsCache: (key: String, value: [BrowseView.ItemGroup])?
+    @ObservationIgnored private var projectItemsCache: (gen: Int, value: [String: [Item]])?
+
+    private func derive() {
+        generation += 1
+        groupsCache = nil
+        projectItemsCache = nil
+        guard let r = report else {
+            areas = []; notInUse = []; reportOnly = []; largest = []; itemIndex = [:]
+            return
+        }
+        largest = Array(r.items.filter { !$0.isReportOnly }.sorted { $0.total_bytes > $1.total_bytes }.prefix(12))
+        reportOnly = r.items.filter(\.isReportOnly).sorted { $0.total_bytes > $1.total_bytes }
+        areas = AreaSummary.notInUse(r)
+        notInUse = r.items.filter { $0.status == .notInUse && $0.isCleanable }.sorted { $0.total_bytes > $1.total_bytes }
+        var idx: [String: Int] = [:]
+        idx.reserveCapacity(r.items.count)
+        for (n, i) in r.items.enumerated() { idx[i.id] = n }
+        itemIndex = idx
+    }
+
+    func item(_ id: String) -> Item? {
+        guard let n = itemIndex[id], let r = report, n < r.items.count else { return nil }
+        return r.items[n]
+    }
+
+    /// Browse's groups for a filter, cached until the report or the filter changes.
+    func groups(filter: BrowseFilter, bucket: String?) -> [BrowseView.ItemGroup] {
+        let key = "\(generation)|\(filter.grouping.rawValue)|\(filter.sorting.rawValue)|\(filter.query)|\(filter.statuses.map(\.rawValue).sorted())|\(bucket ?? "")|\(filter.group ?? "")"
+        if let c = groupsCache, c.key == key { return c.value }
+        let g = BrowseView.groups(report: report, filter: filter, bucket: bucket)
+        groupsCache = (key, g)
+        return g
+    }
+
+    /// Items per project path, biggest first.
+    var itemsByProject: [String: [Item]] {
+        if let c = projectItemsCache, c.gen == generation { return c.value }
+        var acc: [String: [Item]] = [:]
+        for i in report?.items ?? [] { if let p = i.project { acc[p, default: []].append(i) } }
+        for k in acc.keys { acc[k]!.sort { $0.total_bytes > $1.total_bytes } }
+        projectItemsCache = (generation, acc)
+        return acc
+    }
+
     init() {
         // First frame from the cached report; rescan in the background when stale.
         report = PooCLI.cachedReport()
         reportKey = report.map(Self.key)
+        derive()
         if let f = FreeSpace.read() { applyFree(f.free, total: f.total, animated: false) }
         // No scan before setup: the first scan waits for dev folders and permissions.
         if Onboarding.isDone {
@@ -130,8 +190,11 @@ final class Store {
         if let old = report, Self.sameVolume(old, new) {
             new.disk = old.disk
         }
-        withAnimation(.smooth(duration: 0.45)) { report = new }
-        selection = selection.filter { id in new.items.contains { $0.id == id } }
+        withAnimation(.smooth(duration: 0.45)) {
+            report = new
+            derive()
+        }
+        if !selection.isEmpty { selection = selection.filter { itemIndex[$0] != nil } }
         updateFreeSpace()
     }
 
@@ -234,6 +297,17 @@ final class Store {
         report?.items.filter { $0.bucket == bucket } ?? []
     }
 
+    @ObservationIgnored private var lastLightLoad: Date?
+
+    /// History and schedules for the panel and overview, at most once a minute (and after
+    /// every clean), so opening the panel doesn't spawn the CLI each time.
+    func loadLight() async {
+        if let t = lastLightLoad, Date().timeIntervalSince(t) < 60 { return }
+        lastLightLoad = Date()
+        await loadHistory()
+        await loadSchedules()
+    }
+
     func loadHistory() async {
         guard let h = try? await PooCLI.json(HistoryList.self, ["history"]) else { return }
         let since = Int64(Date().timeIntervalSince1970) - 7 * 86_400
@@ -326,6 +400,7 @@ final class Store {
         await reloadCachedReport()
         selection.removeAll()
         updateFreeSpace()
+        await loadHistory()
         await scan()
     }
 
@@ -337,7 +412,7 @@ final class Store {
     }
 
     var selectedItems: [Item] {
-        selection.isEmpty ? [] : (report?.items.filter { selection.contains($0.id) } ?? [])
+        selection.compactMap(item).sorted { $0.total_bytes > $1.total_bytes }
     }
 
     func toggle(_ id: String) {

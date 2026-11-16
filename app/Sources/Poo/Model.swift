@@ -584,6 +584,7 @@ struct HookTarget: Codable, Identifiable, Hashable {
 struct HookStatus: Codable {
     var targets: [HookTarget]
     var on_agent_done: String?
+    var remove_landed_worktrees: Bool?
 }
 
 // MARK: - Formatting
@@ -600,16 +601,27 @@ enum Fmt {
         n == 0 ? "0 KB" : byteFormatter.string(fromByteCount: Int64(clamping: n))
     }
 
-    static func ago(_ date: Date?) -> String {
-        guard let date else { return "–" }
+    /// Made once: list rows call `ago` for every row on every render.
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
         let f = RelativeDateTimeFormatter()
         f.unitsStyle = .abbreviated
-        return f.localizedString(for: date, relativeTo: Date())
+        return f
+    }()
+
+    static func ago(_ date: Date?) -> String {
+        guard let date else { return "–" }
+        return relativeFormatter.localizedString(for: date, relativeTo: Date())
     }
 
+    private static let home = NSHomeDirectory()
+
     static func tilde(_ path: String) -> String {
-        let home = NSHomeDirectory()
-        return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
+        path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
+    }
+
+    /// "1 item", "3 items".
+    static func count(_ n: Int, _ noun: String, plural: String? = nil) -> String {
+        "\(n) \(n == 1 ? noun : plural ?? noun + "s")"
     }
 }
 

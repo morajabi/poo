@@ -35,17 +35,31 @@ struct MenuBarView: View {
                 scanningView
             } else {
                 Divider()
-                ContentUnavailableView("No scan yet", systemImage: "internaldrive")
-                    .frame(maxWidth: .infinity, minHeight: 120)
+                VStack(spacing: 10) {
+                    Label(store.error == nil ? "No scan yet" : "The scan didn't finish",
+                          systemImage: store.error == nil ? "internaldrive" : "exclamationmark.triangle")
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+                    Button("Scan Now") { Task { await store.scan() } }
+                        .buttonStyle(.borderedProminent)
+                }
+                .frame(maxWidth: .infinity, minHeight: 110)
             }
             if let e = store.error {
                 Divider()
-                Label(e, systemImage: "exclamationmark.triangle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
+                    Text(e).lineLimit(2).truncationMode(.middle)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button { store.error = nil } label: { Image(systemName: "xmark") }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("Dismiss")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .help(e)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
             }
             Divider()
             footer
@@ -58,8 +72,7 @@ struct MenuBarView: View {
             updater.isIdle = { [store] in !store.busy && !store.scanning && store.menuSession == nil }
         }
         .task {
-            await store.loadSchedules()
-            await store.loadHistory()
+            await store.loadLight()
             // `--preview-menu-cleaning`: show the panel's progress with a simulated clean.
             if CommandLine.arguments.contains("--preview-menu-cleaning"), store.menuSession == nil, let r = store.report {
                 let items = r.items.filter { $0.status == .notInUse }.sorted { $0.total_bytes > $1.total_bytes }
@@ -121,7 +134,7 @@ struct MenuBarView: View {
                 .padding(.vertical, 10)
                 .zIndex(2)
         case .areas:
-            let areas = config.order(AreaSummary.notInUse(r))
+            let areas = config.order(store.areas)
             if store.menuSession == nil {
                 AreaPicker(areas: areas, limit: max(config.max_areas, 1), disabled: store.busy,
                            onReview: { openReview(areas: $0) },
@@ -236,7 +249,7 @@ struct MenuBarView: View {
     /// click elsewhere, so it only ever hands off with one click.
     private func openReview(bucket: String? = nil, areas: Set<String>? = nil) {
         guard let r = store.report else { return }
-        let notInUse = r.items.filter { $0.status == .notInUse && $0.isCleanable }
+        let notInUse = store.notInUse
         if let bucket {
             nav.review(items: notInUse.filter { $0.bucket == bucket })
         } else if let areas {
@@ -385,7 +398,7 @@ struct HealthLine: View {
 
     var body: some View {
         // The same total the area picker offers, so the numbers agree.
-        let safe = AreaSummary.notInUse(report).reduce(0) { $0 + $1.reclaim }
+        let safe = store.areas.reduce(0) { $0 + $1.reclaim }
         HStack(spacing: 5) {
             switch store.spaceLevel {
             case .critical: Label("Very low", systemImage: "circle.fill").foregroundStyle(.red)

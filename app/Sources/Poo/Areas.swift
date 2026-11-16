@@ -20,8 +20,10 @@ struct AreaSummary: Identifiable, Hashable {
     var items: [Item] = []
 
     /// "Swift build output", "Node packages", "DerivedData".
-    var title: String {
-        switch bucket.id {
+    var title: String { Self.title(bucket: bucket.id, group: group) }
+
+    static func title(bucket: String, group: String) -> String {
+        switch bucket {
         case "build": return "\(group) build output"
         case "deps": return "\(group) packages"
         case "caches": return group.lowercased().hasSuffix("cache") ? group : "\(group) cache"
@@ -192,7 +194,7 @@ struct AreaGroupedList: View {
                             if idx > 0 { Divider().padding(.leading, 46) }
                             AreaListRow(area: a, share: Double(a.reclaim) / Double(all)) { onOpen(a) }
                                 .contextMenu {
-                                    Button("Review & Clean \(Fmt.bytes(a.reclaim))…") { onReview(a.items.filter(\.isCleanable)) }
+                                    Button("Clean \(Fmt.bytes(a.reclaim))…") { onReview(a.items.filter(\.isCleanable)) }
                                     Button("Show in Browse") { onOpen(a) }
                                     Divider()
                                     let paths = a.items.filter { !$0.isVirtual }.map { URL(fileURLWithPath: $0.path) }
@@ -240,6 +242,7 @@ struct AreaListRow: View {
                 .buttonStyle(.borderless)
                 .foregroundStyle(.secondary)
                 .help("Show these items in Browse")
+                .accessibilityLabel("Show in Browse")
         }
         .font(.callout)
         .padding(.horizontal, 10)

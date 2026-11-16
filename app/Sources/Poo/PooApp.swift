@@ -64,11 +64,11 @@ struct PooApp: App {
                 Divider()
             }
             CommandMenu("Clean") {
-                let notInUse = store.report?.items.filter { $0.status == .notInUse && $0.isCleanable } ?? []
-                Button("Review Not in Use…") { nav.review(plan: "stale"); delegate.show("main", title: "Poo") }
+                let notInUse = store.notInUse
+                Button("Clean Not in Use…") { nav.review(plan: "stale"); delegate.show("main", title: "Poo") }
                     .keyboardShortcut("k", modifiers: [.command, .shift])
                     .disabled(notInUse.isEmpty || store.busy)
-                Button("Review Selection…") { nav.review(items: store.selectedItems); delegate.show("main", title: "Poo") }
+                Button("Clean Selection…") { nav.review(items: store.selectedItems); delegate.show("main", title: "Poo") }
                     .keyboardShortcut(.delete, modifiers: .command)
                     .disabled(store.selection.isEmpty || store.busy)
                 Divider()

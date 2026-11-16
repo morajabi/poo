@@ -24,10 +24,24 @@ struct OverviewView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     summary(r)
                         .zIndex(1)
-                    areas(r)
-                    topItems(r)
+                    if r.items.allSatisfy(\.isReportOnly) {
+                        ContentUnavailableView {
+                            Label("No dev storage found", systemImage: "internaldrive")
+                        } description: {
+                            Text("Poo looked in \(r.roots.isEmpty ? "your dev folders" : r.roots.map(Fmt.tilde).joined(separator: ", ")) and your tool caches.")
+                        } actions: {
+                            DevFoldersButton()
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 240)
+                    } else {
+                        areas(r)
+                        topItems(r)
+                    }
                     footnotes(r)
                 }
+                // Readable on wide windows, like a System Settings pane.
+                .frame(maxWidth: 1040)
+                .frame(maxWidth: .infinity)
                 .padding(.horizontal, 20)
                 .padding(.vertical, 16)
             } else {
@@ -38,10 +52,10 @@ struct OverviewView: View {
         .navigationTitle("Overview")
         .toolbar { ToolbarItem { AskAgentButton(target: "overview", title: "Ask") } }
         .task {
-            await store.loadHistory()
+            await store.loadLight()
             await store.loadPurgeable()
         }
-        .freshSubtitle(store.report.map { "\($0.items.count) items" } ?? "")
+        .freshSubtitle(store.report.map { Fmt.count($0.items.count, "item") } ?? "")
     }
 
     // MARK: Summary
@@ -155,7 +169,7 @@ struct OverviewView: View {
     @ViewBuilder
     private func areas(_ r: Report) -> some View {
         if areaStyle == "grouped" {
-            let grouped = AreaSummary.notInUse(r)
+            let grouped = store.areas
             if !grouped.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     header("Not in use · \(Fmt.bytes(grouped.reduce(0) { $0 + $1.reclaim }))", action: "Browse all") { nav.browse(statuses: [.notInUse]) }
@@ -165,7 +179,7 @@ struct OverviewView: View {
                 }
             }
         } else if areaStyle == "ranked" {
-            let ranked = AreaSummary.notInUse(r)
+            let ranked = store.areas
             if !ranked.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     header("Not in use, by area", action: "Browse all") { nav.browse(statuses: [.notInUse]) }
@@ -193,8 +207,7 @@ struct OverviewView: View {
 
     @ViewBuilder
     private func topItems(_ r: Report) -> some View {
-        let pool = (itemScope == "all" ? r.items : r.items.filter { $0.status == .notInUse }).filter { !$0.isReportOnly }
-        let items = pool.sorted { $0.total_bytes > $1.total_bytes }.prefix(12).map { $0 }
+        let items = itemScope == "all" ? store.largest : Array(store.notInUse.prefix(12))
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text("Largest items").font(.headline)
@@ -211,7 +224,8 @@ struct OverviewView: View {
                     .buttonStyle(.link)
             }
             if items.isEmpty {
-                Text("Nothing here right now.").font(.callout).foregroundStyle(.secondary).padding(.vertical, 6)
+                Text(itemScope == "all" ? "Nothing found yet." : "Nothing is sitting unused.")
+                    .font(.callout).foregroundStyle(.secondary).padding(.vertical, 6)
             } else {
                 DenseList(items) { i in
                     DenseItemRow(item: i)
@@ -343,7 +357,7 @@ struct ItemContextMenu: View {
     var item: Item
 
     var body: some View {
-        Button("Review & Clean…") { nav.review(items: [item]) }
+        Button("Clean…") { nav.review(items: [item]) }
             .disabled(!item.isCleanable)
         Button(store.selection.contains(item.id) ? "Deselect" : "Select") { store.toggle(item.id) }
             .disabled(!item.isCleanable)
@@ -379,8 +393,8 @@ struct BucketContextMenu: View {
     var bucket: BucketSummary
 
     var body: some View {
-        let notInUse = store.report?.items.filter { $0.bucket == bucket.id && $0.status == .notInUse && $0.isCleanable } ?? []
-        Button("Review & Clean \(Fmt.bytes(notInUse.reduce(0) { $0 + $1.total_bytes }))…") { nav.review(items: notInUse) }
+        let notInUse = store.notInUse.filter { $0.bucket == bucket.id }
+        Button("Clean \(Fmt.bytes(notInUse.reduce(0) { $0 + $1.total_bytes }))…") { nav.review(items: notInUse) }
             .disabled(notInUse.isEmpty || store.busy)
         Button("Select Not in Use") { store.select(notInUse, true) }
             .disabled(notInUse.isEmpty)

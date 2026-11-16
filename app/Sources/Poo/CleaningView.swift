@@ -240,10 +240,12 @@ struct SweepAnimation: View {
 struct SuccessBurst: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var start = Date()
+    @State private var over = false
 
     var body: some View {
         if !reduceMotion {
-            TimelineView(.animation) { tl in
+            // Pauses once the burst is over, so the sheet doesn't redraw at 120 Hz for nothing.
+            TimelineView(.animation(paused: over)) { tl in
                 let e = tl.date.timeIntervalSince(start)
                 Canvas { ctx, size in
                     guard e < 1.4 else { return }
@@ -262,6 +264,10 @@ struct SuccessBurst: View {
             }
             .allowsHitTesting(false)
             .onAppear { start = Date() }
+            .task {
+                try? await Task.sleep(for: .seconds(1.5))
+                over = true
+            }
         }
     }
 }

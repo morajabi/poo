@@ -43,7 +43,7 @@ struct GeneralSettings: View {
                         }
                     }
                 }
-                Button("Add folder…") { pickFolder() }
+                Button("Add Folder…") { pickFolder() }
             }
             Section("Updates") {
                 @Bindable var updater = updater
@@ -66,11 +66,11 @@ struct GeneralSettings: View {
                     set: { on in try? on ? SMAppService.mainApp.register() : SMAppService.mainApp.unregister() }
                 ))
                 .disabled(!Onboarding.isBundled)
-                Button("Run setup again…") { AppDelegate.shared?.show("onboarding", title: "Set Up Poo") }
+                Button("Run Setup Again…") { AppDelegate.shared?.show("onboarding", title: "Set Up Poo") }
             }
             Section("Data") {
-                Button("Rescan now") { Task { await store.scan() } }
-                Button("Open config folder") {
+                Button("Rescan Now") { Task { await store.scan() } }
+                Button("Open Config Folder") {
                     NSWorkspace.shared.open(URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".config/poo"))
                 }
             }
@@ -102,14 +102,14 @@ struct BucketSettings: View {
         Form {
             Section {
                 ForEach(store.catalog?.buckets ?? []) { b in BucketRow(bucket: b) }
-            } header: {
-                Text("Buckets group items in the menu bar, the window, the CLI and MCP. Changes are saved to config.toml.")
-                    .font(.caption)
+            } footer: {
+                Text("Rename with Return. Saved to config.toml.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("New bucket") {
                 HStack {
-                    TextField("id", text: $newID).frame(width: 120)
-                    TextField("Name", text: $newName)
+                    TextField("ID", text: $newID, prompt: Text("id")).labelsHidden().frame(width: 120)
+                    TextField("Name", text: $newName, prompt: Text("Name")).labelsHidden()
                     Button("Add") {
                         let id = newID.lowercased().replacingOccurrences(of: " ", with: "-")
                         Task { await store.configure(["buckets", "add", id, "--name", newName.isEmpty ? newID : newName]) }
@@ -133,7 +133,9 @@ struct BucketRow: View {
     var body: some View {
         HStack {
             Image(systemName: bucket.symbol).foregroundStyle(Color(hex: bucket.color)).frame(width: 20)
-            TextField("Name", text: $name)
+            TextField("Name", text: $name, prompt: Text(bucket.id))
+                .labelsHidden()
+                .textFieldStyle(.plain)
                 .onSubmit { Task { await store.configure(["buckets", "set", bucket.id, "--name", name], rescan: true) } }
             ColorPicker("", selection: $color, supportsOpacity: false)
                 .labelsHidden()
@@ -145,7 +147,7 @@ struct BucketRow: View {
                 Task { await store.configure(["buckets", "set", bucket.id, "--hidden", h ? "true" : "false"], rescan: true) }
             }))
             .toggleStyle(.checkbox)
-            Text(bucket.id).font(.caption.monospaced()).foregroundStyle(.secondary).frame(width: 90, alignment: .trailing)
+            Text(bucket.id).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1).frame(width: 90, alignment: .trailing)
         }
         .onAppear {
             name = bucket.name
@@ -191,12 +193,15 @@ struct RuleSettings: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Picker("", selection: $scope) {
-                    Text("On this Mac").tag("mac")
-                    Text("All rules").tag("all")
+                    Text("On This Mac").tag("mac")
+                    Text("All Rules").tag("all")
                 }
                 .pickerStyle(.segmented)
+                .labelsHidden()
                 .fixedSize()
-                TextField("Search rules or tags", text: $query).textFieldStyle(.roundedBorder)
+                TextField("Search", text: $query, prompt: Text("Search rules or tags"))
+                    .labelsHidden()
+                    .textFieldStyle(.roundedBorder)
             }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
@@ -213,37 +218,48 @@ struct RuleSettings: View {
                 }
             }
             List(rules) { r in
-                HStack(alignment: .top) {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Toggle("", isOn: Binding(get: { r.enabled }, set: { on in
                         Task { await store.configure(["rules", on ? "enable" : "disable", r.id], rescan: true) }
                     }))
                     .labelsHidden()
+                    .accessibilityLabel(r.name)
                     VStack(alignment: .leading, spacing: 2) {
-                        HStack {
-                            Text(r.name).font(.callout.weight(.medium))
-                            Text(r.id).font(.caption.monospaced()).foregroundStyle(.secondary)
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(r.name).font(.callout.weight(.medium)).lineLimit(1)
                             if let h = store.report?.rule_hits?[r.id], h.count == 2 {
-                                Text("\(Fmt.bytes(h[1])) here").font(.caption).foregroundStyle(.teal)
+                                Text("\(Fmt.bytes(h[1])) here").font(.caption).foregroundStyle(.teal).fixedSize()
                             }
                         }
                         Text(r.description).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                     }
-                    Spacer()
-                    Picker("", selection: Binding(get: { r.bucket }, set: { b in
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .help(r.id)
+                    Picker("Bucket", selection: Binding(get: { r.bucket }, set: { b in
                         Task { await store.configure(["rules", "set", r.id, "bucket=\"\(b)\""], rescan: true) }
                     })) {
                         ForEach(store.catalog?.buckets ?? []) { b in Text(b.name).tag(b.id) }
                     }
                     .labelsHidden()
+                    .controlSize(.small)
                     .frame(width: 150)
-                    if r.cost != "none" && r.tier == nil {
-                        Stepper(value: Binding(get: { r.warm_days }, set: { d in
-                            Task { await store.configure(["rules", "set", r.id, "warm_days=\(d)"], rescan: true) }
-                        }), in: 0...365) {
-                            Text(r.warm_days == 0 ? "default" : "\(r.warm_days)d").font(.caption).monospacedDigit().frame(width: 50)
+                    // Rules that age out get "unused after N days"; the rest keep the column empty.
+                    HStack(spacing: 2) {
+                        if r.cost != "none" && r.tier == nil {
+                            Text(r.warm_days == 0 ? "Default" : "\(r.warm_days)d")
+                                .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                            Stepper("Days", value: Binding(get: { r.warm_days }, set: { d in
+                                Task { await store.configure(["rules", "set", r.id, "warm_days=\(d)"], rescan: true) }
+                            }), in: 0...365)
+                            .labelsHidden()
+                            .controlSize(.small)
                         }
-                        .help("Unused this many days counts as cold")
                     }
+                    .frame(width: 70, alignment: .trailing)
+                    .help("Unused this many days counts as unused. Default follows scan.warm_days.")
+                }
+                .contextMenu {
+                    Button("Copy Rule ID") { Pasteboard.copy(r.id) }
                 }
             }
         }
@@ -269,47 +285,80 @@ struct AutomationSettings: View {
                             }
                         }
                     })) {
-                        VStack(alignment: .leading) {
+                        VStack(alignment: .leading, spacing: 2) {
                             Text(p.id.capitalized)
-                            Text(p.description).font(.caption).foregroundStyle(.secondary)
+                            Text(Self.plain(p.description)).font(.caption).foregroundStyle(.secondary)
+                            if let e = existing, e.schedule.enabled || e.last_run != nil {
+                                Text(detail(e)).font(.caption).foregroundStyle(.tertiary)
+                            }
                         }
+                    }
+                    .contextMenu {
+                        if let e = existing { scheduleMenu(e) }
                     }
                 }
             } header: {
-                Text("Routine cleanups run on their own, rescan first, and only clean items without warnings.")
+                Text("Routine cleanups")
+            } footer: {
+                Text("Each run rescans first and only cleans items without warnings.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
-            if !store.schedules.isEmpty {
-                Section("Schedules") {
-                    ForEach(store.schedules) { e in
+            // Schedules an agent or the CLI added beyond the presets.
+            let custom = store.schedules.filter { e in e.id != "guard" && !store.presets.contains { $0.id == e.id } }
+            if !custom.isEmpty {
+                Section("Other schedules") {
+                    ForEach(custom) { e in
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("\(e.schedule.id) · \(e.schedule.plan) every \(e.schedule.every)\(e.schedule.at.map { " at \($0)" } ?? "")")
                                 Text(detail(e)).font(.caption).foregroundStyle(.secondary)
                             }
                             Spacer()
-                            Button("Run now") { Task { await store.configure(["schedule", "run", e.id], rescan: false); await store.loadSchedules(); store.report = PooCLI.cachedReport() ?? store.report } }
-                            Button("Remove") { Task { await store.configure(["schedule", "rm", e.id]) } }
+                            Menu {
+                                scheduleMenu(e)
+                            } label: {
+                                Image(systemName: "ellipsis.circle")
+                            }
+                            .menuStyle(.borderlessButton)
+                            .menuIndicator(.hidden)
+                            .fixedSize()
+                            .accessibilityLabel("Actions for \(e.schedule.id)")
                         }
+                        .contextMenu { scheduleMenu(e) }
                     }
                 }
-            }
-            Section {
-                Text("Agents can manage schedules too: `poo schedule add nightly`, or the MCP `schedules` tool.")
-                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
         .task { await store.loadSchedules() }
     }
 
+    @ViewBuilder
+    private func scheduleMenu(_ e: ScheduleEntry) -> some View {
+        Button("Run Now") {
+            Task {
+                await store.configure(["schedule", "run", e.id], rescan: false)
+                await store.loadSchedules()
+                await store.reloadCachedReport()
+            }
+        }
+        .disabled(store.busy)
+        Divider()
+        Button("Remove Schedule") { Task { await store.configure(["schedule", "rm", e.id]) } }
+    }
+
+    /// Preset descriptions come from the CLI with Markdown code spans.
+    static func plain(_ s: String) -> String { s.replacingOccurrences(of: "`", with: "") }
+
     private func detail(_ e: ScheduleEntry) -> String {
         var parts: [String] = []
         if let c = e.schedule.when_free_below { parts.append("when free < \(c)") }
         if let t = e.schedule.target_free { parts.append("free up to \(t)") }
         if let l = e.last_run {
-            parts.append("last \(Fmt.ago(Date(timeIntervalSince1970: TimeInterval(l.at)))): \(l.status) \(Fmt.bytes(l.freed_bytes))")
+            let what = l.status == "ok" ? "freed \(Fmt.bytes(l.freed_bytes))" : l.status
+            parts.append("Last ran \(Fmt.ago(Date(timeIntervalSince1970: TimeInterval(l.at)))), \(what)")
         } else {
-            parts.append("never ran")
+            parts.append("Hasn't run yet")
         }
         if e.schedule.enabled, let n = e.next_run {
             parts.append("next \(Fmt.ago(Date(timeIntervalSince1970: TimeInterval(n))))")
@@ -341,12 +390,12 @@ struct AgentSettings: View {
                     }
                     .font(.callout)
                 }
-                Button("Install for all detected agents") { Task { await store.configure(["integration", "install", "all"]) } }
+                Button("Install for All Agents") { Task { await store.configure(["integration", "install", "all"]) } }
             }
             HooksSection()
             Section("Let your agent configure Poo") {
                 Text(Self.setupPrompt).font(.callout).textSelection(.enabled)
-                Button(copied ? "Copied" : "Copy prompt") {
+                Button(copied ? "Copied" : "Copy Prompt") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(Self.setupPrompt, forType: .string)
                     copied = true
@@ -383,7 +432,7 @@ struct ModSettings: View {
                 }
             }
             Section {
-                Button("Open mods folder") {
+                Button("Open Mods Folder") {
                     let url = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".config/poo/mods")
                     try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
                     NSWorkspace.shared.open(url)
@@ -523,22 +572,23 @@ struct GuardSection: View {
             })) {
                 Text("Clean up when the disk runs low")
             }
-            HStack(spacing: 6) {
-                Text("When free space drops below")
-                sizePicker($below, ["10G", "20G", "30G", "50G"], current: entry?.schedule.when_free_below)
-                Text(", clean what's not in use until")
-                sizePicker($target, ["30G", "50G", "75G", "100G"], current: entry?.schedule.target_free)
-                Text("is free.")
+            Group {
+                LabeledContent("When free space is below") {
+                    sizePicker($below, ["10G", "20G", "30G", "50G"], current: entry?.schedule.when_free_below)
+                }
+                LabeledContent("Free up until") {
+                    sizePicker($target, ["30G", "50G", "75G", "100G"], current: entry?.schedule.target_free)
+                }
             }
-            .disabled(entry?.schedule.enabled == false)
+            .disabled(entry?.schedule.enabled != true)
             if let l = entry?.last_run {
-                Text("Last ran \(Fmt.ago(Date(timeIntervalSince1970: TimeInterval(l.at)))): \(l.status), freed \(Fmt.bytes(l.freed_bytes))")
+                Text("Last ran \(Fmt.ago(Date(timeIntervalSince1970: TimeInterval(l.at)))), \(l.status == "ok" ? "freed \(Fmt.bytes(l.freed_bytes))" : l.status)")
                     .font(.caption).foregroundStyle(.secondary)
             }
         } header: {
             Text("Low-disk guard")
         } footer: {
-            Text("Checks every minute while Poo runs (and every 30 minutes in the background). Only cleans items nothing is using, oldest and cheapest first.")
+            Text("Cleans only what nothing is using, oldest and cheapest first. Checks every minute while Poo runs.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .onAppear {
@@ -585,9 +635,23 @@ struct HooksSection: View {
                     }
                 }
                 Picker("Clean up", selection: Binding(get: { h.on_agent_done ?? "landed" }, set: { v in Task { await store.setHooksMode(v) } })) {
-                    Text("Only when the worktree's work landed in main").tag("landed")
-                    Text("Whenever an agent session ends in a worktree").tag("always")
+                    Text("When the work landed in main").tag("landed")
+                    Text("Whenever a session ends").tag("always")
                     Text("Off").tag("off")
+                }
+                if let remove = h.remove_landed_worktrees {
+                    Toggle(isOn: Binding(get: { remove }, set: { on in
+                        Task {
+                            await store.configure(["config", "set", "hooks.remove_landed_worktrees", on ? "true" : "false"])
+                            await store.loadHooks()
+                        }
+                    })) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Also remove landed worktrees")
+                            Text("Only worktrees without uncommitted changes.").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    .disabled((h.on_agent_done ?? "landed") == "off")
                 }
             } else {
                 Text(store.hooksAvailable ? "Loading…" : "Agent hooks need a newer poo command-line tool.")
@@ -596,7 +660,7 @@ struct HooksSection: View {
         } header: {
             Text("Clean up after agents")
         } footer: {
-            Text("Optional. When an agent finishes in a worktree, Poo cleans that worktree's build output. It never touches the code.")
+            Text("When an agent finishes in a worktree, Poo cleans that worktree's build output. Never code.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
