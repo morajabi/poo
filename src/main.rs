@@ -1569,7 +1569,7 @@ fn real_main(cli: Cli) -> R {
             if out.json {
                 emit(&out, &v);
             } else {
-                println!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
+                print_doctor(&ctx, &roots, detected, &st);
             }
         }
         Cmd::Gc => {
@@ -1582,6 +1582,140 @@ fn real_main(cli: Cli) -> R {
         }
     }
     Ok(())
+}
+
+/// `poo doctor` for people: one line per check, with what to do when it fails.
+fn print_doctor(ctx: &Ctx, roots: &[std::path::PathBuf], detected: bool, integrations: &[poo::agent::Target]) {
+    let st = render::Style::new();
+    let line = |ok: Option<bool>, what: String, hint: Option<String>| {
+        let mark = match ok {
+            Some(true) => st.good("✓"),
+            Some(false) => st.note("✗"),
+            None => st.dim("–"),
+        };
+        println!("{} {}", mark, what);
+        if let Some(h) = hint {
+            println!("  {}", st.dim(&h));
+        }
+    };
+    let exe = std::env::current_exe().ok();
+    let exe_real = exe.as_ref().and_then(|e| std::fs::canonicalize(e).ok());
+    let managed = poo::update::managed_by(exe.as_deref().unwrap_or(std::path::Path::new("")));
+
+    // Version and updates, from the last check on record (doctor never goes online).
+    match poo::update::last_check() {
+        Some((_, latest)) if poo::update::newer(&latest, poo::VERSION) => line(
+            Some(false),
+            format!("poo {} (version {} is available)", poo::VERSION, latest),
+            Some(managed.clone().map(|m| format!("update with {}", m)).unwrap_or_else(|| "run `poo update`".into())),
+        ),
+        Some((at, _)) => line(Some(true), format!("poo {} is the latest (checked {})", poo::VERSION, poo::util::age(at)), None),
+        None => line(None, format!("poo {} (no update check yet)", poo::VERSION), Some("run `poo update --check`".into())),
+    }
+
+    // Full Disk Access.
+    if poo::util::has_full_disk_access() {
+        line(Some(true), "Full Disk Access granted".into(), None);
+    } else {
+        line(
+            Some(false),
+            "No Full Disk Access: some caches, Mail, Messages and protected folders are skipped".into(),
+            Some(format!(
+                "System Settings > Privacy & Security > Full Disk Access, then add {}",
+                exe_real.as_ref().map(|e| tilde(e)).unwrap_or_else(|| "poo".into())
+            )),
+        );
+    }
+
+    // On PATH, and whether it is this copy.
+    match poo::util::which("poo") {
+        Some(p) => {
+            let same = std::fs::canonicalize(&p).ok() == exe_real;
+            let note = if same || exe_real.is_none() { String::new() } else { format!(" (a different copy than this one, {})", exe_real.as_ref().map(|e| tilde(e)).unwrap_or_default()) };
+            line(Some(true), format!("`poo` is on PATH at {}{}", tilde(&p), note), None);
+        }
+        None => line(
+            Some(false),
+            "`poo` is not on PATH, so agents and scripts cannot find it".into(),
+            Some(match exe_real.as_ref().and_then(|e| e.parent()) {
+                Some(d) => format!("add {} to PATH, or link it: ln -s {} ~/.local/bin/poo", tilde(d), exe_real.as_ref().map(|e| e.to_string_lossy().to_string()).unwrap_or_default()),
+                None => "reinstall poo (see the README)".into(),
+            }),
+        ),
+    }
+
+    // Roots.
+    let missing: Vec<&String> = ctx.cfg.roots.iter().filter(|r| !poo::util::expand(r).is_dir()).collect();
+    if roots.is_empty() {
+        line(Some(false), "No dev roots to walk".into(), Some("run `poo setup`, or `poo roots add ~/dev`".into()));
+    } else {
+        let list = roots.iter().map(|r| tilde(r)).collect::<Vec<_>>().join(", ");
+        let how = if detected { "detected" } else { "configured" };
+        line(Some(true), format!("{} root{} ({}): {}", roots.len(), if roots.len() == 1 { "" } else { "s" }, how, list), detected.then(|| "pin them with `poo setup` or `poo roots add <path>`".to_string()));
+    }
+    if !missing.is_empty() {
+        line(
+            Some(false),
+            format!("configured root{} not found: {}", if missing.len() == 1 { "" } else { "s" }, missing.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")),
+            Some("remove with `poo roots rm <path>`".into()),
+        );
+    }
+
+    // Config and mods (a config that does not load stops poo before this point).
+    line(Some(true), format!("config is valid ({})", tilde(&poo::config::config_path())), None);
+    if ctx.cat.errors.is_empty() {
+        line(Some(true), format!("{} mod{}, {} rules load cleanly", ctx.cat.mods.len(), if ctx.cat.mods.len() == 1 { "" } else { "s" }, ctx.cat.rules.len()), None);
+    } else {
+        line(
+            Some(false),
+            format!("{} mod error{}: {}", ctx.cat.errors.len(), if ctx.cat.errors.len() == 1 { "" } else { "s" }, ctx.cat.errors[0]),
+            Some("see `poo mods validate --text`".into()),
+        );
+    }
+
+    // Last scan.
+    match poo::scan::load_report() {
+        Some(r) => line(Some(true), format!("last scan {}", poo::util::age(r.scanned_at)), None),
+        None => line(Some(false), "no scan yet".into(), Some("run `poo scan` (the first full scan takes 10-60s)".into())),
+    }
+
+    // Coding agent integrations: only the agents found on this Mac.
+    let found: Vec<&poo::agent::Target> = integrations.iter().filter(|t| t.detected).collect();
+    if found.is_empty() {
+        line(None, "no coding agents found for the skill or MCP server".into(), None);
+    }
+    for t in found {
+        let skill = match (t.skill_path.is_some(), t.skill_installed, t.skill_current) {
+            (false, _, _) => None,
+            (true, true, true) => Some((true, "skill current")),
+            (true, true, false) => Some((false, "skill outdated")),
+            (true, false, _) => Some((false, "no skill")),
+        };
+        let mcp = t.mcp_config.is_some().then(|| if t.mcp_registered { (true, "MCP installed") } else { (false, "no MCP server") });
+        let parts: Vec<(bool, &str)> = skill.into_iter().chain(mcp).collect();
+        let ok = parts.iter().all(|(ok, _)| *ok);
+        let text = parts.iter().map(|(_, s)| *s).collect::<Vec<_>>().join(", ");
+        line(Some(ok), format!("{}: {}", t.name, text), (!ok).then(|| format!("run `poo integration install {}`", t.id)));
+    }
+
+    // Schedules need the launchd agent.
+    let enabled = ctx.cfg.schedule.iter().filter(|s| s.enabled).count();
+    if enabled == 0 {
+        line(None, "no schedules".into(), Some("see `poo schedule presets`".into()));
+    } else if poo::schedule::agent_loaded() {
+        line(Some(true), format!("scheduler running for {} schedule{}", enabled, if enabled == 1 { "" } else { "s" }), None);
+    } else {
+        line(
+            Some(false),
+            format!("{} schedule{} on, but the scheduler is not {}", enabled, if enabled == 1 { "" } else { "s" }, if poo::schedule::agent_installed() { "loaded" } else { "installed" }),
+            Some("run `poo schedule install`".into()),
+        );
+    }
+
+    // Tools poo uses when they are there.
+    if poo::util::which("git").is_none() {
+        line(Some(false), "git not found: worktrees and ignored-folder checks are off".into(), Some("install the Xcode command line tools: xcode-select --install".into()));
+    }
 }
 
 /// What a schedule does and would clean right now, for the user to approve.
