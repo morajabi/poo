@@ -28,7 +28,7 @@ fn tools() -> Value {
     });
     let mut list_props = filter_props.clone();
     list_props["sort"] = json!({"type": "string", "enum": ["size", "age", "tier", "name"]});
-    list_props["limit"] = json!({"type": "integer", "default": 50});
+    list_props["limit"] = json!({"type": "integer", "default": 25, "description": "Most items to return, biggest first unless sort says otherwise"});
     let mut plan_props = filter_props.clone();
     plan_props["plan"] = json!({"type": "string", "description": "quick, stale, deep or emergency (plans are configurable)"});
     plan_props["free"] = json!({"type": "string", "description": "Target to free, e.g. 30G. Makes the plan pick least-regret items until reached."});
@@ -147,6 +147,51 @@ fn filter_from(a: &Value) -> Filter {
     }
 }
 
+/// Items for agents: the `ops::compact` fields minus nulls, `false` and empty lists, and a
+/// rule's `recommend` only on its first item (it is the same text for every item of a
+/// rule; `inspect` always has it). Keeps long lists a fraction of the size.
+fn lean<'a>(items: impl IntoIterator<Item = &'a crate::model::Item>) -> Vec<Value> {
+    let mut told = std::collections::HashSet::new();
+    items
+        .into_iter()
+        .map(|i| {
+            let mut v = ops::compact(i);
+            if let Some(o) = v.as_object_mut() {
+                o.retain(|_, x| !(x.is_null() || x == &json!(false) || x.as_array().is_some_and(|a| a.is_empty())));
+                if !told.insert(i.rule.clone()) {
+                    o.remove("recommend");
+                }
+            }
+            v
+        })
+        .collect()
+}
+
+/// Drops `null` fields everywhere (an absent field reads the same to an agent).
+fn strip_nulls(v: &mut Value) {
+    match v {
+        Value::Object(o) => {
+            o.retain(|_, x| !x.is_null());
+            o.values_mut().for_each(strip_nulls);
+        }
+        Value::Array(a) => a.iter_mut().for_each(strip_nulls),
+        _ => {}
+    }
+}
+
+/// clean.rs speaks in CLI flags; agents set `mode` instead.
+fn mcp_wording(mut v: Value) -> Value {
+    if let Some(rs) = v.get_mut("results").and_then(|r| r.as_array_mut()) {
+        for r in rs {
+            if let Some(reason) = r.get("reason").and_then(|x| x.as_str()) {
+                let fixed = reason.replace("add --include-in-use to clean it anyway", "needs mode: \"in-use\" (ask the user first)").replace("needs --include-in-use", "needs mode: \"in-use\"").replace("--include-in-use", "mode: \"in-use\"");
+                r["reason"] = json!(fixed);
+            }
+        }
+    }
+    v
+}
+
 fn mode_from(a: &Value) -> RiskLevel {
     match s(a, "mode").as_deref() {
         Some("in-use") | Some("force") => RiskLevel::Force,
@@ -168,18 +213,32 @@ fn call(ctx: &mut Ctx, name: &str, a: &Value) -> Result<Value> {
         "overview" => {
             let r = ops::report(ctx, rescan, ScanOptions { full, ..Default::default() })?;
             let mut v = ops::overview(&r);
+            v["top_items"] = json!(lean(r.items.iter().take(10)));
+            // Colors and SF Symbols are for the app; agents get the numbers.
+            for b in v["buckets"].as_array_mut().into_iter().flatten() {
+                if let Some(o) = b.as_object_mut() {
+                    o.remove("color");
+                    o.remove("symbol");
+                    o.retain(|_, x| x != &json!(false));
+                }
+            }
             v["setup_completed"] = json!(ctx.cfg.setup.completed_at.is_some());
             v["autonomy_max_tier"] = json!(ctx.cfg.agents.auto_clean_max_tier);
             Ok(v)
         }
         "list_items" => {
             let r = ops::report(ctx, false, ScanOptions::default())?;
-            let limit = a.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
+            let limit = a.get("limit").and_then(|v| v.as_u64()).unwrap_or(25) as usize;
             let sort = s(a, "sort").unwrap_or_else(|| "size".into());
             let f = filter_from(a);
             let all = ops::list(&r, &f, &sort, 0);
             let total: u64 = all.iter().map(|i| i.bytes).sum();
-            Ok(json!({"count": all.len(), "total_bytes": total, "items": all.iter().take(limit).map(|i| ops::compact(i)).collect::<Vec<_>>()}))
+            let shown = lean(all.iter().take(limit).copied());
+            let mut v = json!({"count": all.len(), "total_bytes": total, "items": shown});
+            if all.len() > limit {
+                v["more"] = json!(format!("{} more; narrow with bucket, tier, project, min_size or query, or raise limit", all.len() - limit));
+            }
+            Ok(v)
         }
         "inspect" => {
             let r = ops::report(ctx, false, ScanOptions::default())?;
@@ -194,7 +253,7 @@ fn call(ctx: &mut Ctx, name: &str, a: &Value) -> Result<Value> {
             let target = s(a, "free").and_then(|f| parse_bytes(&f));
             let p = ops::make_plan(ctx, &r, &id, target, &filter_from(a), Admission::mode(mode_from(a)))?;
             Ok(json!({"plan": p.plan, "name": p.name, "bytes": p.bytes, "count": p.count, "target_bytes": p.target_bytes,
-                      "items": p.items.iter().map(ops::compact).collect::<Vec<_>>()}))
+                      "items": lean(&p.items)}))
         }
         "clean" => {
             let mut r = ops::report(ctx, false, ScanOptions::default())?;
@@ -220,7 +279,7 @@ fn call(ctx: &mut Ctx, name: &str, a: &Value) -> Result<Value> {
                 return Ok(json!({
                     "status": "needs_approval",
                     "message": format!("{} above the autonomy tier `{}`. Show them to the user; call again with approved_by_user: true only after they approve.", if needs.len() == 1 { "1 item is".to_string() } else { format!("{} items are", needs.len()) }, limit.as_str()),
-                    "items": needs.iter().map(|i| ops::compact(i)).collect::<Vec<_>>(),
+                    "items": lean(needs.iter().copied()),
                 }));
             }
             let mut opts = CleanOptions::from_config(&ctx.cfg, mode, dry, "mcp");
@@ -232,11 +291,13 @@ fn call(ctx: &mut Ctx, name: &str, a: &Value) -> Result<Value> {
             if !dry {
                 ops::forget_cleaned(ctx, &mut r, &res);
             }
-            Ok(serde_json::to_value(res)?)
+            Ok(mcp_wording(serde_json::to_value(res)?))
         }
         "projects" => {
             let r = ops::report(ctx, false, ScanOptions::default())?;
-            Ok(json!({"projects": r.projects, "worktrees": ops::worktrees(&r)["repos"]}))
+            let mut v = json!({"projects": r.projects, "worktrees": ops::worktrees(&r)["repos"]});
+            strip_nulls(&mut v);
+            Ok(v)
         }
         "catalog" => Ok(catalog(ctx, a)),
         "explain_path" => {
@@ -328,7 +389,7 @@ fn call(ctx: &mut Ctx, name: &str, a: &Value) -> Result<Value> {
             let limit = a.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
             Ok(json!({"history": clean::history(limit)}))
         }
-        _ => Err(anyhow!("unknown tool `{}`", name)),
+        _ => Err(anyhow!("unknown tool `{}`; tools: {}", name, tools().as_array().map(|t| t.iter().filter_map(|x| x["name"].as_str()).collect::<Vec<_>>().join(", ")).unwrap_or_default())),
     }
 }
 
@@ -462,7 +523,7 @@ pub fn schedule_preview(ctx: &mut Ctx, x: &crate::config::Schedule) -> Result<Va
         "status": "needs_approval",
         "message": format!("Not saved. Show the user this schedule and what it would clean right now ({} in {}; scheduled runs skip items with risks), then call again with approved_by_user: true after they say yes.", crate::util::bytes(p.bytes), crate::util::plural(p.count as u64, "item")),
         "schedule": x,
-        "would_clean_now": {"plan": p.plan, "bytes": p.bytes, "count": p.count, "items": p.items.iter().take(15).map(ops::compact).collect::<Vec<_>>()},
+        "would_clean_now": {"plan": p.plan, "bytes": p.bytes, "count": p.count, "items": lean(p.items.iter().take(15))},
     }))
 }
 
@@ -474,6 +535,8 @@ fn error_json(msg: &str) -> Value {
         ("not_found", "schedules {action: list} shows the ids")
     } else if msg.contains("config.toml") {
         ("invalid_config", "show the user the error, then fix the TOML in config.toml or move it aside; poo retries loading it on every call")
+    } else if msg.starts_with("unknown tool") {
+        ("usage", "call tools/list for the current tools and their inputs")
     } else if msg.contains("is required") || msg.starts_with("unknown") || msg.starts_with("pass ") {
         ("usage", "check this tool's inputSchema")
     } else {
