@@ -114,14 +114,33 @@ struct SelectBox: View {
 struct ItemRow: View {
     var item: Item
     var subtitle: String?
+    /// Set by lists that measure their own width once (Browse), so thousands of rows don't
+    /// each lay out three variants. Nil picks per row.
+    var density: Density? = nil
+
+    enum Density {
+        case full, noAge, compact
+
+        /// Narrow (inspector open, small window): the age column goes first, then the badge
+        /// shrinks to a dot, so the name keeps its room.
+        init(width: CGFloat) {
+            self = width >= 600 ? .full : width >= 420 ? .noAge : .compact
+        }
+    }
 
     var body: some View {
-        // Narrow (inspector open, small window): the age column goes first, then the badge
-        // shrinks to a dot, so the name keeps its room.
-        ViewThatFits(in: .horizontal) {
-            row(showsAge: true)
-            row(showsAge: false)
-            row(showsAge: false, compact: true)
+        Group {
+            switch density {
+            case .full: row(showsAge: true)
+            case .noAge: row(showsAge: false)
+            case .compact: row(showsAge: false, compact: true)
+            case nil:
+                ViewThatFits(in: .horizontal) {
+                    row(showsAge: true)
+                    row(showsAge: false)
+                    row(showsAge: false, compact: true)
+                }
+            }
         }
         .padding(.vertical, 2)
     }

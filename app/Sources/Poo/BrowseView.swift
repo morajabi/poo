@@ -8,6 +8,7 @@ struct BrowseView: View {
     var lockedBucket: String?
     @State private var inspected: Item.ID?
     @State private var collapsed: Set<String> = []
+    @State private var density: ItemRow.Density = .full
 
     struct ItemGroup: Identifiable {
         var id: String
@@ -33,7 +34,7 @@ struct BrowseView: View {
                 Section {
                     if !collapsed.contains(g.id) {
                         ForEach(g.items) { i in
-                            ItemRow(item: i, subtitle: subtitle(i, filter.grouping))
+                            ItemRow(item: i, subtitle: subtitle(i, filter.grouping), density: density)
                                 .tag(i.id as String?)
                                 .contextMenu { ItemContextMenu(item: i) }
                         }
@@ -44,6 +45,7 @@ struct BrowseView: View {
             }
         }
         .listStyle(.inset)
+        .onGeometryChange(for: ItemRow.Density.self) { ItemRow.Density(width: $0.size.width) } action: { density = $0 }
         .overlay {
             if report == nil {
                 NoReportView()
