@@ -246,7 +246,7 @@ jobs:
           set -eu
           base="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}"
           prev="$(git tag --sort=-v:refname | grep -v "^v${VERSION}$" | head -n1 || true)"
-          changes="$(git log --no-merges --format='- %s' ${prev:+$prev..}HEAD | grep -v -e '\[skip release\]' -e '^- docs:' -e '^- chore:' | head -n 30 || true)"
+          changes="$(git log --no-merges --format='- %s' ${prev:+$prev..}HEAD | grep -v -e '\[skip release\]' -e '^- docs:' -e '^- chore:' -e '^- site:' | head -n 30 || true)"
           cat > notes.md <<NOTES
           Poo finds and safely frees the disk space your dev work eats: build output, caches, simulators and agent worktrees. Menu bar app, CLI and MCP server. [What it does](https://github.com/${GITHUB_REPOSITORY}#readme).
 

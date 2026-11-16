@@ -27,7 +27,7 @@ git rev-parse -q --verify "refs/tags/v$version" >/dev/null && { echo "v$version 
 prev="$(git tag --sort=-v:refname -l 'v*' | head -n1)"
 echo "v$version <- $(git log -1 --format='%h %s' "$sha")"
 echo "changes since ${prev:-the start}:"
-git log --no-merges --format='  %s' ${prev:+$prev..}"$sha" | grep -v -e '^  docs:' -e '^  chore:' | head -n 30
+git log --no-merges --format='  %s' ${prev:+$prev..}"$sha" | grep -v -e '^  docs:' -e '^  chore:' -e '^  site:' | head -n 30
 if command -v gh >/dev/null; then
   ci="$(gh run list -w ci -c "$sha" -L 1 --json status,conclusion -q '.[0] | "\(.status) \(.conclusion)"' 2>/dev/null || true)"
   echo "ci on this commit: ${ci:-not started}"
