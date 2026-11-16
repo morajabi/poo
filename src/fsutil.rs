@@ -256,6 +256,20 @@ pub fn read_entries(dir: &Path) -> Vec<Entry> {
     read_entries_std(dir)
 }
 
+/// Like `read_entries` without APFS private sizes (`private` is `alloc`): for walking
+/// structure and matching names, never for sizing. APFS looks up every file's extents to
+/// answer the private size, which costs about as much as the rest of the read.
+pub fn read_entries_lite(dir: &Path) -> Vec<Entry> {
+    if !readable_without_blocking(dir) {
+        return vec![];
+    }
+    let want = crate::bulk::Want { private: false, flags: false };
+    if let Some(v) = crate::bulk::read_entries_bulk_with(dir, want) {
+        return v.into_iter().map(|(e, _)| e).collect();
+    }
+    read_entries_std(dir)
+}
+
 /// Portable reader: `read_dir` plus an `lstat` per entry. Fallback for `read_entries`.
 pub fn read_entries_std(dir: &Path) -> Vec<Entry> {
     let Ok(rd) = std::fs::read_dir(dir) else { return vec![] };
@@ -290,10 +304,14 @@ pub const MEMO_MIN_BYTES: u64 = 32_000_000;
 // Ages (`Sized::newest`) come from files only. A folder's own mtime changes when anything
 // inside is added or removed, including by a cleanup, which is not use.
 
+const SEEN_SHARDS: usize = 32;
+
 /// Shared state for one scan: hardlink dedupe, progress counters and cancellation.
 #[derive(Default)]
 pub struct SizeCtx {
-    seen: Mutex<HashSet<(u64, u64)>>,
+    /// Hard links already counted, sharded by inode so parallel walks of pnpm-style trees
+    /// (every file a hard link) do not queue on one lock.
+    seen: [Mutex<HashSet<(u64, u64)>>; SEEN_SHARDS],
     pub files: AtomicU64,
     pub bytes: AtomicU64,
     pub cancel: AtomicBool,
@@ -338,7 +356,7 @@ impl SizeCtx {
 
     fn file_bytes(&self, e: &Entry) -> u64 {
         if e.nlink > 1 && !e.is_dir {
-            let mut seen = self.seen.lock().unwrap();
+            let mut seen = self.seen[(e.ino as usize) % SEEN_SHARDS].lock().unwrap();
             if !seen.insert((e.dev, e.ino)) {
                 return 0;
             }
@@ -441,8 +459,7 @@ impl SizeCtx {
                         };
                         s.bytes += d.alloc;
                         s.frees += d.alloc;
-                s.frees += d.alloc;
-                                s
+                        s
                     }
                 };
                 self.remember(&d.path, s);
@@ -482,7 +499,6 @@ impl SizeCtx {
             let (mut s, children) = self.size_entries(&entries, md.dev(), exclude);
             s.bytes += md.blocks() * 512;
             s.frees += md.blocks() * 512;
-        s.frees += md.blocks() * 512;
             Some((s, children))
         } else {
             let e = Entry {

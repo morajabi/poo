@@ -81,3 +81,24 @@ fn bulk_matches_std() {
 fn bulk_missing_dir_is_none() {
     assert!(read_entries_bulk(Path::new("/definitely/not/here")).is_none());
 }
+
+/// The lite read (no APFS private sizes, for walking structure) sees the same entries.
+#[test]
+fn lite_read_matches_full_read() {
+    let d = std::env::temp_dir().join(format!("poo-bulk-lite-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&d);
+    fs::create_dir_all(d.join("sub/deeper")).unwrap();
+    fs::write(d.join("a.txt"), vec![7u8; 10_000]).unwrap();
+    fs::write(d.join("sub/b.bin"), vec![1u8; 100_000]).unwrap();
+    let _ = std::os::unix::fs::symlink("a.txt", d.join("link"));
+    for dir in [d.clone(), d.join("sub")] {
+        let full = sorted(poo::fsutil::read_entries(&dir));
+        let lite = sorted(poo::fsutil::read_entries_lite(&dir));
+        assert_eq!(full.len(), lite.len());
+        for (x, y) in full.iter().zip(&lite) {
+            assert_eq!((&x.name, &x.path, x.is_dir, x.is_symlink, x.alloc, x.mtime, x.dev, x.ino, x.nlink), (&y.name, &y.path, y.is_dir, y.is_symlink, y.alloc, y.mtime, y.dev, y.ino, y.nlink));
+            assert_eq!(y.private, y.alloc, "lite reads report private = alloc");
+        }
+    }
+    let _ = fs::remove_dir_all(&d);
+}

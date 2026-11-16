@@ -20,19 +20,44 @@
 use crate::fsutil::Entry;
 use std::path::Path;
 
+/// `EF_MAY_SHARE_BLOCKS` from <sys/stat.h>: the file may share blocks with another (an APFS
+/// clone). Without it, a file's private size is its allocated size.
+pub const EF_MAY_SHARE_BLOCKS: u64 = 0x1;
+
+/// What to ask for besides names, types, sizes, times and ids.
+#[derive(Clone, Copy, Debug)]
+pub struct Want {
+    /// `ATTR_CMNEXT_PRIVATESIZE`: exact, but APFS looks up every file's extents for it.
+    pub private: bool,
+    /// `ATTR_CMNEXT_EXT_FLAGS`: cheap; says which files may be clones.
+    pub flags: bool,
+}
+
 #[cfg(not(target_os = "macos"))]
 pub fn read_entries_bulk(_dir: &Path) -> Option<Vec<Entry>> {
     None
 }
 
+#[cfg(not(target_os = "macos"))]
+pub fn read_entries_bulk_with(_dir: &Path, _want: Want) -> Option<Vec<(Entry, u64)>> {
+    None
+}
+
 #[cfg(target_os = "macos")]
 pub fn read_entries_bulk(dir: &Path) -> Option<Vec<Entry>> {
-    imp::read(dir)
+    Some(imp::read(dir, Want { private: true, flags: false })?.into_iter().map(|(e, _)| e).collect())
+}
+
+/// Entries with their extended flags (0 unless `want.flags`). Without `want.private`,
+/// `private` is the allocated size.
+#[cfg(target_os = "macos")]
+pub fn read_entries_bulk_with(dir: &Path, want: Want) -> Option<Vec<(Entry, u64)>> {
+    imp::read(dir, want)
 }
 
 #[cfg(target_os = "macos")]
 mod imp {
-    use super::Entry;
+    use super::{Entry, Want};
     use libc::{attrlist, attrreference_t, attribute_set_t, c_void};
     use std::ffi::{CString, OsStr};
     use std::os::unix::ffi::OsStrExt;
@@ -47,6 +72,7 @@ mod imp {
     /// clone blocks excluded) and `FSOPT_ATTR_CMN_EXTENDED` from <sys/attr.h>.
     const ATTR_CMNEXT_PRIVATESIZE: u32 = 0x0000_0008;
     const FSOPT_ATTR_CMN_EXTENDED: u64 = 0x0000_0020;
+    const ATTR_CMNEXT_EXT_FLAGS: u32 = 0x0000_0200;
     /// `enum vtype` values from <sys/vnode.h>.
     const VDIR: u32 = 2;
     const VLNK: u32 = 5;
@@ -85,7 +111,7 @@ mod imp {
         }
     }
 
-    pub fn read(dir: &Path) -> Option<Vec<Entry>> {
+    pub fn read(dir: &Path, want: Want) -> Option<Vec<(Entry, u64)>> {
         let c = CString::new(dir.as_os_str().as_bytes()).ok()?;
         let raw = unsafe { libc::open(c.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC) };
         if raw < 0 {
@@ -99,16 +125,26 @@ mod imp {
             volattr: 0,
             dirattr: DIR,
             fileattr: FILE,
-            forkattr: ATTR_CMNEXT_PRIVATESIZE,
+            forkattr: if want.private { ATTR_CMNEXT_PRIVATESIZE } else { 0 } | if want.flags { ATTR_CMNEXT_EXT_FLAGS } else { 0 },
         };
-        let mut buf = vec![0u64; BUF_WORDS];
-        let size = BUF_WORDS * 8;
+        // One buffer per thread: a fresh zeroed 256 KB per folder cost more than the read.
+        thread_local! {
+            static BUF: std::cell::RefCell<Vec<u64>> = std::cell::RefCell::new(vec![0u64; BUF_WORDS]);
+        }
+        BUF.with(|b| match b.try_borrow_mut() {
+            Ok(mut buf) => read_with(dir, fd.0, &mut al, &mut buf),
+            Err(_) => read_with(dir, fd.0, &mut al, &mut vec![0u64; BUF_WORDS]),
+        })
+    }
+
+    fn read_with(dir: &Path, fd: i32, al: &mut attrlist, buf: &mut [u64]) -> Option<Vec<(Entry, u64)>> {
+        let size = buf.len() * 8;
         let mut out = Vec::new();
         loop {
             let n = unsafe {
                 libc::getattrlistbulk(
-                    fd.0,
-                    &mut al as *mut attrlist as *mut c_void,
+                    fd,
+                    al as *mut attrlist as *mut c_void,
                     buf.as_mut_ptr() as *mut c_void,
                     size,
                     FSOPT_ATTR_CMN_EXTENDED,
@@ -124,6 +160,7 @@ mod imp {
                 break;
             }
             let bytes = unsafe { std::slice::from_raw_parts(buf.as_ptr() as *const u8, size) };
+            out.reserve(n as usize);
             let mut pos = 0usize;
             for _ in 0..n {
                 let len = u32::from_ne_bytes(bytes.get(pos..pos + 4)?.try_into().ok()?) as usize;
@@ -141,7 +178,7 @@ mod imp {
     }
 
     /// `None` = malformed buffer (abort), `Some(None)` = entry vanished (skip).
-    fn parse(dir: &Path, g: &[u8]) -> Option<Option<Entry>> {
+    fn parse(dir: &Path, g: &[u8]) -> Option<Option<(Entry, u64)>> {
         let mut c = Cur { b: g, off: 4 };
         let ret: attribute_set_t = c.take()?;
         let has = |set: u32, bit: u32| set & bit != 0;
@@ -169,23 +206,23 @@ mod imp {
         let ino: Option<u64> = if has(ret.commonattr, libc::ATTR_CMN_FILEID) { Some(c.take()?) } else { None };
 
         let (Some(dev), Some(objtype), Some(mtime), Some(ino)) = (dev, objtype, mtime, ino) else {
-            return Some(lstat_entry(name, path));
+            return Some(lstat_entry(name, path).map(|e| (e, 0)));
         };
         if err != 0 {
-            return Some(lstat_entry(name, path));
+            return Some(lstat_entry(name, path).map(|e| (e, 0)));
         }
 
         let is_dir = objtype == VDIR;
         let (alloc, nlink, is_file) = if is_dir {
             let mnt: u32 = if has(ret.dirattr, libc::ATTR_DIR_MOUNTSTATUS) { c.take()? } else { 0 };
             if mnt & DIR_MNTSTATUS_MNTPOINT != 0 {
-                return Some(lstat_entry(name, path));
+                return Some(lstat_entry(name, path).map(|e| (e, 0)));
             }
             let alloc: i64 = if has(ret.dirattr, libc::ATTR_DIR_ALLOCSIZE) { c.take()? } else { 0 };
             (alloc.max(0) as u64, 1, None)
         } else {
             if !has(ret.fileattr, libc::ATTR_FILE_LINKCOUNT) || !has(ret.fileattr, libc::ATTR_FILE_ALLOCSIZE) {
-                return Some(lstat_entry(name, path));
+                return Some(lstat_entry(name, path).map(|e| (e, 0)));
             }
             let nlink: u32 = c.take()?;
             let alloc: i64 = c.take()?;
@@ -193,11 +230,12 @@ mod imp {
         };
         // Extended common attributes come last.
         let private: Option<i64> = if has(ret.forkattr, ATTR_CMNEXT_PRIVATESIZE) { Some(c.take()?) } else { None };
+        let flags: u64 = if has(ret.forkattr, ATTR_CMNEXT_EXT_FLAGS) { c.take()? } else { 0 };
         let private = match (is_file, private) {
             (Some(()), Some(p)) => (p.max(0) as u64).min(alloc),
             _ => alloc,
         };
-        Some(Some(Entry {
+        Some(Some((Entry {
             name,
             path,
             is_dir,
@@ -209,7 +247,7 @@ mod imp {
             ino,
             nlink,
             private,
-        }))
+        }, flags)))
     }
 
     fn lstat_entry(name: String, path: std::path::PathBuf) -> Option<Entry> {

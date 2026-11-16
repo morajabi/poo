@@ -210,6 +210,8 @@ pub fn run_capture(cmd: &[&str], timeout_secs: u64) -> Option<String> {
         buf
     });
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
+    // Most commands (git, simctl) answer in a few ms: poll often at first, then back off.
+    let mut nap = std::time::Duration::from_millis(1);
     loop {
         match child.try_wait() {
             Ok(Some(status)) => {
@@ -226,7 +228,8 @@ pub fn run_capture(cmd: &[&str], timeout_secs: u64) -> Option<String> {
                     let _ = child.wait();
                     return None;
                 }
-                std::thread::sleep(std::time::Duration::from_millis(20));
+                std::thread::sleep(nap);
+                nap = (nap * 2).min(std::time::Duration::from_millis(20));
             }
             Err(_) => return None,
         }
