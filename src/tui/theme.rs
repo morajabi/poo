@@ -25,6 +25,11 @@ impl Theme {
         Theme { color, light, truecolor }
     }
 
+    /// Whether the user said which background they have (COLORFGBG or POO_THEME).
+    pub fn background_known() -> bool {
+        std::env::var_os("COLORFGBG").is_some() || std::env::var_os("POO_THEME").is_some()
+    }
+
     fn fg(&self, c: Color) -> Style {
         if self.color {
             Style::default().fg(c)
@@ -110,6 +115,70 @@ impl Theme {
     }
 }
 
+/// Asks the terminal for its background color (OSC 11), followed by a device attributes
+/// request every terminal answers, so terminals without OSC 11 cost one round trip rather
+/// than the timeout. Call in raw mode, before anything else reads stdin. `Some(true)` for a
+/// light background.
+#[cfg(unix)]
+pub fn query_light_background(timeout: std::time::Duration) -> Option<bool> {
+    use std::io::Write;
+    let mut out = std::io::stdout();
+    out.write_all(b"\x1b]11;?\x1b\\\x1b[c").ok()?;
+    out.flush().ok()?;
+    let deadline = std::time::Instant::now() + timeout;
+    let mut buf: Vec<u8> = Vec::with_capacity(64);
+    loop {
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() {
+            break;
+        }
+        let mut pfd = libc::pollfd { fd: 0, events: libc::POLLIN, revents: 0 };
+        let n = unsafe { libc::poll(&mut pfd, 1, left.as_millis().max(1) as libc::c_int) };
+        if n <= 0 {
+            break;
+        }
+        let mut chunk = [0u8; 128];
+        let r = unsafe { libc::read(0, chunk.as_mut_ptr() as *mut libc::c_void, chunk.len()) };
+        if r <= 0 {
+            break;
+        }
+        buf.extend_from_slice(&chunk[..r as usize]);
+        // The device attributes answer (ESC [ ? ... c) comes last.
+        if let Some(i) = find(&buf, b"\x1b[?") {
+            if buf[i..].contains(&b'c') {
+                break;
+            }
+        }
+        if buf.len() > 512 {
+            break;
+        }
+    }
+    parse_osc11(&buf)
+}
+
+#[cfg(not(unix))]
+pub fn query_light_background(_: std::time::Duration) -> Option<bool> {
+    None
+}
+
+fn find(h: &[u8], n: &[u8]) -> Option<usize> {
+    h.windows(n.len()).position(|w| w == n)
+}
+
+/// `ESC ] 11 ; rgb:RRRR/GGGG/BBBB` (1 to 4 hex digits per channel) to light or dark.
+pub fn parse_osc11(buf: &[u8]) -> Option<bool> {
+    let i = find(buf, b"]11;rgb:")? + 8;
+    let rest = std::str::from_utf8(&buf[i..]).ok()?;
+    let end = rest.find(|c: char| !(c.is_ascii_hexdigit() || c == '/')).unwrap_or(rest.len());
+    let mut ch = rest[..end].split('/').map(|h| {
+        let v = u32::from_str_radix(h, 16).ok()?;
+        let max = (1u32 << (4 * h.len().clamp(1, 4))) - 1;
+        Some(v as f64 / max as f64)
+    });
+    let (r, g, b) = (ch.next()??, ch.next()??, ch.next()??);
+    Some(0.2126 * r + 0.7152 * g + 0.0722 * b > 0.5)
+}
+
 pub fn parse_hex(hex: &str) -> Option<(u8, u8, u8)> {
     let h = hex.trim_start_matches('#');
     if h.len() != 6 {
@@ -158,5 +227,13 @@ mod tests {
         assert_eq!(rgb_to_256(255, 255, 255), 231);
         assert_eq!(rgb_to_256(255, 0, 0), 196);
         assert_eq!(rgb_to_256(0, 255, 0), 46);
+    }
+
+    #[test]
+    fn osc11_background() {
+        assert_eq!(parse_osc11(b"\x1b]11;rgb:ffff/ffff/ffff\x1b\\\x1b[?62;22c"), Some(true));
+        assert_eq!(parse_osc11(b"\x1b]11;rgb:1e1e/1e1e/2e2e\x07"), Some(false));
+        assert_eq!(parse_osc11(b"\x1b]11;rgb:fa/fa/f0\x07"), Some(true));
+        assert_eq!(parse_osc11(b"\x1b[?1;2c"), None);
     }
 }

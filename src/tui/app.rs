@@ -156,6 +156,8 @@ pub struct Summary {
 pub enum Modal {
     None,
     Help,
+    /// One item's details, for terminals too narrow for the side pane.
+    Detail(usize),
     Review(Review),
     Cleaning(Cleaning),
     Summary(Summary),
@@ -177,6 +179,8 @@ pub struct Hits {
     /// List body area (rows only) and its scroll offset.
     pub list: Option<(Rect, usize)>,
     pub modal: Option<Rect>,
+    /// Whether this frame had room for the details pane beside the list.
+    pub detail_pane: bool,
 }
 
 pub struct ScanState {
@@ -614,6 +618,23 @@ impl App {
                 self.modal = Modal::None;
                 return Effect::None;
             }
+            Modal::Detail(i) => {
+                let i = *i;
+                match k.code {
+                    KeyCode::Char('o') => {
+                        if let Some(p) = self.item(i).map(|x| x.path.clone()) {
+                            return Effect::Reveal(p);
+                        }
+                    }
+                    KeyCode::Char(' ') => self.toggle_select(),
+                    KeyCode::Char('c') if !ctrl => {
+                        self.modal = Modal::None;
+                        self.review_selected();
+                    }
+                    _ => self.modal = Modal::None,
+                }
+                return Effect::None;
+            }
             Modal::Cleaning(c) => {
                 if matches!(k.code, KeyCode::Esc | KeyCode::Char('c') | KeyCode::Char('q')) || ctrl {
                     c.cancel_requested = true;
@@ -730,7 +751,12 @@ impl App {
                 let next = match row.kind {
                     BKind::Bucket(b) => Level::Groups { bucket: b, name: row.name },
                     BKind::Group { bucket, group } => Level::Items { bucket: Some(bucket), group: Some(group.clone()), project: None, title: group },
-                    BKind::Item(_) => return,
+                    BKind::Item(i) => {
+                        if !self.hits.detail_pane {
+                            self.modal = Modal::Detail(i);
+                        }
+                        return;
+                    }
                 };
                 self.query.clear();
                 self.nav.push(Nav::new(next));
@@ -835,7 +861,7 @@ impl App {
             MouseEventKind::Down(MouseButton::Left) => {
                 if !matches!(self.modal, Modal::None) {
                     // Clicking outside a help or summary popup closes it.
-                    if matches!(self.modal, Modal::Help | Modal::Summary(_)) && !self.hits.modal.map_or(false, |r| contains(r, m.column, m.row)) {
+                    if matches!(self.modal, Modal::Help | Modal::Summary(_) | Modal::Detail(_)) && !self.hits.modal.map_or(false, |r| contains(r, m.column, m.row)) {
                         self.modal = Modal::None;
                     }
                     return Effect::None;

@@ -184,6 +184,7 @@ fn screens(app: &mut App) -> Vec<(&'static str, Box<dyn Fn(&mut App)>)> {
         ("worktrees", Box::new(|a: &mut App| a.tab = Tab::Worktrees)),
         ("plans", Box::new(|a: &mut App| a.tab = Tab::Plans)),
         ("help", Box::new(|a: &mut App| a.modal = Modal::Help)),
+        ("detail", Box::new(|a: &mut App| a.modal = Modal::Detail(0))),
         (
             "review",
             Box::new(|a: &mut App| {
@@ -273,6 +274,19 @@ fn every_screen_renders_at_every_size() {
             }
         }
     }
+    // Column headers and the help text fit, not cut mid-word.
+    app.modal = Modal::None;
+    for w in [60u16, 80, 95, 100, 132] {
+        app.tab = Tab::Projects;
+        let t = text_of(&render(&mut app, &th, w, 24));
+        assert!(t.contains("ACTIVE"), "projects header cut at width {}:\n{}", w, t);
+    }
+    for (w, h) in [(80u16, 24u16), (100, 30)] {
+        app.modal = Modal::Help;
+        let t = text_of(&render(&mut app, &th, w, h));
+        assert!(t.contains("CLI-only") && t.contains("right-click back"), "help cut at {}x{}:\n{}", w, h, t);
+    }
+    app.modal = Modal::None;
     // NO_COLOR still renders, with no colors at all.
     th.color = false;
     app.modal = Modal::None;

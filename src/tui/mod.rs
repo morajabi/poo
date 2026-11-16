@@ -34,13 +34,35 @@ impl UiOptions {
     }
 }
 
+/// Reads the preference file directly: spawning `defaults` costs ~20 ms before the first frame.
 fn reduce_motion() -> bool {
     if !cfg!(target_os = "macos") {
         return false;
     }
-    crate::util::run_capture(&["defaults", "read", "com.apple.universalaccess", "reduceMotion"], 1)
-        .map(|s| s.trim() == "1")
-        .unwrap_or(false)
+    let p = crate::util::home().join("Library/Preferences/com.apple.universalaccess.plist");
+    let Ok(v) = plist::Value::from_file(p) else { return false };
+    match v.as_dictionary().and_then(|d| d.get("reduceMotion")) {
+        Some(plist::Value::Boolean(b)) => *b,
+        Some(plist::Value::Integer(i)) => i.as_signed() == Some(1),
+        _ => false,
+    }
+}
+
+/// Set by SIGTERM, SIGHUP or SIGINT (e.g. `kill`, a closed terminal tab): leave cleanly,
+/// restoring the terminal, after any clean in flight stops between items.
+static QUIT: AtomicBool = AtomicBool::new(false);
+
+extern "C" fn on_quit_signal(_: libc::c_int) {
+    QUIT.store(true, Ordering::SeqCst);
+    clean::CANCEL.store(true, Ordering::SeqCst);
+}
+
+fn install_quit_handler() {
+    unsafe {
+        for sig in [libc::SIGTERM, libc::SIGHUP, libc::SIGINT] {
+            libc::signal(sig, on_quit_signal as *const () as libc::sighandler_t);
+        }
+    }
 }
 
 enum Msg {
@@ -172,7 +194,7 @@ pub fn run(o: UiOptions) -> anyhow::Result<()> {
     let cached = scan::load_report().filter(|r| r.version == crate::VERSION);
     let have = cached.is_some();
     let mut app = App::new(ctx, cached, o.animate);
-    let th = theme::Theme::detect();
+    let mut th = theme::Theme::detect();
 
     let (tx, rx) = channel::<Msg>();
     let (req_tx, req_rx) = channel::<Req>();
@@ -183,11 +205,27 @@ pub fn run(o: UiOptions) -> anyhow::Result<()> {
         app.scanning = Some(ScanState { phase: "starting".into(), detail: String::new(), bytes: 0, files: 0, full: true });
     }
 
+    install_quit_handler();
     let mut terminal = ratatui::init();
+    if th.color && !theme::Theme::background_known() {
+        if let Some(light) = theme::query_light_background(Duration::from_millis(120)) {
+            th.light = light;
+        }
+    }
     let _ = crossterm::execute!(std::io::stdout(), EnableMouseCapture);
+    // ratatui's hook restores raw mode and the screen; mouse reporting must go too, or the
+    // shell fills with escape codes on every mouse move after a crash.
+    let restore_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = crossterm::execute!(std::io::stdout(), DisableMouseCapture);
+        restore_hook(info);
+    }));
     let result = (|| -> anyhow::Result<()> {
         let frame = Duration::from_millis(if o.animate { 80 } else { 250 });
         loop {
+            if QUIT.load(Ordering::SeqCst) && !busy.load(Ordering::SeqCst) {
+                return Ok(());
+            }
             terminal.draw(|f| view::draw(f, &mut app, &th))?;
             if event::poll(frame)? {
                 let eff = match event::read()? {

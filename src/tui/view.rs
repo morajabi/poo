@@ -30,9 +30,17 @@ pub fn draw(f: &mut Frame, app: &mut App, th: &Theme) {
         }
     }
     status_line(f, status, app, th);
+    if !matches!(app.modal, Modal::None) {
+        // Push the screen behind a popup back so the popup reads first.
+        f.buffer_mut().set_style(Rect { height: area.height.saturating_sub(1), ..area }, Style::default().add_modifier(Modifier::DIM));
+    }
     match &app.modal {
         Modal::None => {}
         Modal::Help => help(f, area, app, th),
+        Modal::Detail(i) => {
+            let i = *i;
+            detail(f, area, app, i, th)
+        }
         Modal::Review(_) => review(f, area, app, th),
         Modal::Cleaning(_) => cleaning(f, area, app, th),
         Modal::Summary(_) => summary(f, area, app, th),
@@ -77,14 +85,17 @@ fn header(f: &mut Frame, area: Rect, app: &mut App, th: &Theme) {
     let mut x = area.x + 6;
     let compact = area.width < 70;
     for (i, t) in Tab::ALL.iter().enumerate() {
-        let label = if compact { t.title()[..1].to_string() } else { t.title().to_string() };
+        // Narrow: only the current view keeps its name; the others are their number keys.
+        let label = if compact && app.tab != *t { String::new() } else { t.title().to_string() };
         let key = format!("{}", i + 1);
-        let w = (cells(&key) + 1 + cells(&label) + 2) as u16;
+        let w = (cells(&key) + if label.is_empty() { 0 } else { 1 + cells(&label) } + 2) as u16;
         app.hits.tabs.push((Rect { x, y: area.y, width: w, height: 1 }, *t));
         x += w;
         let on = app.tab == *t;
-        spans.push(Span::styled(key, th.dim()));
-        spans.push(Span::raw(" "));
+        spans.push(Span::styled(key, if label.is_empty() { th.text() } else { th.dim() }));
+        if !label.is_empty() {
+            spans.push(Span::raw(" "));
+        }
         spans.push(Span::styled(label, if on { th.accent().add_modifier(Modifier::BOLD | Modifier::UNDERLINED) } else { th.text() }));
         spans.push(Span::raw("  "));
     }
@@ -121,6 +132,7 @@ pub fn hints(app: &App) -> Vec<(&'static str, &'static str)> {
         Modal::Cleaning(_) => vec![("esc", "cancel after this item")],
         Modal::Summary(_) => vec![("enter", "done")],
         Modal::Help => vec![("any key", "close")],
+        Modal::Detail(_) => vec![("space", "select"), ("c", "clean"), ("o", "show in Finder"), ("esc", "close")],
         Modal::None => match app.tab {
             Tab::Overview => vec![("enter", "browse"), ("1-5", "views"), ("r", "refresh"), ("?", "help"), ("q", "quit")],
             Tab::Plans => vec![("↑↓", "move"), ("enter", "review plan"), ("space", "select"), ("c", "clean"), ("?", "help")],
@@ -158,7 +170,12 @@ fn status_line(f: &mut Frame, area: Rect, app: &App, th: &Theme) {
     }
     let rw: usize = right.iter().map(|s| cells(&s.content)).sum::<usize>() + 1;
     let budget = (area.width as usize).saturating_sub(rw + 2);
+    let selection_shown = right.len() > 1;
     for (k, label) in hints(app) {
+        // The selection on the right already offers c and u.
+        if selection_shown && matches!(k, "c" | "u") {
+            continue;
+        }
         let w = cells(k) + 1 + cells(label) + 3;
         if used + w > budget {
             break;
@@ -516,6 +533,7 @@ fn browse(f: &mut Frame, area: Rect, app: &mut App, th: &Theme) {
         lines.push(Line::from(l));
     }
     list(f, lst, Some(header), lines, app, th);
+    app.hits.detail_pane = detail.is_some();
     if let Some(d) = detail {
         let (c, _) = app.cursor();
         let row = rows.get(c).cloned();
@@ -658,17 +676,18 @@ pub fn item_lines(i: &Item, app: &App, w: usize, th: &Theme) -> Vec<Line<'static
     for g in &i.safeguards {
         lines.push(Line::from(vec![Span::styled("↺ ", th.good()), Span::styled(g.clone(), th.dim())]));
     }
-    let action = match i.action.kind {
+    let action = if i.report_only { "none; manage it in its app".into() } else { match i.action.kind {
         ActionKind::Command => format!("runs `{}`", i.action.command.clone().unwrap_or_default().join(" ")),
         ActionKind::WorktreeRemove => "git worktree remove".into(),
         ActionKind::Delete => "delete".into(),
         ActionKind::Trash => "move to Trash".into(),
         ActionKind::None => "manage it yourself".into(),
-    };
+    } };
     lines.push(Line::raw(""));
     lines.push(kv("action", Span::raw(action), th));
     if let Some(rule) = app.ctx.cat.rule(&i.rule) {
-        if let Some(rec) = &rule.recommend {
+        // Report-only items already say this in their safeguard line.
+        if let Some(rec) = rule.recommend.as_ref().filter(|rec| !i.safeguards.iter().any(|g| g.contains(rec.as_str()))) {
             lines.push(kv("tip", Span::styled(rec.clone(), th.dim()), th));
         }
     }
@@ -712,7 +731,7 @@ fn projects(f: &mut Frame, area: Rect, app: &mut App, th: &Theme) {
     let fixed = 2 + 9 + 2 + 8 + 2 + 9 + if show_stacks { 18 } else { 0 };
     let name_w = w.saturating_sub(fixed).max(10);
     let header = Line::from(Span::styled(
-        format!("  {} {:>9}  {}{:>11}{}", pad("PROJECT", name_w), "BUILD", pad("STATUS", 8), "ACTIVE", if show_stacks { "  STACKS" } else { "" }),
+        format!("  {}{:>9}  {}{:>11}{}", pad("PROJECT", name_w), "BUILD", pad("STATUS", 8), "ACTIVE", if show_stacks { "  STACKS" } else { "" }),
         th.dim(),
     ));
     let mut lines = vec![];
@@ -889,7 +908,7 @@ fn popup(area: Rect, w_pct: u16, h_pct: u16, min_w: u16, min_h: u16) -> Rect {
 }
 
 fn help(f: &mut Frame, area: Rect, app: &mut App, th: &Theme) {
-    let r = popup(area, 60, 0, 50, 23);
+    let r = popup(area, 60, 0, 66, 23);
     app.hits.modal = Some(r);
     f.render_widget(Clear, r);
     let block = panel("Keys", th, true);
@@ -913,14 +932,27 @@ fn help(f: &mut Frame, area: Rect, app: &mut App, th: &Theme) {
         ("mouse", "click, double-click, scroll, right-click back"),
         ("q", "quit"),
     ];
-    let mut lines = vec![Line::raw("")];
+    let mut lines = vec![];
     for (k, d) in keys {
         lines.push(Line::from(vec![Span::styled(pad(k, 14), th.accent()), Span::raw(d.to_string())]));
     }
     lines.push(Line::raw(""));
-    lines.push(Line::from(Span::styled("Cleaning always shows a review first. Safe mode skips anything in use;", th.dim())));
-    lines.push(Line::from(Span::styled("f in the review allows in-use items. Protected items stay CLI-only.", th.dim())));
-    f.render_widget(Paragraph::new(lines), inner);
+    lines.push(Line::from(Span::styled("Every clean shows a review first. Safe mode skips items in use (f there allows them); protected items are CLI-only.", th.dim())));
+    f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), inner);
+}
+
+/// One item's details as a popup, for terminals too narrow for the side pane.
+fn detail(f: &mut Frame, area: Rect, app: &mut App, idx: usize, th: &Theme) {
+    let r = popup(area, 80, 80, 40, 12);
+    app.hits.modal = Some(r);
+    f.render_widget(Clear, r);
+    let selected = app.item(idx).map_or(false, |i| app.selected.contains(&i.id));
+    let block = panel(if selected { "Details · selected" } else { "Details" }, th, true);
+    let inner = inset(block.inner(r), 1, 0);
+    f.render_widget(block, r);
+    let Some(i) = app.item(idx) else { return };
+    let lines = item_lines(i, app, inner.width as usize, th);
+    f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
 }
 
 fn review(f: &mut Frame, area: Rect, app: &mut App, th: &Theme) {
