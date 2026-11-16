@@ -4,13 +4,23 @@ For maintainers. Users only need the [install steps in the README](../README.md#
 
 ## How releases happen
 
-Every push to `main` whose `ci` workflow passes (Rust tests on macOS and Linux,
-`mods validate`, `swift build` and `swift test` for the app) is released by
-[`.github/workflows/release.yml`](../.github/workflows/release.yml). Put `[skip release]`
-in the commit message to skip one; run the workflow by hand to release `main` again.
+Pushing to `main` runs CI only. A release ships when a version tag is pushed:
+
+```sh
+scripts/release.sh            # tags origin/main with the next patch and pushes the tag
+scripts/release.sh 0.2.0      # or an explicit version
+scripts/release.sh --dry-run  # show the version and the changes since the last tag
+```
+
+[`.github/workflows/release.yml`](../.github/workflows/release.yml) then waits for the
+`ci` run on that commit to pass (Rust tests on macOS and Linux, `mods validate`, the app
+build and tests), builds, signs, notarizes and publishes. Running the workflow by hand
+releases `main`'s head with the next patch. Batch changes into one release rather than
+tagging every push; installed apps and CLIs pick it up silently.
 
 **Versioning.** `major.minor` come from `Cargo.toml`; the patch counts up from the
-highest `v<major>.<minor>.*` tag (the first release uses `Cargo.toml`'s patch). The
+highest `v<major>.<minor>.*` tag (the first release uses `Cargo.toml`'s patch), unless you
+pass a version. The
 version is stamped into the build (`scripts/stamp-version.sh`), never committed; the
 release tag `vX.Y.Z` on the commit records it. Bump `major.minor` in `Cargo.toml` to
 start a new series.
