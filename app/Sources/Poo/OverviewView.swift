@@ -31,8 +31,8 @@ struct OverviewView: View {
                 .padding(.horizontal, 20)
                 .padding(.vertical, 16)
             } else {
-                ContentUnavailableView("No scan yet", systemImage: "internaldrive", description: Text("Rescan to see what takes space."))
-                    .frame(maxWidth: .infinity, minHeight: 400)
+                NoReportView()
+                    .frame(maxWidth: .infinity, minHeight: 460)
             }
         }
         .navigationTitle("Overview")

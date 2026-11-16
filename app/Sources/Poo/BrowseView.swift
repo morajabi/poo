@@ -46,7 +46,7 @@ struct BrowseView: View {
         .listStyle(.inset)
         .overlay {
             if report == nil {
-                ContentUnavailableView("Scanning…", systemImage: "internaldrive")
+                NoReportView()
             } else if groups.isEmpty {
                 if filter.query.isEmpty {
                     ContentUnavailableView {

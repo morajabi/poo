@@ -49,6 +49,20 @@ struct MainWindow: View {
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if nav.section != .backups { SelectionBar() }
             }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                // A full rescan with numbers on screen: say what it's doing, quietly.
+                if store.report != nil, store.scanning, store.progress != nil {
+                    VStack(spacing: 0) {
+                        ScanProgressView(compact: true)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 7)
+                        Divider()
+                    }
+                    .background(.bar)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+            .animation(.smooth, value: store.scanning && store.progress != nil)
             .overlay(alignment: .bottom) { ToastOverlay().animation(.default, value: store.toast) }
             .onDeleteCommand {
                 if nav.section != .backups { nav.review(items: store.selectedItems) }

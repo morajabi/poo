@@ -9,14 +9,6 @@ struct MenuBarView: View {
     @Environment(Navigation.self) private var nav
     @Environment(\.openWindow) private var openWindow
     @Environment(\.openSettings) private var openSettings
-    @State private var review: PanelReview?
-
-    struct PanelReview: Identifiable {
-        var bucket: String?
-        var areas: Set<String>?
-        var id: String { (bucket ?? "all") + (areas?.sorted().joined(separator: ",") ?? "") }
-    }
-
     private var config: MenubarSettings { store.menubar }
 
     var body: some View {
@@ -74,10 +66,6 @@ struct MenuBarView: View {
                 store.menuSession = CleanSession.fake(items: items, freeBefore: r.disk.free, speed: 0.3)
             }
         }
-        .sheet(item: $review) { rv in
-            CleanConfirmView(planID: "stale", free: nil, bucket: rv.bucket, areas: rv.areas, onStart: { store.menuSession = $0 })
-                .environment(store)
-        }
     }
 
     // MARK: Header
@@ -128,7 +116,7 @@ struct MenuBarView: View {
                 .padding(.top, -4)
         case .disk:
             Divider()
-            DiskBreakdownBar(breakdown: DiskBreakdown(report: r), height: 6, onReview: { review = PanelReview(bucket: nil) })
+            DiskBreakdownBar(breakdown: DiskBreakdown(report: r), height: 6, onReview: { openReview() })
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
                 .zIndex(2)
@@ -136,7 +124,7 @@ struct MenuBarView: View {
             let areas = config.order(AreaSummary.notInUse(r))
             if store.menuSession == nil {
                 AreaPicker(areas: areas, limit: max(config.max_areas, 1), disabled: store.busy,
-                           onReview: { review = PanelReview(bucket: nil, areas: $0) },
+                           onReview: { openReview(areas: $0) },
                            onOpen: { a in
                                nav.browse(bucket: a.bucket.id, group: a.group, statuses: [.notInUse])
                                open(.browse)
@@ -177,7 +165,7 @@ struct MenuBarView: View {
                 MenuBucketRow(
                     bucket: b,
                     onOpen: { open(.bucket(b.id)) },
-                    onClean: b.notInUseBytes > 0 && store.menuSession == nil && !store.busy ? { review = PanelReview(bucket: b.id) } : nil
+                    onClean: b.notInUseBytes > 0 && store.menuSession == nil && !store.busy ? { openReview(bucket: b.id) } : nil
                 )
             }
         }
@@ -186,16 +174,8 @@ struct MenuBarView: View {
     }
 
     private var scanningView: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ProgressView().controlSize(.small)
-            if let p = store.progress {
-                Text("\(p.phase.capitalized)… \(Fmt.bytes(p.bytes)) in \(p.files) files")
-                    .font(.callout)
-                Text(p.detail).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-            }
-        }
-        .frame(maxWidth: .infinity, minHeight: 100)
-        .padding(.horizontal, 14)
+        ScanProgressView()
+            .frame(height: 230)
     }
 
     private var footer: some View {
@@ -250,6 +230,21 @@ struct MenuBarView: View {
         }
         .frame(width: 18, height: 18)
         .help(store.report.map { "Updated \(FreshnessLabel.age($0.scannedAt, now: .now)). ⌘R to refresh, ⌥-click to rescan everything." } ?? "Refresh (⌘R)")
+    }
+
+    /// Reviewing and cleaning happen in the window: a menu bar panel closes on the first
+    /// click elsewhere, so it only ever hands off with one click.
+    private func openReview(bucket: String? = nil, areas: Set<String>? = nil) {
+        guard let r = store.report else { return }
+        let notInUse = r.items.filter { $0.status == .notInUse && $0.isCleanable }
+        if let bucket {
+            nav.review(items: notInUse.filter { $0.bucket == bucket })
+        } else if let areas {
+            nav.review(items: notInUse.filter { areas.contains(AreaSummary.key($0)) })
+        } else {
+            nav.review(plan: "stale")
+        }
+        open(nav.section ?? .overview)
     }
 
     private func open(_ section: Navigation.Section) {

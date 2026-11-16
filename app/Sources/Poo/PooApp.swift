@@ -99,6 +99,8 @@ struct PooApp: App {
         Window("Set Up Poo", id: "onboarding") {
             OnboardingView()
                 .environment(store)
+                .environment(nav)
+                .environment(updater)
         }
         .windowResizability(.contentSize)
         .windowStyle(.hiddenTitleBar)

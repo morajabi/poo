@@ -19,304 +19,502 @@ enum Onboarding {
     }
 
     static var isBundled: Bool { Bundle.main.bundleIdentifier != nil && Bundle.main.bundleURL.pathExtension == "app" }
+
+    /// Reading the TCC folder works only with Full Disk Access, and never prompts.
+    static var hasFullDiskAccess: Bool {
+        (try? FileManager.default.contentsOfDirectory(atPath: NSHomeDirectory() + "/Library/Application Support/com.apple.TCC")) != nil
+    }
 }
 
-/// First-run setup: a few quick steps, nothing scanned or scheduled until the user says so.
+/// First run, from install to the first clean. Each step does one thing, reacts to what
+/// the user does (folders found, Full Disk Access switched on), and the first scan runs
+/// underneath from the first second, so the last step shows real numbers.
 struct OnboardingView: View {
     @Environment(Store.self) private var store
+    @Environment(Navigation.self) private var nav
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
     @AppStorage("showInMenuBar") private var showInMenuBar = true
+    /// Survives "Quit & Reopen" after granting Full Disk Access.
+    @AppStorage("onboardingStep") private var savedStep = 0
 
     enum Step: Int, CaseIterable {
-        case welcome, folders, home, permissions, routines, agents
+        case welcome, folders, access, routines, agents, ready
         var title: String {
             switch self {
-            case .welcome: return "Welcome"
-            case .folders: return "Dev folders"
-            case .home: return "Where Poo lives"
-            case .permissions: return "Permissions"
-            case .routines: return "Routine cleanups"
-            case .agents: return "Agents"
+            case .welcome: return "Welcome to Poo"
+            case .folders: return "Where your code lives"
+            case .access: return "See the whole disk"
+            case .routines: return "Keep it tidy"
+            case .agents: return "Your coding agents"
+            case .ready: return "You're set"
             }
         }
     }
 
-    @State private var step: Step = {
-        let arg = ProcessInfo.processInfo.arguments.first { $0.hasPrefix("--onboarding-step=") }
-        return arg.flatMap { Int($0.split(separator: "=").last ?? "") }.flatMap(Step.init(rawValue:)) ?? .welcome
-    }()
-    @State private var fullDiskAccess: Bool?
-    @State private var notifications: UNAuthorizationStatus?
+    @State private var step: Step = .welcome
+    @State private var fullDiskAccess = Onboarding.hasFullDiskAccess
+    @State private var openedSettings = false
+    @State private var justGranted = false
     @State private var nightly = true
     @State private var guardOn = true
+    @State private var notify = true
     @State private var loginItem = SMAppService.mainApp.status == .enabled
     @State private var loginError: String?
     @State private var working = false
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 6) {
-                ForEach(Step.allCases, id: \.self) { s in
-                    Capsule()
-                        .fill(s.rawValue <= step.rawValue ? Color.accentColor : Color.secondary.opacity(0.25))
-                        .frame(height: 3)
+            if step != .welcome {
+                progressDots
+                    .padding(.top, 16)
+            }
+            Group {
+                switch step {
+                case .welcome: welcome
+                case .folders: folders
+                case .access: access
+                case .routines: routines
+                case .agents: agents
+                case .ready: ready
                 }
             }
-            .padding(.horizontal, 24)
-            .padding(.top, 14)
-            VStack(alignment: .leading, spacing: 14) {
-                Text(step == .welcome ? "Set up Poo" : step.title)
-                    .font(.title2.weight(.semibold))
-                content
-                Spacer(minLength: 0)
-            }
-            .padding(24)
+            .padding(.horizontal, 32)
+            .padding(.vertical, 20)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            Divider()
-            HStack {
-                if step != .welcome {
-                    Button("Back") { go(-1) }
+            .transition(.asymmetric(insertion: .move(edge: .trailing).combined(with: .opacity), removal: .opacity))
+            .id(step)
+            if step != .welcome && step != .ready {
+                Divider()
+                footer
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+            }
+        }
+        .frame(width: 600, height: 520)
+        .animation(.smooth(duration: 0.3), value: step)
+        .onAppear {
+            LaunchFlow.run(openWindow)
+            if let arg = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--onboarding-step=") }),
+               let n = Int(arg.split(separator: "=").last ?? ""), let s = Step(rawValue: n) {
+                step = s
+            } else if let s = Step(rawValue: savedStep) {
+                step = s
+            }
+            // The first look starts now, with whatever Poo can read, so later steps have numbers.
+            if store.report == nil, !store.scanning { Task { await store.scan() } }
+        }
+        .onChange(of: step) { _, s in savedStep = s.rawValue }
+        .task(id: step) { await load() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            refreshAccess()
+        }
+    }
+
+    // MARK: Chrome
+
+    private var progressDots: some View {
+        HStack(spacing: 6) {
+            ForEach(Step.allCases.dropFirst(), id: \.self) { s in
+                Capsule()
+                    .fill(s.rawValue <= step.rawValue ? Color.accentColor : Color.secondary.opacity(0.22))
+                    .frame(width: s == step ? 22 : 7, height: 7)
+            }
+        }
+        .animation(.snappy, value: step)
+        .accessibilityLabel("Step \(step.rawValue) of \(Step.allCases.count - 1)")
+    }
+
+    private var footer: some View {
+        HStack {
+            if step != .ready {
+                Button("Back") { go(-1) }
+                    .keyboardShortcut(.cancelAction)
+            }
+            Spacer()
+            if store.scanning {
+                // One quiet line: the first look keeps going while you set things up.
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.mini)
+                    Text(store.progress.map { "Looking… \(Fmt.bytes($0.bytes))" } ?? "Looking…")
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
                 }
-                Spacer()
-                if step != .welcome && step != .agents {
-                    Button("Skip") { go(1, apply: false) }
-                }
-                Button(step == .agents ? "Finish & scan" : "Continue") { go(1) }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .fixedSize()
+                .animation(.default, value: store.progress?.bytes)
+            }
+            Spacer()
+            if step != .ready {
+                Button(step == .access && !fullDiskAccess ? "Skip for Now" : "Continue") { go(1) }
                     .keyboardShortcut(.defaultAction)
                     .disabled(working)
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
-        }
-        .frame(width: 580, height: 480)
-        .task(id: step) { await load() }
-        .onAppear { LaunchFlow.run(openWindow) }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            Task { await checkPermissions() }
         }
     }
 
-    @ViewBuilder
-    private var content: some View {
-        switch step {
-        case .welcome: welcome
-        case .folders: folders
-        case .home: home
-        case .permissions: permissions
-        case .routines: routines
-        case .agents: agents
+    private func header(_ subtitle: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(step.title).font(.title.weight(.semibold))
+            Text(subtitle).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
+        .padding(.bottom, 8)
     }
 
-    // MARK: Steps
+    // MARK: Welcome
 
     private var welcome: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Poo finds build output, caches, simulators and old worktrees your dev tools leave behind, and frees the space without touching anything you're using.")
-                .fixedSize(horizontal: false, vertical: true)
-            VStack(alignment: .leading, spacing: 8) {
-                bullet("magnifyingglass", "Scans only your dev folders and known tool caches.")
-                bullet("checkmark.shield", "Never deletes on its own. You review every clean, and risky items are skipped.")
-                bullet("archivebox", "Backs up small config files and uncommitted work before removing a worktree.")
-                bullet("sparkles", "Hands its findings to your coding agent when you want a second opinion.")
+        VStack(spacing: 18) {
+            Spacer(minLength: 0)
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .frame(width: 96, height: 96)
+            VStack(spacing: 6) {
+                Text("Welcome to Poo").font(.largeTitle.weight(.semibold))
+                Text("Finds the space your dev tools leave behind and frees it, without touching anything you use.")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 420)
             }
-            Text("Takes about a minute. You can change everything later in Settings.")
-                .font(.callout).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 10) {
+                bullet("hammer", "Build output, caches, simulators and old worktrees")
+                bullet("checkmark.shield", "Nothing goes without your review")
+                bullet("archivebox", "Uncommitted work is backed up first")
+            }
+            .padding(.top, 4)
+            Spacer(minLength: 0)
+            Button { go(1) } label: {
+                Text("Get Started").frame(width: 200)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.extraLarge)
+            .keyboardShortcut(.defaultAction)
+            Text("About a minute. Change anything later in Settings.")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    // MARK: Folders
+
+    private var folders: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            header("Poo looks for projects in these folders. It found them on its own; add any it missed.")
+            if let roots = store.roots {
+                VStack(spacing: 0) {
+                    ForEach(Array(roots.roots.enumerated()), id: \.element) { idx, r in
+                        if idx > 0 { Divider().padding(.leading, 40) }
+                        HStack(spacing: 10) {
+                            Image(systemName: "folder.fill").foregroundStyle(Color.accentColor).frame(width: 20)
+                            Text(Fmt.tilde(r))
+                            Spacer()
+                            Group {
+                                if let n = projectCount(r) {
+                                    Text(n == 1 ? "1 project" : "\(n) projects")
+                                        .contentTransition(.numericText())
+                                } else {
+                                    ProgressView().controlSize(.mini)
+                                }
+                            }
+                            .font(.callout).foregroundStyle(.secondary)
+                            Button { Task { await store.configure(["roots", "rm", r]); await reloadRoots() } } label: {
+                                Image(systemName: "minus.circle.fill").foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.borderless)
+                            .help("Don't look in this folder")
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 9)
+                        .contextMenu {
+                            Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: r)]) }
+                            Button("Remove") { Task { await store.configure(["roots", "rm", r]); await reloadRoots() } }
+                        }
+                    }
+                    if roots.roots.isEmpty {
+                        Text("No dev folders found yet. Add the folder that holds your projects.")
+                            .foregroundStyle(.secondary)
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .card()
+                .animation(.default, value: store.report?.projects.count)
+            } else {
+                ProgressView().controlSize(.small)
+            }
+            Button { pickFolder() } label: { Label("Add Folder…", systemImage: "plus") }
+            Spacer(minLength: 0)
+            Text("Poo also checks the caches your tools keep in your Library, wherever your code is.")
+                .font(.caption).foregroundStyle(.secondary)
         }
     }
 
-    private var folders: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Poo looks for projects in these folders. Remove any you don't want scanned.")
-                .foregroundStyle(.secondary)
-            if let roots = store.roots {
-                List {
-                    ForEach(roots.roots, id: \.self) { r in
-                        HStack {
-                            Image(systemName: "folder").foregroundStyle(.secondary)
-                            Text(Fmt.tilde(r))
-                            Spacer()
-                            Text(projectCount(r) == 1 ? "1 project" : "\(projectCount(r)) projects").font(.caption).foregroundStyle(.secondary)
-                                .opacity(store.report == nil ? 0 : 1)
-                            Button { Task { await store.configure(["roots", "rm", r]) } } label: { Image(systemName: "minus.circle") }
-                                .buttonStyle(.borderless)
-                                .help("Don't scan this folder")
+    // MARK: Full Disk Access
+
+    private var access: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            header("macOS keeps some folders private: Downloads, Docker's disk, other apps' caches. One switch lets Poo see them, so it never has to ask folder by folder.")
+            if fullDiskAccess {
+                HStack(spacing: 14) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 36))
+                        .foregroundStyle(.green)
+                        .symbolEffect(.bounce, value: justGranted)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Full Disk Access is on").font(.title3.weight(.semibold))
+                        Text(justGranted ? "Poo is taking another look with everything in view." : "Poo can see the whole disk.")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .card()
+                .transition(.scale(scale: 0.95).combined(with: .opacity))
+            } else {
+                VStack(alignment: .leading, spacing: 12) {
+                    numbered(1, "Open Privacy & Security") {
+                        Button("Open System Settings") {
+                            openedSettings = true
+                            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!)
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    numbered(2, "Turn on Poo in Full Disk Access") {
+                        if Onboarding.isBundled {
+                            HStack(spacing: 8) {
+                                Text("Not in the list? Drag it in:").font(.caption).foregroundStyle(.secondary)
+                                AppTile()
+                            }
+                        }
+                    }
+                    numbered(3, "Come back here") {
+                        HStack(spacing: 6) {
+                            ProgressView().controlSize(.mini)
+                            Text("Poo notices on its own.").font(.caption).foregroundStyle(.secondary)
                         }
                     }
                 }
-                .listStyle(.bordered)
-                .frame(minHeight: 140)
-                if roots.detected {
-                    Text("Detected automatically. Changing the list pins it.").font(.caption).foregroundStyle(.secondary)
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .card()
+                if openedSettings {
+                    HStack(spacing: 8) {
+                        Image(systemName: "arrow.clockwise.circle").foregroundStyle(.secondary)
+                        Text("Turned it on and nothing changed? macOS applies it after Poo reopens.")
+                            .font(.callout).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Quit & Reopen") { relaunch() }
+                    }
+                    .transition(.opacity)
                 }
-            } else {
-                ProgressView().controlSize(.small)
-            }
-            Button("Add folder…") { pickFolder() }
-        }
-    }
-
-    private var home: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Picker("", selection: $showInMenuBar) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Menu bar and window")
-                    Text("Free space at a glance in the menu bar. Open the window when you want to clean.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                .tag(true)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Window only")
-                    Text("A regular app in the Dock, no menu bar icon.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                .tag(false)
-            }
-            .pickerStyle(.radioGroup)
-            .labelsHidden()
-            Divider()
-            Toggle(isOn: Binding(get: { loginItem }, set: { setLogin($0) })) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Open at login")
-                    Text("Keeps the menu bar number and the low-disk guard running.").font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            if let loginError {
-                Text(loginError).font(.caption).foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var firstLook: some View {
-        HStack(spacing: 10) {
-            if let r = store.report, !store.scanning {
-                let safe = r.plan("stale")?.bytes ?? r.notInUseBytes
-                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.title3)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(safe > 0 ? "\(Fmt.bytes(safe)) you can free safely" : "Nothing needs cleaning yet")
-                        .font(.callout.weight(.medium))
-                    Text("In \(r.projects.count) projects and your tool caches.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            } else {
-                ProgressView().controlSize(.small)
-                Text("Taking a first look at your dev folders…").font(.callout).foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
+            Label("Poo only reads to measure. It never sends your files anywhere.", systemImage: "lock")
+                .font(.caption).foregroundStyle(.secondary)
         }
-        .padding(10)
-        .card()
+        .animation(.smooth, value: fullDiskAccess)
+        .animation(.smooth, value: openedSettings)
+        .task(id: step) {
+            // Watch for the switch while this step is up: no relaunch or button needed.
+            while step == .access && !Task.isCancelled {
+                refreshAccess()
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
     }
 
-    private var permissions: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            firstLook
-            permissionRow(
-                title: "Full Disk Access (recommended)",
-                detail: "One switch instead of a prompt per folder. Covers Downloads and other apps' data.",
-                granted: fullDiskAccess,
-                button: "Open Privacy Settings"
-            ) {
-                NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!)
+    private func numbered<C: View>(_ n: Int, _ title: String, @ViewBuilder _ content: () -> C) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text("\(n)")
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(.white)
+                .frame(width: 22, height: 22)
+                .background(Circle().fill(Color.accentColor))
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title).fontWeight(.medium)
+                content()
             }
-            if Onboarding.isBundled, fullDiskAccess != true {
-                HStack(spacing: 10) {
-                    AppTile()
-                    Text("Drag Poo into the list, or add it with +. macOS may ask you to reopen Poo afterwards.")
-                        .font(.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(.leading, 28)
-            }
-            permissionRow(
-                title: "Notifications",
-                detail: "A short note when a routine cleanup or the low-disk guard frees space.",
-                granted: notifications.map { $0 == .authorized || $0 == .provisional },
-                button: notifications == .denied ? "Open Notification Settings" : "Allow"
-            ) {
-                if notifications == .denied {
-                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")!)
-                } else {
-                    requestNotifications()
-                }
-            }
-            .disabled(!Onboarding.isBundled)
-            Text("Without it, Poo skips folders macOS guards. It never asks folder by folder.")
-                .font(.caption).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
         }
     }
+
+    // MARK: Routines
 
     private var routines: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Poo can keep things tidy on its own. Routine cleanups rescan first and only clean items without warnings: nothing in use, nothing that needs a look.")
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            Toggle(isOn: $nightly) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Nightly cleanup")
-                    Text("Every night at 03:30, clean what's not in use.").font(.caption).foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+            header("Poo can clean on its own, only what nothing is using. You can watch every run in Settings.")
+            VStack(spacing: 0) {
+                toggleRow("moon.stars", "Nightly cleanup", "Every night at 03:30", $nightly)
+                Divider().padding(.leading, 44)
+                toggleRow("gauge.with.dots.needle.0percent", "Low-disk guard", "Below 20 GB free, clean until 50 GB are free", $guardOn)
+                Divider().padding(.leading, 44)
+                toggleRow("bell", "Tell me when it cleans", "A short notification with what was freed", $notify)
+                    .disabled(!nightly && !guardOn)
             }
-            Toggle(isOn: $guardOn) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Low-disk guard")
-                    Text("When free space drops below 20 GB, clean what's not in use until 50 GB is free.").font(.caption).foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+            .card()
+            VStack(spacing: 0) {
+                toggleRow("menubar.rectangle", "Show in the menu bar", "Free space at a glance, one click to clean", $showInMenuBar)
+                Divider().padding(.leading, 44)
+                toggleRow("power", "Open at login", "Keeps the menu bar and the guard running",
+                          Binding(get: { loginItem }, set: { setLogin($0) }))
             }
-            Text("Applied when you press Continue. Change them later in Settings › Automation.")
-                .font(.caption).foregroundStyle(.secondary)
+            .card()
+            if let loginError {
+                Text(loginError).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func toggleRow(_ symbol: String, _ title: String, _ detail: String, _ on: Binding<Bool>) -> some View {
+        Toggle(isOn: on) {
+            HStack(spacing: 12) {
+                Image(systemName: symbol).foregroundStyle(Color.accentColor).frame(width: 20)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                    Text(detail).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
         }
         .toggleStyle(.switch)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
     }
+
+    // MARK: Agents
 
     private var agents: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Poo's static analysis can't know everything. Let your coding agent look deeper: it gets Poo's data and can check worktrees and files with you.")
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            header("Give your coding agent Poo's tools, so it can check your disk and clean with you. Optional.")
             let detected = store.integrations.filter(\.detected)
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Skill and MCP server")
-                    Text(detected.isEmpty ? "No coding agents found." : detected.map(\.name).joined(separator: ", "))
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer()
-                if !detected.isEmpty && detected.allSatisfy({ $0.skill_current && $0.mcp_registered }) {
-                    Label("Installed", systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(.callout)
-                } else {
-                    Button("Install skill + MCP") { Task { await store.configure(["integration", "install", "all"]) } }
-                        .disabled(detected.isEmpty)
-                }
-            }
-            if let h = store.hooks, !h.targets.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Clean up after agents (optional)")
-                    ForEach(h.targets.filter { $0.detected ?? true }) { t in
-                        Toggle(t.name, isOn: Binding(get: { t.installed == true }, set: { on in
-                            Task { await store.setHook(t.id, installed: on) }
-                        }))
-                        .toggleStyle(.checkbox)
+            VStack(spacing: 0) {
+                HStack(spacing: 12) {
+                    Image(systemName: "sparkles").foregroundStyle(Color.accentColor).frame(width: 20)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Skill and MCP server")
+                        Text(detected.isEmpty ? "No coding agents found" : detected.map(\.name).joined(separator: ", "))
+                            .font(.caption).foregroundStyle(.secondary)
                     }
-                    Text("When an agent session ends in a worktree whose work landed in main, Poo cleans that worktree's build output. Never the code.")
-                        .font(.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                    if !detected.isEmpty && detected.allSatisfy({ $0.skill_current && $0.mcp_registered }) {
+                        Label("Installed", systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(.callout)
+                    } else {
+                        Button("Install") {
+                            working = true
+                            Task {
+                                await store.configure(["integration", "install", "all"])
+                                store.integrations = (try? await PooCLI.json(IntegrationStatus.self, ["integration", "status"]))?.targets ?? []
+                                working = false
+                            }
+                        }
+                        .disabled(detected.isEmpty || working)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                if let h = store.hooks, !h.targets.filter({ $0.detected ?? true }).isEmpty {
+                    Divider().padding(.leading, 44)
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "arrow.triangle.branch").foregroundStyle(Color.accentColor).frame(width: 20)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("Clean up after agents")
+                                Text("When a session ends in a worktree whose work landed, clean its build output. Never code.")
+                                    .font(.caption).foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        HStack(spacing: 14) {
+                            ForEach(h.targets.filter { $0.detected ?? true }) { t in
+                                Toggle(t.name, isOn: Binding(get: { t.installed == true }, set: { on in
+                                    Task { await store.setHook(t.id, installed: on) }
+                                }))
+                                .toggleStyle(.checkbox)
+                            }
+                        }
+                        .padding(.leading, 32)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
                 }
             }
+            .card()
             HStack {
-                Button("Copy setup prompt") {
+                Button("Copy Setup Prompt") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(AgentSettings.setupPrompt, forType: .string)
                     store.flash("Copied")
                 }
-                Text(store.toast ?? "Paste it into your agent to let it tune Poo for your projects.")
+                Text(store.toast ?? "Paste it into your agent to tune Poo to your projects.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Spacer(minLength: 0)
+        }
+    }
+
+    // MARK: Ready
+
+    @ViewBuilder
+    private var ready: some View {
+        if let r = store.report, !store.scanning || store.progress == nil {
+            let safe = r.plan("stale")?.bytes ?? 0
+            let areas = AreaSummary.notInUse(r).prefix(4)
+            VStack(spacing: 16) {
+                Spacer(minLength: 0)
+                VStack(spacing: 4) {
+                    Text(safe > 0 ? Fmt.bytes(safe) : "All clean")
+                        .font(.system(size: 44, weight: .semibold))
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
+                    Text(safe > 0 ? "you can free right now, nothing in use" : "Nothing needs cleaning. Poo keeps watching.")
+                        .font(.title3).foregroundStyle(.secondary)
+                }
+                if !areas.isEmpty {
+                    VStack(spacing: 0) {
+                        ForEach(Array(areas.enumerated()), id: \.element.id) { idx, a in
+                            if idx > 0 { Divider().padding(.leading, 46) }
+                            HStack(spacing: 10) {
+                                AreaIcon(symbol: a.bucket.symbol, color: a.bucket.swiftColor, size: 24)
+                                Text(a.title).lineLimit(1)
+                                Spacer()
+                                Text(Fmt.bytes(a.reclaim)).monospacedDigit().foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
+                        }
+                    }
+                    .card()
+                    .frame(maxWidth: 400)
+                }
+                Spacer(minLength: 0)
+                HStack(spacing: 12) {
+                    Button("Done") { finish(review: false) }
+                        .controlSize(.large)
+                    if safe > 0 {
+                        Button("Review & Clean…") { finish(review: true) }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.large)
+                            .keyboardShortcut(.defaultAction)
+                    } else {
+                        Button("Open Poo") { finish(review: false, open: true) }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.large)
+                            .keyboardShortcut(.defaultAction)
+                    }
+                }
+                Label(showInMenuBar ? "Poo lives in your menu bar, at the top right." : "Open Poo from the Dock or Spotlight any time.",
+                      systemImage: showInMenuBar ? "arrow.up.right" : "dock.rectangle")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .transition(.opacity)
+        } else {
+            ScanProgressView()
         }
     }
 
@@ -324,65 +522,58 @@ struct OnboardingView: View {
 
     private func bullet(_ symbol: String, _ text: String) -> some View {
         Label {
-            Text(text).fixedSize(horizontal: false, vertical: true)
+            Text(text)
         } icon: {
-            Image(systemName: symbol).foregroundStyle(Color.accentColor).frame(width: 20)
+            Image(systemName: symbol).foregroundStyle(Color.accentColor).frame(width: 22)
         }
+        .font(.body)
     }
 
-    private func permissionRow(title: String, detail: String, granted: Bool?, button: String, action: @escaping () -> Void) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: granted == true ? "checkmark.circle.fill" : "circle")
-                .foregroundStyle(granted == true ? Color.green : Color.secondary)
-                .font(.title3)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).fontWeight(.medium)
-                Text(detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer()
-            if granted != true {
-                Button(button, action: action)
-            } else {
-                Text("Allowed").font(.callout).foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    private func projectCount(_ root: String) -> Int {
-        store.report?.projects.filter { $0.path.hasPrefix(root) }.count ?? 0
+    /// nil while the first scan hasn't counted projects yet.
+    private func projectCount(_ root: String) -> Int? {
+        guard let r = store.report else { return nil }
+        return r.projects.filter { $0.path.hasPrefix(root) }.count
     }
 
     // MARK: Actions
 
     private func load() async {
         switch step {
-        case .folders: store.roots = try? await PooCLI.json(RootsInfo.self, ["roots"])
-        case .permissions:
-            // Show value before asking: take a first look with what Poo can read already.
-            if !store.scanning, (store.report.map { Date().timeIntervalSince($0.scannedAt) > 3600 } ?? true) {
-                Task { await store.scan() }
-            }
-            await checkPermissions()
-        case .routines: await store.loadSchedules()
+        case .folders: await reloadRoots()
         case .agents:
             store.integrations = (try? await PooCLI.json(IntegrationStatus.self, ["integration", "status"]))?.targets ?? []
             await store.loadHooks()
+        case .routines: await store.loadSchedules()
         default: break
         }
     }
 
-    private func checkPermissions() async {
-        fullDiskAccess = (try? await PooCLI.json(Catalog.self, ["catalog"]))?.full_disk_access
-        if Onboarding.isBundled {
-            notifications = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+    private func reloadRoots() async {
+        store.roots = try? await PooCLI.json(RootsInfo.self, ["roots"])
+    }
+
+    private func refreshAccess() {
+        let now = Onboarding.hasFullDiskAccess
+        guard now != fullDiskAccess else { return }
+        fullDiskAccess = now
+        if now {
+            justGranted = true
+            // Folders that were hidden are readable now: walk everything once.
+            Task {
+                while store.scanning { try? await Task.sleep(for: .milliseconds(300)) }
+                await store.scan(full: true)
+            }
         }
     }
 
-    private func requestNotifications() {
-        Task {
-            _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])
-            await checkPermissions()
-        }
+    private func relaunch() {
+        savedStep = Step.access.rawValue
+        let path = Bundle.main.bundlePath
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/sh")
+        p.arguments = ["-c", "sleep 1; open \"\(path)\""]
+        try? p.run()
+        NSApp.terminate(nil)
     }
 
     private func setLogin(_ on: Bool) {
@@ -392,7 +583,7 @@ struct OnboardingView: View {
             loginError = nil
         } catch {
             loginItem = SMAppService.mainApp.status == .enabled
-            loginError = Onboarding.isBundled ? error.localizedDescription : "Available when Poo runs from /Applications."
+            loginError = Onboarding.isBundled ? error.localizedDescription : "Available when Poo runs from Applications."
         }
     }
 
@@ -403,12 +594,16 @@ struct OnboardingView: View {
         panel.allowsMultipleSelection = true
         panel.prompt = "Add"
         if panel.runModal() == .OK {
-            Task { for url in panel.urls { await store.configure(["roots", "add", url.path]) } }
+            Task {
+                for url in panel.urls { await store.configure(["roots", "add", url.path]) }
+                await reloadRoots()
+                await store.scan(full: true)
+            }
         }
     }
 
-    private func go(_ delta: Int, apply: Bool = true) {
-        if delta > 0 && step == .routines && apply {
+    private func go(_ delta: Int) {
+        if delta > 0 && step == .routines {
             working = true
             Task {
                 await applyRoutines()
@@ -417,14 +612,11 @@ struct OnboardingView: View {
             }
             return
         }
-        if delta > 0 && step == .agents {
-            finish()
-            return
-        }
         if let next = Step(rawValue: step.rawValue + delta) { step = next }
     }
 
     private func applyRoutines() async {
+        AppDelegate.updateActivationPolicy(windowOpen: true)
         let existing = Set(store.schedules.map(\.id))
         if nightly && !existing.contains("nightly") {
             await store.configure(["schedule", "add", "nightly"])
@@ -432,16 +624,23 @@ struct OnboardingView: View {
         if guardOn && !existing.contains("guard") {
             await store.configure(["schedule", "add", "guard", "--preset", "guard", "--when-free-below", "20G", "--target-free", "50G"])
         }
+        if notify && (nightly || guardOn) && Onboarding.isBundled {
+            _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])
+        }
         await store.loadSchedules()
     }
 
-    private func finish() {
+    private func finish(review: Bool, open: Bool = false) {
         Onboarding.markDone()
-        openWindow(id: "main")
-        NSApp.activate(ignoringOtherApps: true)
-        dismissWindow(id: "onboarding")
+        savedStep = 0
         store.startGuard()
-        Task { await store.scan() }
+        if review || open || !showInMenuBar {
+            nav.section = .overview
+            if review { nav.review(plan: "stale") }
+            openWindow(id: "main")
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        dismissWindow(id: "onboarding")
     }
 }
 
