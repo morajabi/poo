@@ -1,6 +1,12 @@
 name: ci
 
 # A green run of this workflow on main triggers release.yml.
+#
+# macOS runners are scarce: a job on the macos-15 arm64 pool once sat unassigned for 15
+# minutes until GitHub gave up ("not acquired by Runner of type hosted"), which cancelled
+# the run and skipped the release. So every macOS job uses macos-26 (the pool the Xcode
+# jobs need anyway) and the Rust and Swift checks share one runner. timeout-minutes only
+# counts once a runner has the job, so a real hang fails clearly instead of eating 6 hours.
 on:
   push:
     branches: [main]
@@ -10,27 +16,36 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  # Dev builds of poo never check for updates (CI is also set, belt and braces).
+  POO_NO_UPDATE_CHECK: 1
+
 jobs:
-  rust:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-15, ubuntu-24.04]
-    runs-on: ${{ matrix.os }}
-    env:
-      CARGO_TERM_COLOR: always
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      # Unit tests plus tests/core.rs, tests/bulk.rs and tests/incremental.rs (macOS only).
+      - uses: Swatinem/rust-cache@v2
       - run: cargo test --all-targets
       - name: core mods load without errors
         run: cargo run --quiet -- mods validate --text
 
-  app:
+  # Unit tests plus tests/core.rs, tests/bulk.rs and tests/incremental.rs (macOS only),
+  # then the app.
+  macos:
     runs-on: macos-26  # the app links against the macOS 26 SDK (Xcode 26+)
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --all-targets
+      - name: core mods load without errors
+        run: cargo run --quiet -- mods validate --text
       - run: swift build --package-path app
       - run: swift test --package-path app
       - name: release scripts parse
@@ -39,6 +54,7 @@ jobs:
   # The release build path, ad-hoc and one arch: icon, Sparkle embedding, signing order.
   bundle:
     runs-on: macos-26  # Xcode 26+: build-app.sh refuses an older SDK; actool needs it for the .icon
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - name: newest Xcode (actool compiles the Icon Composer icon)
@@ -47,6 +63,7 @@ jobs:
           sudo xcode-select -s "$x"
           xcodebuild -version
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - run: ./scripts/build-app.sh
       - name: bundle is complete and launches
         run: |

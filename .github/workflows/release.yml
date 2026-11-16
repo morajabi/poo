@@ -28,6 +28,7 @@ jobs:
        github.event.workflow_run.head_repository.full_name == github.repository &&
        !contains(github.event.workflow_run.head_commit.message, '[skip release]'))
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     outputs:
       version: ${{ steps.v.outputs.version }}
       sha: ${{ steps.v.outputs.sha }}
@@ -56,6 +57,7 @@ jobs:
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-24.04-arm
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -83,6 +85,7 @@ jobs:
   app:
     needs: version
     runs-on: macos-26  # Xcode 26+: build-app.sh refuses an older SDK; actool needs it for the .icon
+    timeout-minutes: 60  # notarization can queue at Apple
     outputs:
       signing: ${{ steps.verify.outputs.signing }}
     env:
@@ -212,6 +215,7 @@ jobs:
   publish:
     needs: [version, cli, app]
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     env:
       VERSION: ${{ needs.version.outputs.version }}
       SIGNING: ${{ needs.app.outputs.signing }}
