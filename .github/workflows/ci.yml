@@ -33,6 +33,17 @@ jobs:
       - run: cargo test --all-targets
       - name: core mods load without errors
         run: cargo run --quiet -- mods validate --text
+      # This branch's install.sh against the published release, in a throwaway home.
+      - name: install.sh installs and upgrades
+        run: |
+          set -eu
+          export HOME="$RUNNER_TEMP/home" POO_INSTALL_DIR="$RUNNER_TEMP/home/.local/bin" SHELL=/bin/bash
+          mkdir -p "$HOME"
+          sh install.sh | tee first.log
+          "$POO_INSTALL_DIR/poo" --version
+          grep -q "not on your PATH" first.log
+          sh install.sh | grep -q "^Reinstalling poo"
+          test "$(ls -A "$POO_INSTALL_DIR")" = poo
 
   # Unit tests plus tests/core.rs, tests/bulk.rs and tests/incremental.rs (macOS only),
   # then the app.
