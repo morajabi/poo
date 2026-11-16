@@ -197,7 +197,7 @@ struct OnboardingView: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(safe > 0 ? "\(Fmt.bytes(safe)) you can free safely" : "Nothing needs cleaning yet")
                         .font(.callout.weight(.medium))
-                    Text("Found in \(r.projects.count) projects and your tool caches, without Full Disk Access.")
+                    Text("In \(r.projects.count) projects and your tool caches.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             } else {
@@ -214,8 +214,8 @@ struct OnboardingView: View {
         VStack(alignment: .leading, spacing: 14) {
             firstLook
             permissionRow(
-                title: "Full Disk Access (optional)",
-                detail: "Also covers caches inside Safari, Mail, Messages and other apps' containers.",
+                title: "Full Disk Access (recommended)",
+                detail: "One switch instead of a prompt per folder. Covers Downloads and other apps' data.",
                 granted: fullDiskAccess,
                 button: "Open Privacy Settings"
             ) {
@@ -243,7 +243,7 @@ struct OnboardingView: View {
                 }
             }
             .disabled(!Onboarding.isBundled)
-            Text("Without Full Disk Access, macOS asks once the first time Poo looks in Desktop, Documents or Downloads.")
+            Text("Without it, Poo skips folders macOS guards. It never asks folder by folder.")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }

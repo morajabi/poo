@@ -44,17 +44,17 @@ struct DiskBreakdown {
         let bFree = left
 
         let otherHelp = trackedExceedsUsed
-            ? "Poo tracks more than this volume reports as used: some of it (often simulator runtimes) lives on another volume, so Other files shows as 0."
-            : "System, apps, documents and everything else Poo doesn't track."
+            ? "Some of what Poo tracks (often simulator runtimes) lives on another volume."
+            : "System, apps, documents: everything Poo doesn't track."
         segments = [
             Segment(kind: .notInUse, label: "Not in use", bytes: notInUse, barBytes: bNot,
-                    help: "Junk, Unused and Idle: dev data nothing is using right now. What a cleanup frees."),
+                    help: "Nothing is using it. This is what a clean frees."),
             Segment(kind: .inUse, label: "In use", bytes: inUse, barBytes: bIn,
-                    help: "In use and Active now: builds, dependencies and caches you are working with."),
+                    help: "Builds, packages and caches you're working with."),
             Segment(kind: .checkKept, label: "Check first & kept", bytes: checkKept, barBytes: bCheck,
-                    help: "Items Poo won't clean on its own: they need a look, or you keep them on purpose."),
+                    help: "Poo won't clean these on its own."),
             Segment(kind: .other, label: "Other files", bytes: other, barBytes: bOther, help: otherHelp),
-            Segment(kind: .free, label: "Free", bytes: free, barBytes: bFree, help: "Free space on this disk."),
+            Segment(kind: .free, label: "Free", bytes: free, barBytes: bFree, help: "Space macOS can use now."),
         ]
     }
 
@@ -154,15 +154,20 @@ struct DiskBreakdownBar: View {
                     let cardWidth: CGFloat = 250
                     let mid = sp.x + sp.width / 2
                     let x = min(max(0, mid - cardWidth / 2), max(0, geo.size.width - cardWidth))
+                    // Hover is tracked on the card's own frame, then the card is moved with padding:
+                    // `.offset` would leave its hover area on top of the bar and freeze the card.
                     SegmentCard(segment: sp.segment, total: breakdown.total, note: k == .other && breakdown.trackedExceedsUsed ? sp.segment.help : nil,
                                 onReview: k == .notInUse ? onReview : nil)
                         .frame(width: cardWidth)
-                        .offset(x: x, y: height + 6)
                         .onHover { inside in
                             cardHovered = inside
                             if inside { hideTask?.cancel() } else { scheduleHide() }
                         }
+                        .padding(.leading, x)
+                        .padding(.top, height + 6)
+                        .fixedSize()
                         .transition(.opacity)
+                        .id(k)
                 }
             }
         }
@@ -204,20 +209,22 @@ struct SegmentCard: View {
                 Spacer(minLength: 4)
                 Text(Fmt.bytes(segment.bytes)).font(.callout.weight(.semibold)).monospacedDigit()
             }
-            Text("\(percent) of the disk").font(.caption).foregroundStyle(.secondary).monospacedDigit()
-            Text(note ?? segment.help)
+            Text("\(percent) of the disk · \(note ?? segment.help)")
                 .font(.caption)
+                .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             if let onReview {
-                Button("Review & clean…", action: onReview)
+                Button("Clean…", action: onReview)
                     .buttonStyle(.link)
                     .font(.caption)
                     .padding(.top, 2)
             }
         }
         .padding(10)
-        .glassBackground(in: .rect(cornerRadius: 12, style: .continuous))
-        .shadow(color: .black.opacity(0.15), radius: 8, y: 3)
+        // Opaque, like a popover: text under it must never show through.
+        .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
     }
 
     private var percent: String {

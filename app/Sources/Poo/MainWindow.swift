@@ -9,11 +9,16 @@ struct MainWindow: View {
         @Bindable var nav = nav
         NavigationSplitView {
             List(selection: $nav.section) {
-                Label("Overview", systemImage: "gauge.with.dots.needle.33percent").tag(Navigation.Section.overview)
-                Label("Browse", systemImage: "list.bullet.indent").tag(Navigation.Section.browse)
-                Label("Projects", systemImage: "folder").tag(Navigation.Section.projects)
-                Label("Worktrees", systemImage: "arrow.triangle.branch").tag(Navigation.Section.worktrees)
-                Label("Backups", systemImage: "archivebox").tag(Navigation.Section.backups)
+                ForEach(Array(Navigation.menuSections.enumerated()), id: \.offset) { _, s in
+                    HStack {
+                        Label(s.title, systemImage: s.symbol)
+                        Spacer()
+                        if s.section == .elsewhere, let r = store.report, case let b = ElsewhereView.bytes(r, purgeable: store.purgeable), b > 0 {
+                            Text(Fmt.bytes(b)).font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                        }
+                    }
+                    .tag(s.section)
+                }
                 Section("Buckets") {
                     ForEach(store.report?.visibleBuckets.sorted { $0.bytes > $1.bytes } ?? []) { b in
                         HStack {
@@ -24,6 +29,7 @@ struct MainWindow: View {
                         }
                         .tag(Navigation.Section.bucket(b.id))
                         .listItemTint(b.swiftColor)
+                        .contextMenu { BucketContextMenu(bucket: b) }
                     }
                 }
             }
@@ -36,6 +42,7 @@ struct MainWindow: View {
                 case .bucket(let id): BrowseView(lockedBucket: id).id(id)
                 case .projects: ProjectsView()
                 case .worktrees: WorktreesView()
+                case .elsewhere: ElsewhereView()
                 case .backups: BackupsView()
                 }
             }
@@ -61,6 +68,7 @@ struct MainWindow: View {
                     case "projects": nav.section = .projects
                     case "worktrees": nav.section = .worktrees
                     case "backups": nav.section = .backups
+                    case "elsewhere": nav.section = .elsewhere
                     default: if p.hasPrefix("bucket:") { nav.section = .bucket(String(p.dropFirst(7))) }
                     }
                 }
@@ -268,7 +276,7 @@ struct ProjectRow: View {
     @ViewBuilder
     static func menu(_ path: String) -> some View {
         Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }
-        Button("Copy path") {
+        Button("Copy Path") {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(path, forType: .string)
         }

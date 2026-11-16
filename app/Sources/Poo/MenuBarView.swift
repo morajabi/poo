@@ -1,14 +1,14 @@
 import SwiftUI
 
-/// The menu bar panel. `[menubar] sections` in config.toml picks and orders what it shows:
-/// disk (bar and breakdown), areas (tick and clean once), buckets, freed, schedules.
+/// The menu bar panel: free space, one Clean button, the areas behind it on demand.
+/// `[menubar] sections` in config.toml adds or reorders the rest (growth, disk bar, buckets,
+/// freed this week, next auto-clean).
 struct MenuBarView: View {
     @Environment(Store.self) private var store
     @Environment(Updater.self) private var updater
     @Environment(Navigation.self) private var nav
     @Environment(\.openWindow) private var openWindow
     @Environment(\.openSettings) private var openSettings
-    @AppStorage("menuBreakdownExpanded") private var expanded = false
     @State private var review: PanelReview?
 
     struct PanelReview: Identifiable {
@@ -25,7 +25,6 @@ struct MenuBarView: View {
                 .padding(.horizontal, 14)
                 .padding(.top, 12)
                 .padding(.bottom, 10)
-                .zIndex(2)
             if let r = store.report {
                 if let s = store.menuSession {
                     Divider()
@@ -80,31 +79,37 @@ struct MenuBarView: View {
 
     // MARK: Header
 
+    /// Free space, and nothing else: the Clean button below says what Poo can add to it.
     private var header: some View {
-        HStack(alignment: .firstTextBaseline) {
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
             if let r = store.report {
-                Text("\(Fmt.bytes(r.disk.free)) free")
-                    .font(.title3.weight(.semibold))
+                Text(Fmt.bytes(r.disk.free))
+                    .font(.title2.weight(.semibold))
                     .monospacedDigit()
                     .contentTransition(.numericText())
                     .foregroundStyle(store.menubarWarns ? Color.orange : Color.primary)
                     .animation(.default, value: r.disk.free)
+                Text("free of \(Fmt.bytes(r.disk.total))")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
             } else {
-                Text("Poo").font(.title3.weight(.semibold))
+                Text("Poo").font(.title2.weight(.semibold))
             }
             Spacer(minLength: 8)
-            FreshnessLabel(prefix: "updated")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-            Button {
-                // ⌥-click walks everything instead of only what changed.
-                Task { await store.scan(full: NSEvent.modifierFlags.contains(.option)) }
-            } label: { Image(systemName: "arrow.clockwise") }
-                .buttonStyle(.borderless)
-                .keyboardShortcut("r")
-                .disabled(store.scanning)
-                .help("Refresh (⌘R). ⌥-click to rescan everything.")
-                .accessibilityLabel("Refresh")
+            switch store.spaceLevel {
+            case .critical: Text("Very low").font(.caption.weight(.medium)).foregroundStyle(.red)
+            case .low: Text("Low").font(.caption.weight(.medium)).foregroundStyle(.orange)
+            case .ok: EmptyView()
+            }
+        }
+        .contextMenu {
+            Button("Open Poo") { open(.overview) }
+            Button("Copy Free Space") {
+                guard let r = store.report else { return }
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString("\(Fmt.bytes(r.disk.free)) free of \(Fmt.bytes(r.disk.total))", forType: .string)
+            }
         }
     }
 
@@ -120,17 +125,21 @@ struct MenuBarView: View {
                 .padding(.top, -4)
         case .disk:
             Divider()
-            disk(r)
+            DiskBreakdownBar(breakdown: DiskBreakdown(report: r), height: 6, onReview: { review = PanelReview(bucket: nil) })
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
+                .zIndex(2)
         case .areas:
             let areas = config.order(AreaSummary.notInUse(r))
-            if !areas.isEmpty, store.menuSession == nil {
-                Divider()
+            if store.menuSession == nil {
                 AreaPicker(areas: areas, limit: max(config.max_areas, 1), disabled: store.busy,
                            onReview: { review = PanelReview(bucket: nil, areas: $0) },
                            onOpen: { a in
                                nav.browse(bucket: a.bucket.id, group: a.group, statuses: [.notInUse])
+                               open(.browse)
+                           },
+                           onOpenAll: {
+                               nav.browse(statuses: [.notInUse])
                                open(.browse)
                            })
             }
@@ -149,47 +158,12 @@ struct MenuBarView: View {
         case .schedules:
             if let next = store.schedules.filter({ $0.schedule.enabled }).compactMap({ e in e.next_run.map { (e, $0) } }).min(by: { $0.1 < $1.1 }) {
                 Divider()
-                Label("Auto-clean \(Fmt.ago(Date(timeIntervalSince1970: TimeInterval(next.1))))\(next.0.last_run.map { " · last freed \(Fmt.bytes($0.freed_bytes))" } ?? "")", systemImage: "clock.arrow.2.circlepath")
+                Label("Auto-clean \(Fmt.ago(Date(timeIntervalSince1970: TimeInterval(next.1))))", systemImage: "clock.arrow.2.circlepath")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 7)
-                    .help("Next run of “\(next.0.id)”")
-            }
-        }
-    }
-
-    private func disk(_ r: Report) -> some View {
-        let d = DiskBreakdown(report: r)
-        return VStack(alignment: .leading, spacing: 6) {
-            DiskBreakdownBar(breakdown: d, height: 6, onReview: { review = PanelReview(bucket: nil) })
-            Button { withAnimation(.snappy) { expanded.toggle() } } label: {
-                HStack(spacing: 5) {
-                    Text("\(Fmt.bytes(d.used)) of \(Fmt.bytes(d.total)) used")
-                    Spacer(minLength: 4)
-                    Image(systemName: "chevron.right")
-                        .font(.caption2.weight(.semibold))
-                        .rotationEffect(.degrees(expanded ? 90 : 0))
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(expanded ? "Hide the breakdown" : "Show the breakdown")
-            if expanded {
-                Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 3) {
-                    ForEach(d.segments) { s in
-                        GridRow {
-                            LegendSwatch(kind: s.kind)
-                            Text(s.label).foregroundStyle(.secondary)
-                            Text(Fmt.bytes(s.bytes)).monospacedDigit().gridColumnAlignment(.trailing)
-                        }
-                    }
-                }
-                .font(.caption)
-                .transition(.opacity.combined(with: .move(edge: .top)))
+                    .help("Next run of “\(next.0.id)”\(next.0.last_run.map { ". Last run freed \(Fmt.bytes($0.freed_bytes))." } ?? "")")
             }
         }
     }
@@ -222,13 +196,14 @@ struct MenuBarView: View {
     }
 
     private var footer: some View {
-        HStack {
+        HStack(spacing: 10) {
             Button("Open Poo") { open(.overview) }
                 .keyboardShortcut("o")
             if updater.available != nil {
                 Button("Update") { Task { await updater.install() } }
             }
             Spacer()
+            refreshButton
             Menu {
                 Button("Settings…") {
                     NSApp.activate(ignoringOtherApps: true)
@@ -236,6 +211,10 @@ struct MenuBarView: View {
                 }
                 .keyboardShortcut(",")
                 Button("Rescan Everything") { Task { await store.scan(full: true) } }
+                    .disabled(store.scanning)
+                Divider()
+                Button("Elsewhere on This Mac") { open(.elsewhere) }
+                Button("Backups") { open(.backups) }
                 Divider()
                 Button("Quit Poo") { NSApp.terminate(nil) }
                     .keyboardShortcut("q")
@@ -249,6 +228,24 @@ struct MenuBarView: View {
         }
         .buttonStyle(.borderless)
         .font(.callout)
+    }
+
+    /// Refresh lives quietly at the bottom; how fresh the numbers are is in its tooltip.
+    private var refreshButton: some View {
+        ZStack {
+            if store.refreshing || store.scanning {
+                ProgressView().controlSize(.small)
+            } else {
+                Button {
+                    // ⌥-click walks everything instead of only what changed.
+                    Task { await store.scan(full: NSEvent.modifierFlags.contains(.option)) }
+                } label: { Image(systemName: "arrow.clockwise") }
+                    .keyboardShortcut("r")
+                    .accessibilityLabel("Refresh")
+            }
+        }
+        .frame(width: 18, height: 18)
+        .help(store.report.map { "Updated \(FreshnessLabel.age($0.scannedAt, now: .now)). ⌘R to refresh, ⌥-click to rescan everything." } ?? "Refresh (⌘R)")
     }
 
     private func open(_ section: Navigation.Section) {

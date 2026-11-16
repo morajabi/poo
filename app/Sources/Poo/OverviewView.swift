@@ -26,7 +26,6 @@ struct OverviewView: View {
                         .zIndex(1)
                     areas(r)
                     topItems(r)
-                    ElsewhereCard(report: r)
                     footnotes(r)
                 }
                 .padding(.horizontal, 20)
@@ -64,7 +63,7 @@ struct OverviewView: View {
                 Spacer(minLength: 8)
                 plansMenu(r)
                 if (stale?.count ?? 0) > 0 {
-                    Button("Review & clean \(Fmt.bytes(stale?.bytes ?? 0))…") { nav.review(plan: "stale") }
+                    Button("Clean \(Fmt.bytes(stale?.bytes ?? 0))…") { nav.review(plan: "stale") }
                         .buttonStyle(.borderedProminent)
                         .disabled(store.busy)
                         .help(stale?.description ?? "")
@@ -231,29 +230,13 @@ struct OverviewView: View {
 
     @ViewBuilder
     private func footnotes(_ r: Report) -> some View {
-        let fda = r.warnings.first { $0.contains("Full Disk Access") }
-        let lines = (r.warnings.filter { $0 != fda } + [store.lastClean?.snapshot_note].compactMap { $0 })
-        if let fda {
-            // "31 rules (…) are off until poo has Full Disk Access: …" → one line and a button.
-            let n = fda.prefix { $0.isNumber }
-            HStack(spacing: 8) {
-                Label(n.isEmpty ? "Some rules need Full Disk Access" : "\(n) rules need Full Disk Access to look inside app data", systemImage: "lock.shield")
-                    .foregroundStyle(.secondary)
-                    .help(fda)
-                Button("Open Privacy Settings") {
-                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!)
-                }
-                .buttonStyle(.link)
-            }
-            .font(.caption)
-        }
-        if !lines.isEmpty || store.lastClean != nil || store.freedThisWeek > 0 {
+        // Full Disk Access notes live in Elsewhere on This Mac.
+        let lines = r.warnings.filter { !$0.contains("Full Disk Access") } + [store.lastClean?.snapshot_note].compactMap { $0 }
+        if !lines.isEmpty || store.freedThisWeek > 0 {
             VStack(alignment: .leading, spacing: 3) {
                 if store.freedThisWeek > 0 {
-                    Text("Freed with Poo: \(Fmt.bytes(store.freedThisWeek)) this week")
-                }
-                if let last = store.lastClean, !last.dry_run {
-                    Text("Last clean freed \(Fmt.bytes(last.freed_bytes)): \(last.cleaned) cleaned, \(last.skipped) skipped")
+                    Text("\(Fmt.bytes(store.freedThisWeek)) freed this week")
+                        .help(store.lastClean.map { "Last clean freed \(Fmt.bytes($0.freed_bytes)): \($0.cleaned) cleaned, \($0.skipped) skipped" } ?? "")
                 }
                 ForEach(lines, id: \.self) { Text($0) }
             }
@@ -360,83 +343,64 @@ struct ItemContextMenu: View {
     var item: Item
 
     var body: some View {
-        Button(store.selection.contains(item.id) ? "Deselect" : "Select") { store.toggle(item.id) }
+        Button("Review & Clean…") { nav.review(items: [item]) }
             .disabled(!item.isCleanable)
-        Button("Review & clean…") { nav.review(items: [item]) }
+        Button(store.selection.contains(item.id) ? "Deselect" : "Select") { store.toggle(item.id) }
             .disabled(!item.isCleanable)
         Divider()
         Button("Reveal in Finder") { store.reveal(item) }.disabled(item.isVirtual)
-        Button("Copy path") {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(item.path, forType: .string)
+        Button("Open in Terminal") { Terminal.open(item.path) }.disabled(item.isVirtual)
+        Button("Copy Path") { Pasteboard.copy(item.path) }
+        if let p = item.project {
+            Divider()
+            Menu("Project “\(URL(fileURLWithPath: p).lastPathComponent)”") {
+                Picker("Policy", selection: Binding(
+                    get: { store.report?.projects.first { $0.path == p }?.policy ?? "auto" },
+                    set: { new in Task { await store.setPolicy(p, new) } }
+                )) {
+                    ForEach(["auto", "active", "stale", "protected"], id: \.self) { Text(ProjectRow.policyLabel($0)).tag($0) }
+                }
+                .pickerStyle(.inline)
+                Divider()
+                ProjectRow.menu(p)
+            }
         }
+        Divider()
+        Button("Show All “\(item.group)”") { nav.browse(bucket: item.bucket, group: item.group) }
+        Button("Turn Off Rule “\(item.rule)”") { Task { await store.configure(["rules", "disable", item.rule], rescan: true) } }
+            .help("Poo stops listing this kind of item. Turn it back on in Settings › Rules.")
     }
 }
 
-/// "Elsewhere on this Mac": space Poo explains but leaves to its owner (C15, U6).
-/// Shown only when there is something to say.
-struct ElsewhereCard: View {
+/// Right-click on a bucket in the sidebar.
+struct BucketContextMenu: View {
     @Environment(Store.self) private var store
-    var report: Report
+    @Environment(Navigation.self) private var nav
+    var bucket: BucketSummary
 
     var body: some View {
-        let items = report.items.filter(\.isReportOnly).sorted { $0.total_bytes > $1.total_bytes }
-        let snaps = report.snapshots.flatMap { $0.count > 0 ? $0 : nil }
-        let purgeable = store.purgeable >= 1_000_000_000 ? store.purgeable : 0
-        if !items.isEmpty || snaps != nil || purgeable > 0 {
-            VStack(alignment: .leading, spacing: 6) {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Elsewhere on this Mac").font(.headline)
-                    Text("Not Poo's to clean. Shown so the numbers add up.").font(.caption).foregroundStyle(.secondary)
-                }
-                VStack(spacing: 0) {
-                    if purgeable > 0 {
-                        row(symbol: "arrow.3.trianglepath", title: "Purgeable",
-                            detail: "macOS frees this on its own when it needs room", bytes: purgeable) { EmptyView() }
-                    }
-                    if let snaps {
-                        if purgeable > 0 { Divider().padding(.leading, 34) }
-                        row(symbol: "clock.arrow.circlepath",
-                            title: "\(snaps.count) local Time Machine snapshot\(snaps.count == 1 ? "" : "s")",
-                            detail: "Kept until the next backup or until space runs low", bytes: snaps.bytes) {
-                            Button("Open Settings") { open("x-apple.systempreferences:com.apple.Time-Machine-Settings.extension") }
-                        }
-                    }
-                    ForEach(Array(items.enumerated()), id: \.element.id) { idx, i in
-                        if idx > 0 || purgeable > 0 || snaps != nil { Divider().padding(.leading, 34) }
-                        row(symbol: report.buckets.first { $0.id == i.bucket }?.symbol ?? "folder",
-                            title: i.name, detail: i.reasons.first ?? Fmt.tilde(i.path), bytes: i.total_bytes) {
-                            if let url = i.manage_url {
-                                Button("Open Settings") { open(url) }
-                            } else if !i.isVirtual {
-                                Button("Reveal") { store.reveal(i) }
-                            }
-                        }
-                    }
-                }
-                .padding(.vertical, 2)
-                .card()
-            }
+        let notInUse = store.report?.items.filter { $0.bucket == bucket.id && $0.status == .notInUse && $0.isCleanable } ?? []
+        Button("Review & Clean \(Fmt.bytes(notInUse.reduce(0) { $0 + $1.total_bytes }))…") { nav.review(items: notInUse) }
+            .disabled(notInUse.isEmpty || store.busy)
+        Button("Select Not in Use") { store.select(notInUse, true) }
+            .disabled(notInUse.isEmpty)
+        Button("Show Not in Use") {
+            nav.browse.statuses = [.notInUse]
+            nav.section = .bucket(bucket.id)
         }
+        Divider()
+        Button("Hide Bucket") { Task { await store.configure(["buckets", "rm", bucket.id], rescan: true) } }
+            .help("Hides it from Poo. Bring it back in Settings › Buckets.")
     }
+}
 
-    private func row<B: View>(symbol: String, title: String, detail: String, bytes: UInt64?, @ViewBuilder button: () -> B) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: symbol).foregroundStyle(.secondary).frame(width: 18)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title).lineLimit(1)
-                Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-            }
-            Spacer(minLength: 8)
-            if let bytes { Text(Fmt.bytes(bytes)).monospacedDigit().foregroundStyle(.secondary) }
-            button().controlSize(.small)
-        }
-        .font(.callout)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-    }
-
-    private func open(_ s: String) {
-        if let u = URL(string: s) { NSWorkspace.shared.open(u) }
+enum Terminal {
+    /// Opens the folder (or the file's folder) in Terminal.
+    static func open(_ path: String) {
+        var url = URL(fileURLWithPath: path)
+        var isDir: ObjCBool = false
+        if FileManager.default.fileExists(atPath: path, isDirectory: &isDir), !isDir.boolValue { url.deleteLastPathComponent() }
+        guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Terminal") else { return }
+        NSWorkspace.shared.open([url], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration())
     }
 }

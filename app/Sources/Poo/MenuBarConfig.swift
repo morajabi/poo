@@ -8,7 +8,7 @@ struct MenubarSettings: Codable, Equatable {
     var warn = true
     var warn_below = "10%"
     var notify = false
-    var sections = ["health", "disk", "areas", "freed", "schedules"]
+    var sections = ["areas"]
     var area_order = "size"
     var max_areas = 6
 
@@ -30,9 +30,9 @@ struct MenubarSettings: Codable, Equatable {
         var id: String { rawValue }
         var label: String {
             switch self {
-            case .health: return "What you can free"
+            case .health: return "Growth today"
             case .disk: return "Disk bar"
-            case .areas: return "Areas to clean"
+            case .areas: return "Clean button and areas"
             case .buckets: return "Buckets with Clean buttons"
             case .freed: return "Freed this week"
             case .schedules: return "Next auto-clean"

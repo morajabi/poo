@@ -178,21 +178,29 @@ struct AreaGroupedList: View {
                 let bytes = rows.reduce(0) { $0 + $1.reclaim }
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(cost.title).font(.subheadline.weight(.semibold))
-                            Text(cost.subtitle).font(.caption).foregroundStyle(.secondary)
-                        }
+                        Text(cost.title).font(.subheadline.weight(.semibold))
+                            .help(cost.subtitle)
                         Spacer()
-                        Button("Review \(Fmt.bytes(bytes))…") {
+                        Button("Clean \(Fmt.bytes(bytes))…") {
                             onReview(rows.flatMap(\.items).filter(\.isCleanable))
                         }
                         .controlSize(.small)
-                        .help("See exactly what goes before anything is cleaned.")
+                        .help("\(cost.subtitle) You review it before anything goes.")
                     }
                     VStack(spacing: 0) {
                         ForEach(Array(rows.enumerated()), id: \.element.id) { idx, a in
                             if idx > 0 { Divider().padding(.leading, 46) }
                             AreaListRow(area: a, share: Double(a.reclaim) / Double(all)) { onOpen(a) }
+                                .contextMenu {
+                                    Button("Review & Clean \(Fmt.bytes(a.reclaim))…") { onReview(a.items.filter(\.isCleanable)) }
+                                    Button("Show in Browse") { onOpen(a) }
+                                    Divider()
+                                    let paths = a.items.filter { !$0.isVirtual }.map { URL(fileURLWithPath: $0.path) }
+                                    Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting(paths) }
+                                        .disabled(paths.isEmpty)
+                                    Button("Copy Paths") { Pasteboard.copy(paths.map(\.path).joined(separator: "\n")) }
+                                        .disabled(paths.isEmpty)
+                                }
                         }
                     }
                     .card()
@@ -388,12 +396,13 @@ struct AreaPicker: View {
     var disabled: Bool
     var onReview: (Set<String>?) -> Void
     var onOpen: (AreaSummary) -> Void
+    var onOpenAll: () -> Void
+    @AppStorage("menuAreasExpanded") private var expanded = false
 
     /// Rows past the limit share one checkbox.
     private static let restKey = "__rest__"
 
     var body: some View {
-        @Bindable var store = store
         let shown = Array(areas.prefix(limit))
         let rest = Array(areas.dropFirst(limit))
         let restBytes = rest.reduce(0) { $0 + $1.reclaim }
@@ -401,50 +410,105 @@ struct AreaPicker: View {
         let all = max(areas.reduce(0) { $0 + $1.reclaim }, 1)
         let total = selected.reduce(0) { $0 + $1.reclaim }
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("\(Fmt.bytes(areas.reduce(0) { $0 + $1.reclaim })) not in use")
-                    .font(.caption.weight(.semibold)).foregroundStyle(.secondary).monospacedDigit()
-                Spacer()
-                Button(store.menuExcludedAreas.isEmpty ? "Select none" : "Select all") {
+            if areas.isEmpty {
+                Label("Nothing to clean", systemImage: "checkmark.circle")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 12)
+            } else {
+                Button { onReview(selected.count == areas.count ? nil : Set(selected.map(\.id))) } label: {
+                    Text(total > 0 ? "Clean \(Fmt.bytes(total))…" : "Pick what to clean")
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(disabled || total == 0)
+                .animation(.snappy, value: total)
+                .padding(.horizontal, 14)
+                .help("Opens a review first. Only items nothing is using are included.")
+                disclosure(shown: shown, rest: rest)
+                if expanded {
+                    VStack(spacing: 0) {
+                        ForEach(shown) { a in
+                            row(id: a.id, symbol: a.bucket.symbol, color: a.bucket.swiftColor, title: a.title,
+                                detail: a.shortNote, bytes: a.reclaim, share: Double(a.reclaim) / Double(all))
+                            .help(a.note)
+                            .contextMenu { menu(ids: [a.id], items: a.items, open: { onOpen(a) }) }
+                        }
+                        if !rest.isEmpty {
+                            row(id: Self.restKey, symbol: "ellipsis.circle", color: .secondary,
+                                title: "\(rest.count) more",
+                                detail: rest.prefix(3).map(\.group).joined(separator: ", "), bytes: restBytes,
+                                share: Double(restBytes) / Double(all))
+                            .contextMenu { menu(ids: Set(rest.map(\.id)), items: rest.flatMap(\.items), open: onOpenAll) }
+                        }
+                    }
+                    .padding(.horizontal, 5)
+                    .padding(.bottom, 6)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+        }
+    }
+
+    /// "▸ 7 areas · DerivedData, Rust, Swift" — opens the checklist behind the button.
+    private func disclosure(shown: [AreaSummary], rest: [AreaSummary]) -> some View {
+        @Bindable var store = store
+        let excluded = store.menuExcludedAreas.count
+        return HStack(spacing: 6) {
+            Button { withAnimation(.snappy) { expanded.toggle() } } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                        .rotationEffect(.degrees(expanded ? 90 : 0))
+                        .frame(width: 10)
+                    Text(excluded > 0 ? "\(areas.count - excluded) of \(areas.count) areas" : "\(areas.count) area\(areas.count == 1 ? "" : "s")")
+                    if !expanded {
+                        Text(areas.prefix(3).map(\.group).joined(separator: ", "))
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    Spacer(minLength: 4)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(expanded ? "Hide areas" : "Show areas")
+            if expanded {
+                Button(store.menuExcludedAreas.isEmpty ? "None" : "All") {
                     store.menuExcludedAreas = store.menuExcludedAreas.isEmpty
                         ? Set(shown.map(\.id) + (rest.isEmpty ? [] : [Self.restKey])) : []
                 }
                 .buttonStyle(.link)
-                .font(.caption)
+                .help(store.menuExcludedAreas.isEmpty ? "Untick every area" : "Tick every area")
             }
-            .padding(.horizontal, 14)
-            .padding(.top, 8)
-            .padding(.bottom, 3)
-            VStack(spacing: 0) {
-                ForEach(shown) { a in
-                    row(id: a.id, symbol: a.bucket.symbol, color: a.bucket.swiftColor, title: a.title,
-                        detail: a.shortNote, bytes: a.reclaim, share: Double(a.reclaim) / Double(all))
-                    .help(a.note)
-                    .contextMenu { Button("Show in Poo") { onOpen(a) } }
-                }
-                if !rest.isEmpty {
-                    row(id: Self.restKey, symbol: "ellipsis.circle", color: .secondary,
-                        title: "\(rest.count) more area\(rest.count == 1 ? "" : "s")",
-                        detail: rest.prefix(3).map(\.group).joined(separator: ", "), bytes: restBytes,
-                        share: Double(restBytes) / Double(all))
-                }
-            }
-            .padding(.horizontal, 5)
-            Button { onReview(selected.count == areas.count ? nil : Set(selected.map(\.id))) } label: {
-                Text(total > 0 ? "Review & clean \(Fmt.bytes(total))" : "Pick what to clean")
-                    .monospacedDigit()
-                    .contentTransition(.numericText())
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .disabled(disabled || total == 0)
-            .animation(.snappy, value: total)
-            .padding(.horizontal, 14)
-            .padding(.top, 6)
-            .padding(.bottom, 10)
-            .help("Review first. Only items nothing is using are included.")
         }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 14)
+        .padding(.top, 8)
+        .padding(.bottom, expanded ? 3 : 10)
+    }
+
+    @ViewBuilder
+    private func menu(ids: Set<String>, items: [Item], open: @escaping () -> Void) -> some View {
+        Button("Clean Only This…") { onReview(ids) }
+            .disabled(disabled)
+        Button("Show in Poo", action: open)
+        let paths = items.filter { !$0.isVirtual }.map { URL(fileURLWithPath: $0.path) }
+        Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting(paths) }
+            .disabled(paths.isEmpty)
+        Divider()
+        Button("Copy Paths") {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(paths.map(\.path).joined(separator: "\n"), forType: .string)
+        }
+        .disabled(paths.isEmpty)
     }
 
     private func isExcluded(_ a: AreaSummary, rest: [AreaSummary]) -> Bool {
@@ -463,10 +527,7 @@ struct AreaPicker: View {
                     .foregroundStyle(on ? color : Color.secondary)
                     .font(.title3)
                 VStack(alignment: .leading, spacing: 0) {
-                    HStack(spacing: 4) {
-                        Text(title).lineLimit(1)
-                        Text(AreaListRow.percent(share)).foregroundStyle(.secondary).monospacedDigit()
-                    }
+                    Text(title).lineLimit(1)
                     Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer(minLength: 6)
@@ -481,7 +542,7 @@ struct AreaPicker: View {
         }
         .buttonStyle(MenuRowStyle())
         .accessibilityAddTraits(on ? .isSelected : [])
-        .accessibilityLabel("\(title), \(Fmt.bytes(bytes))")
+        .accessibilityLabel("\(title), \(Fmt.bytes(bytes)), \(AreaListRow.percent(share)) of what you can clean")
     }
 }
 

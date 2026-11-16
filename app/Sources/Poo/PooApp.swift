@@ -49,6 +49,50 @@ struct PooApp: App {
                 Button("Find") { AppDelegate.focusToolbarSearch() }
                     .keyboardShortcut("f")
             }
+            CommandGroup(before: .sidebar) {
+                ForEach(Array(Navigation.menuSections.enumerated()), id: \.offset) { idx, s in
+                    Button(s.title) { go(s.section) }
+                        .keyboardShortcut(KeyEquivalent(Character("\(idx + 1)")))
+                }
+                Divider()
+                Button(nav.inspector ? "Hide Inspector" : "Show Inspector") {
+                    go(.browse)
+                    nav.inspector.toggle()
+                }
+                .keyboardShortcut("i", modifiers: [.command, .option])
+                Divider()
+            }
+            CommandMenu("Clean") {
+                let notInUse = store.report?.items.filter { $0.status == .notInUse && $0.isCleanable } ?? []
+                Button("Review Not in Use…") { nav.review(plan: "stale"); delegate.show("main", title: "Poo") }
+                    .keyboardShortcut("k", modifiers: [.command, .shift])
+                    .disabled(notInUse.isEmpty || store.busy)
+                Button("Review Selection…") { nav.review(items: store.selectedItems); delegate.show("main", title: "Poo") }
+                    .keyboardShortcut(.delete, modifiers: .command)
+                    .disabled(store.selection.isEmpty || store.busy)
+                Divider()
+                Button("Select All Not in Use") { store.select(notInUse, true) }
+                    .keyboardShortcut("a", modifiers: [.command, .option])
+                    .disabled(notInUse.isEmpty)
+                Button("Deselect All") { store.select(store.selectedItems, false) }
+                    .keyboardShortcut("a", modifiers: [.command, .shift])
+                    .disabled(store.selection.isEmpty)
+                Divider()
+                Menu("Bigger Cleanups") {
+                    ForEach(store.report?.plans.filter { $0.id != "stale" && $0.id != "emergency" } ?? []) { p in
+                        Button("\(p.name) · \(Fmt.bytes(p.bytes))…") { nav.review(plan: p.id); delegate.show("main", title: "Poo") }
+                            .disabled(p.count == 0)
+                    }
+                    Divider()
+                    ForEach([10, 20, 50, 100], id: \.self) { gb in
+                        Button("Free up to \(gb) GB…") {
+                            nav.review(plan: "emergency", free: UInt64(gb) * 1_000_000_000)
+                            delegate.show("main", title: "Poo")
+                        }
+                    }
+                }
+                .disabled(store.report == nil || store.busy)
+            }
         }
 
         Window("Set Up Poo", id: "onboarding") {
@@ -94,6 +138,13 @@ struct PooApp: App {
     }
 }
 
+extension PooApp {
+    private func go(_ section: Navigation.Section) {
+        nav.section = section
+        delegate.show("main", title: "Poo")
+    }
+}
+
 /// Which section the main window shows; the menu bar can deep-link into it.
 @Observable
 final class Navigation {
@@ -119,14 +170,28 @@ final class Navigation {
         review = Review(planID: plan, free: free)
     }
 
+    /// Browse's inspector, so the View menu can toggle it.
+    var inspector = false
+
     enum Section: Hashable {
         case overview
         case browse
         case projects
         case worktrees
+        case elsewhere
         case backups
         case bucket(String)
     }
+
+    /// The fixed sidebar sections, in order, with ⌘1… in the View menu.
+    static let menuSections: [(title: String, symbol: String, section: Section)] = [
+        ("Overview", "gauge.with.dots.needle.33percent", .overview),
+        ("Browse", "list.bullet.indent", .browse),
+        ("Projects", "folder", .projects),
+        ("Worktrees", "arrow.triangle.branch", .worktrees),
+        ("Elsewhere", "macbook", .elsewhere),
+        ("Backups", "archivebox", .backups),
+    ]
 
     /// Opens Browse narrowed to a bucket, group or status.
     func browse(bucket: String? = nil, group: String? = nil, statuses: Set<ItemStatus> = []) {

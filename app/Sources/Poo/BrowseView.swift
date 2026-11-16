@@ -7,7 +7,6 @@ struct BrowseView: View {
     /// Set when opened from a bucket in the sidebar.
     var lockedBucket: String?
     @State private var inspected: Item.ID?
-    @State private var showInspector = false
     @State private var collapsed: Set<String> = []
 
     struct ItemGroup: Identifiable {
@@ -85,11 +84,11 @@ struct BrowseView: View {
                 }
                 .help("Group by \(nav.browse.grouping.label.lowercased()), sorted by \(nav.browse.sorting.label.lowercased())")
                 AskAgentButton(target: askTarget(groups), title: "Ask")
-                Button { showInspector.toggle() } label: { Label("Inspector", systemImage: "sidebar.right") }
-                    .help("Show the selected item's details")
+                Button { nav.inspector.toggle() } label: { Label("Inspector", systemImage: "sidebar.right") }
+                    .help("Show the selected item's details (⌥⌘I)")
             }
         }
-        .inspector(isPresented: $showInspector) {
+        .inspector(isPresented: $nav.inspector) {
             Group {
                 if let i = byID {
                     ItemInspector(item: i)
@@ -99,7 +98,7 @@ struct BrowseView: View {
             }
             .inspectorColumnWidth(min: 260, ideal: 320, max: 440)
         }
-        .onChange(of: inspected) { _, new in if new != nil { showInspector = true } }
+        .onChange(of: inspected) { _, new in if new != nil { nav.inspector = true } }
         .task {
             // `--preview-inspect`: open the inspector on the biggest item not in use (screenshots).
             if CommandLine.arguments.contains("--preview-inspect"), inspected == nil {
@@ -170,8 +169,17 @@ struct BrowseView: View {
         }
         .contentShape(Rectangle())
         .contextMenu {
-            if !g.notInUse.isEmpty { Button("Select not in use") { store.select(g.notInUse, true) } }
-            Button("Deselect all") { store.select(g.items, false) }
+            if !g.notInUse.isEmpty {
+                Button("Review & Clean Not in Use…") { nav.review(items: g.notInUse.filter(\.isCleanable)) }
+                Button("Select Not in Use") { store.select(g.notInUse, true) }
+            }
+            Button("Deselect All") { store.select(g.items, false) }
+            Divider()
+            Button(isCollapsed ? "Expand" : "Collapse") {
+                if isCollapsed { collapsed.remove(g.id) } else { collapsed.insert(g.id) }
+            }
+            Button("Collapse All") { collapsed = Set(Self.groups(report: store.report, filter: nav.browse, bucket: lockedBucket ?? nav.browse.bucket).map(\.id)) }
+            Button("Expand All") { collapsed = [] }
         }
         .onTapGesture(count: 2) {
             if isCollapsed { collapsed.remove(g.id) } else { collapsed.insert(g.id) }
