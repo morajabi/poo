@@ -178,7 +178,7 @@ pub struct MenubarConfig {
     /// The status item: icon, free, not_in_use, percent_free, or several joined with `+`
     /// ("free+not_in_use"). The icon always shows when there is no text.
     pub title: String,
-    /// Tint the free space orange when it falls below `warn_below`.
+    /// Tint the free space orange when it falls below `warn_below` (off by default: calm).
     pub warn: bool,
     /// Low-space threshold for the tint: "10%" of the disk or a size like "20G".
     pub warn_below: String,
@@ -196,8 +196,8 @@ pub struct MenubarConfig {
 impl Default for MenubarConfig {
     fn default() -> Self {
         Self {
-            title: "icon+free".into(),
-            warn: true,
+            title: "icon".into(),
+            warn: false,
             warn_below: "10%".into(),
             notify: false,
             sections: vec!["areas".to_string()],
@@ -313,8 +313,8 @@ pub const KEYS: &[(&str, &str)] = &[
     ("hooks.remove_landed_worktrees", "Also remove a landed, clean worktree from the hook (default off)."),
     ("hooks.notify", "Show a notification after a hook cleans something (default on)."),
     ("schedule", "Routine cleanups; manage with `poo schedule` (presets nightly, quick, guard, weekly)."),
-    ("menubar.title", "What the menu bar shows: icon | free | not_in_use | percent_free, or a mix joined with + (default icon+free)."),
-    ("menubar.warn / menubar.warn_below", "Tint the menu bar number when free space is below this, \"10%\" or \"20G\" (default on, 10%)."),
+    ("menubar.title", "What the menu bar shows: icon | free | not_in_use | percent_free, or a mix joined with + (default icon)."),
+    ("menubar.warn / menubar.warn_below", "Tint the menu bar number when free space is below this, \"10%\" or \"20G\" (default off, 10%)."),
     ("menubar.notify", "Notify once when free space falls below menubar.warn_below (default off)."),
     ("menubar.sections", "Panel sections in order: health, disk, areas, buckets, freed, schedules (default [areas])."),
     ("menubar.area_order / menubar.max_areas", "Areas in the panel by size | bucket | name, and how many before the rest fold (default size, 6)."),
