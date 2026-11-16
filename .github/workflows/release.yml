@@ -1,50 +1,63 @@
 name: release
 
-# Every push to main whose `ci` run passed becomes a release: v<major>.<minor>.<n>,
-# with major.minor from Cargo.toml and n counted up from the last tag. Put
-# `[skip release]` in the head commit message to skip one. Manual runs release main.
+# Releases ship when a version tag is pushed (`scripts/release.sh` picks the next one
+# and tags main once CI is green there). Manual runs release main's head with the next
+# patch version. Every release waits for that commit's `ci` run to pass.
 on:
-  workflow_run:
-    workflows: [ci]
-    types: [completed]
-    branches: [main]
+  push:
+    tags: ['v*.*.*']
   workflow_dispatch:
 
 permissions:
   contents: write
+  actions: read
 
-# One release at a time, in order; a newer push waits instead of cancelling.
+# One release at a time, in order; a newer tag waits instead of cancelling.
 concurrency:
   group: release
   cancel-in-progress: false
 
 jobs:
   version:
-    if: >-
-      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
-      (github.event_name == 'workflow_run' &&
-       github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.event == 'push' &&
-       github.event.workflow_run.head_repository.full_name == github.repository &&
-       !contains(github.event.workflow_run.head_commit.message, '[skip release]'))
+    if: github.event_name == 'push' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 45
     outputs:
       version: ${{ steps.v.outputs.version }}
       sha: ${{ steps.v.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
       - id: v
         run: |
           set -eu
           sha="$(git rev-parse HEAD)"
-          version="$(scripts/release-version.sh "$sha")"
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$(scripts/release-version.sh "$sha")"
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "Releasing $sha as v$version" >> "$GITHUB_STEP_SUMMARY"
+      - name: wait for ci on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.v.outputs.sha }}
+        run: |
+          set -eu
+          for i in $(seq 1 80); do
+            state="$(gh run list -R "$GITHUB_REPOSITORY" -w ci -c "$SHA" -L 1 --json status,conclusion -q '.[0] | "\(.status) \(.conclusion)"' || true)"
+            case "$state" in
+              "completed success") echo "ci passed for $SHA"; exit 0 ;;
+              completed*) echo "::error::ci did not pass for $SHA ($state)"; exit 1 ;;
+              "") echo "no ci run for $SHA yet" ;;
+              *) echo "ci: $state" ;;
+            esac
+            sleep 30
+          done
+          echo "::error::timed out waiting for ci on $SHA"; exit 1
 
   # Linux CLI builds. The macOS ones come from the app job, which signs and notarizes them.
   cli:
