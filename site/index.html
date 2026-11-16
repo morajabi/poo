@@ -3,160 +3,307 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Poo — free the space your dev tools leave behind</title>
+<title>Poo — get your disk back</title>
 <meta name="description" content="Poo finds build output, DerivedData, caches, simulators and agent worktrees nothing is using, and frees the space safely. Free macOS menu bar app, CLI and MCP server.">
-<meta property="og:title" content="Poo — free the space your dev tools leave behind">
-<meta property="og:description" content="Build output, DerivedData, caches, simulators and agent worktrees. Free macOS menu bar app, CLI and MCP server.">
+<meta property="og:title" content="Poo — get your disk back">
+<meta property="og:description" content="Build output, DerivedData, caches, simulators and agent worktrees, freed safely. Free macOS menu bar app, CLI and MCP server.">
 <meta property="og:image" content="https://poo.morajabi.com/images/og.png">
 <meta property="og:url" content="https://poo.morajabi.com/">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="images/icon.png">
 <style>
   :root {
-    --bg: #ffffff;
-    --fg: #1d1d1f;
-    --muted: #6e6e73;
-    --faint: #a1a1a6;
-    --line: rgba(0, 0, 0, 0.08);
-    --code: #f5f5f7;
-    --accent: #1f9d55;
-    --accent-hover: #198a4a;
+    --ink: #0b1f14;
+    --ink-2: rgba(11, 31, 20, 0.62);
+    --ink-3: rgba(11, 31, 20, 0.42);
+    --wall-a: #e9f6ee;
+    --wall-b: #cfeedd;
+    --wall-c: #b7e3f2;
+    --bar: rgba(255, 255, 255, 0.55);
+    --bar-ink: #111;
+    --panel: rgba(250, 250, 250, 0.82);
+    --panel-ink: #1d1d1f;
+    --panel-2: #6e6e73;
+    --panel-line: rgba(0, 0, 0, 0.09);
+    --hover: rgba(0, 0, 0, 0.05);
+    --track: rgba(0, 0, 0, 0.06);
+    --green: #1f9d55;
+    --green-2: #178a49;
+    --chip: rgba(255, 255, 255, 0.6);
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #0f0f10;
-      --fg: #f5f5f7;
-      --muted: #a1a1a6;
-      --faint: #6e6e73;
-      --line: rgba(255, 255, 255, 0.1);
-      --code: #1c1c1e;
-      --accent: #2fb866;
-      --accent-hover: #3cc874;
+      --ink: #eef7f1;
+      --ink-2: rgba(238, 247, 241, 0.66);
+      --ink-3: rgba(238, 247, 241, 0.42);
+      --wall-a: #07140d;
+      --wall-b: #0c2a1b;
+      --wall-c: #0a2230;
+      --bar: rgba(20, 24, 22, 0.55);
+      --bar-ink: #f2f2f2;
+      --panel: rgba(38, 40, 39, 0.82);
+      --panel-ink: #f5f5f7;
+      --panel-2: #a1a1a6;
+      --panel-line: rgba(255, 255, 255, 0.1);
+      --hover: rgba(255, 255, 255, 0.07);
+      --track: rgba(255, 255, 255, 0.08);
+      --green: #2fb866;
+      --green-2: #3cc874;
+      --chip: rgba(255, 255, 255, 0.07);
     }
   }
   * { box-sizing: border-box; }
-  html { -webkit-text-size-adjust: 100%; }
+  html, body { margin: 0; height: 100%; }
   body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--fg);
-    font: 16px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+    background:
+      radial-gradient(1200px 700px at 12% 18%, var(--wall-b), transparent 60%),
+      radial-gradient(1000px 800px at 95% 95%, var(--wall-c), transparent 55%),
+      var(--wall-a);
+    background-attachment: fixed;
+    color: var(--ink);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
     -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+    overflow-x: hidden;
   }
   a { color: inherit; }
-  .wrap { max-width: 960px; margin: 0 auto; padding: 0 20px; }
-  header { display: flex; align-items: center; justify-content: space-between; height: 64px; }
-  .brand { display: flex; align-items: center; gap: 8px; font-weight: 600; text-decoration: none; }
-  .brand img { width: 26px; height: 26px; }
-  nav a { color: var(--muted); text-decoration: none; font-size: 14px; margin-left: 18px; }
-  nav a:hover { color: var(--fg); }
-  .hero { text-align: center; padding: 56px 0 28px; }
-  h1 {
-    font-size: clamp(32px, 5.4vw, 52px);
-    line-height: 1.08;
-    letter-spacing: -0.025em;
-    font-weight: 700;
-    margin: 0 auto 14px;
-    max-width: 14em;
+
+  /* Menu bar */
+  .menubar {
+    position: fixed; inset: 0 0 auto 0; height: 30px; z-index: 10;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 14px; font-size: 13.5px; color: var(--bar-ink);
+    background: var(--bar);
+    backdrop-filter: saturate(180%) blur(24px); -webkit-backdrop-filter: saturate(180%) blur(24px);
   }
-  .lede { color: var(--muted); font-size: clamp(17px, 2.2vw, 20px); max-width: 32em; margin: 0 auto 28px; }
+  .menus { display: flex; gap: 18px; align-items: center; }
+  .menus b { font-weight: 700; }
+  .menus span { opacity: 0.9; }
+  .extras { display: flex; gap: 14px; align-items: center; }
+  .extras svg { width: 16px; height: 16px; display: block; }
+  .item {
+    display: flex; align-items: center; gap: 5px; padding: 2px 7px; border-radius: 5px;
+    font-variant-numeric: tabular-nums; cursor: default;
+  }
+  .item.on { background: rgba(127, 127, 127, 0.22); }
+
+  /* Desktop */
+  .desk {
+    position: relative; max-width: 1180px; margin: 0 auto; min-height: 100vh;
+    padding: 120px 32px 56px; display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 48px; align-items: start;
+  }
+  .copy { padding-top: 64px; max-width: 520px; }
+  .name { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 17px; margin-bottom: 28px; }
+  .name img { width: 34px; height: 34px; }
+  h1 { font-size: clamp(44px, 7vw, 76px); line-height: 0.98; letter-spacing: -0.035em; margin: 0 0 20px; font-weight: 750; }
+  .lede { font-size: 19px; color: var(--ink-2); margin: 0 0 32px; max-width: 26em; }
+  .actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
   .download {
-    display: inline-flex; align-items: center; gap: 8px;
-    background: var(--accent); color: #fff; text-decoration: none;
-    font-weight: 600; font-size: 16px; padding: 12px 22px; border-radius: 999px;
-    transition: background 0.15s;
+    display: inline-flex; align-items: center; gap: 8px; text-decoration: none;
+    background: var(--ink); color: var(--wall-a); font-weight: 600; font-size: 15px;
+    padding: 12px 20px; border-radius: 12px; transition: transform 0.15s;
   }
-  .download:hover { background: var(--accent-hover); }
-  .download svg { width: 16px; height: 16px; }
-  .meta { color: var(--faint); font-size: 13px; margin: 12px 0 0; }
+  .download:hover { transform: translateY(-1px); }
+  .download svg { width: 15px; height: 15px; }
+  .curl {
+    display: inline-flex; align-items: center; gap: 8px; border: 0; cursor: pointer;
+    background: var(--chip); color: var(--ink); padding: 12px 14px; border-radius: 12px;
+    font: 13px ui-monospace, "SF Mono", Menlo, monospace;
+    white-space: nowrap; max-width: 100%; overflow-x: auto; text-align: left; scrollbar-width: none;
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  }
+  .curl::-webkit-scrollbar { display: none; }
+  .curl .d { color: var(--ink-3); }
+  .curl .hint { font: 500 11px -apple-system, sans-serif; color: var(--ink-3); margin-left: 4px; }
+  .meta { margin-top: 18px; font-size: 13px; color: var(--ink-3); }
   .meta span + span::before { content: "·"; margin: 0 7px; }
   .meta span:empty { display: none; }
-  .cli {
-    display: flex; align-items: center; gap: 10px;
-    max-width: 640px; margin: 26px auto 0; padding: 10px 10px 10px 16px;
-    background: var(--code); border: 1px solid var(--line); border-radius: 12px;
-    font: 13.5px/1.4 ui-monospace, "SF Mono", Menlo, monospace; text-align: left;
+  .links { position: absolute; left: 32px; bottom: 28px; font-size: 13px; color: var(--ink-3); display: flex; gap: 18px; }
+  .links a { text-decoration: none; }
+  .links a:hover { color: var(--ink); }
+
+  /* The panel */
+  .panel {
+    position: sticky; top: 38px; width: 340px; margin-top: -82px;
+    background: var(--panel); color: var(--panel-ink);
+    backdrop-filter: saturate(180%) blur(30px); -webkit-backdrop-filter: saturate(180%) blur(30px);
+    border-radius: 16px; border: 0.5px solid var(--panel-line);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.18), 0 2px 8px rgba(0, 0, 0, 0.08);
+    overflow: hidden; font-size: 13px; user-select: none;
   }
-  .cli code { flex: 1; overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
-  .cli code::-webkit-scrollbar { display: none; }
-  .cli .p { color: var(--faint); user-select: none; margin-right: 8px; }
-  .copy {
-    flex: none; border: 1px solid var(--line); background: var(--bg); color: var(--muted);
-    font: 500 12px -apple-system, sans-serif; padding: 6px 10px; border-radius: 8px; cursor: pointer;
+  .p-head { padding: 14px 16px 10px; display: flex; align-items: baseline; gap: 6px; }
+  .p-free { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+  .p-of { color: var(--panel-2); font-variant-numeric: tabular-nums; }
+  .p-clean {
+    display: block; width: calc(100% - 32px); margin: 2px 16px 0; height: 34px; border: 0; border-radius: 999px;
+    background: var(--green); color: #fff; font: 600 14px -apple-system, sans-serif; cursor: pointer;
+    font-variant-numeric: tabular-nums; position: relative; overflow: hidden;
   }
-  .copy:hover { color: var(--fg); }
-  .shot { margin: 48px auto 0; }
-  .shot img { display: block; width: 100%; height: auto; border-radius: 14px; }
-  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
-  .points { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin: 64px 0 0; }
-  .points h3 { font-size: 15px; margin: 0 0 4px; }
-  .points p { margin: 0; color: var(--muted); font-size: 14px; }
-  footer {
-    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;
-    color: var(--faint); font-size: 13px; padding: 56px 0 40px; margin-top: 64px; border-top: 1px solid var(--line);
+  .p-clean:hover { background: var(--green-2); }
+  .p-clean[disabled] { cursor: default; }
+  .p-clean .fill { position: absolute; inset: 0 auto 0 0; width: 0; background: rgba(255, 255, 255, 0.22); transition: width 0.2s linear; }
+  .p-clean .t { position: relative; }
+  .p-sub { display: flex; justify-content: space-between; padding: 10px 16px 4px; color: var(--panel-2); font-size: 12px; }
+  .rows { padding: 0 6px 6px; }
+  .row { display: flex; align-items: center; gap: 9px; padding: 5px 10px; border-radius: 7px; transition: opacity 0.3s; }
+  .row:hover { background: var(--hover); }
+  .chk {
+    width: 19px; height: 19px; border-radius: 50%; flex: none; display: grid; place-items: center;
+    background: var(--c); transition: transform 0.25s, background 0.25s;
   }
-  footer a { color: var(--muted); text-decoration: none; }
-  footer a:hover { color: var(--fg); }
-  @media (max-width: 680px) {
-    .hero { padding-top: 32px; }
-    .pair, .points { grid-template-columns: 1fr; }
-    .points { gap: 18px; margin-top: 44px; }
-    nav a.optional { display: none; }
+  .chk svg { width: 11px; height: 11px; }
+  .row .t1 { line-height: 1.25; }
+  .row .t2 { color: var(--panel-2); font-size: 11.5px; line-height: 1.3; }
+  .row .sz { margin-left: auto; font-variant-numeric: tabular-nums; }
+  .row.done { opacity: 0.38; }
+  .row.done .chk { transform: scale(0.85); }
+  .row.going .chk { background: transparent; border: 2px solid var(--c); border-top-color: transparent; animation: spin 0.6s linear infinite; }
+  .row.going .chk svg { display: none; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .p-foot { border-top: 0.5px solid var(--panel-line); padding: 9px 16px; display: flex; justify-content: space-between; color: var(--panel-2); }
+  .p-foot svg { width: 15px; height: 15px; }
+
+  @media (max-width: 860px) {
+    .menus span, .extras .opt { display: none; }
+    .desk { grid-template-columns: minmax(0, 1fr); padding: 72px 20px 80px; gap: 40px; }
+    .copy, .actions { min-width: 0; }
+    .copy { padding-top: 12px; }
+    .panel { position: relative; top: 0; margin: 0 auto; width: 100%; max-width: 360px; }
+    .links { position: static; grid-row: 3; justify-content: center; }
+    .curl { width: 100%; font-size: 12px; }
+    .download { width: 100%; justify-content: center; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .row, .chk, .download, .p-clean .fill { transition: none; }
+    .row.going .chk { animation: none; }
   }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <a class="brand" href="./"><img src="images/icon.png" alt="">Poo</a>
-    <nav>
-      <a class="optional" href="https://github.com/morajabi/poo#readme">Docs</a>
-      <a href="https://github.com/morajabi/poo">GitHub</a>
-    </nav>
-  </header>
-
-  <section class="hero">
-    <h1>Free the space your dev tools leave behind</h1>
-    <p class="lede">Build output, DerivedData, caches, simulators and agent worktrees. Poo finds what nothing is using and frees it, safely.</p>
-    <a class="download" href="https://github.com/morajabi/poo/releases/latest/download/Poo.app.zip">
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v9M4 7.5 8 11.5 12 7.5M3 14h10"/></svg>
-      Download for macOS
-    </a>
-    <p class="meta"><span>macOS 15+</span><span>Apple silicon and Intel</span><span>Free and open source</span><span id="version"></span></p>
-    <div class="cli" aria-label="Install the command-line tool">
-      <code><span class="p">$</span>curl -fsSL poo.morajabi.com/install | sh</code>
-      <button class="copy" type="button" data-copy="curl -fsSL poo.morajabi.com/install | sh">Copy</button>
+  <div class="menubar" aria-hidden="true">
+    <div class="menus"><b>Poo</b><span>File</span><span>Edit</span><span>View</span><span>Window</span><span>Help</span></div>
+    <div class="extras">
+      <div class="item on" id="status">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="1.5" y="5" width="13" height="6.5" rx="2"/><path d="M4 8.3h4.5" stroke-linecap="round"/><circle cx="11.5" cy="8.3" r=".6" fill="currentColor"/></svg>
+        <span id="status-free">86 GB</span>
+      </div>
+      <svg class="opt" viewBox="0 0 16 16" fill="currentColor"><path d="M8 12.6a1.2 1.2 0 1 0 0 2.4 1.2 1.2 0 0 0 0-2.4ZM8 8.6c1.5 0 2.8.6 3.8 1.5l-1 1.1A4 4 0 0 0 8 10.1c-1 0-2 .4-2.8 1.1l-1-1.1c1-1 2.3-1.5 3.8-1.5Zm0-4c2.6 0 5 1 6.7 2.6l-1 1.1A8 8 0 0 0 8 6.1a8 8 0 0 0-5.7 2.2l-1-1.1C3 5.6 5.4 4.6 8 4.6Z"/></svg>
+      <span id="clock" style="font-variant-numeric: tabular-nums">Mon 9:41</span>
     </div>
-  </section>
-
-  <div class="shot">
-    <img src="images/menubar-expanded.png" width="1520" height="994" alt="The Poo menu bar panel: free space, one Clean button and the areas behind it">
-  </div>
-  <div class="pair">
-    <img src="images/overview.png" width="2080" height="1440" alt="The Poo window: what is not in use, grouped by what a clean costs" loading="lazy">
-    <img src="images/cli-overview.png" alt="The poo terminal UI" loading="lazy">
   </div>
 
-  <section class="points">
-    <div><h3>Nothing goes without your review</h3><p>Anything running, recent or uncommitted stays. Worktrees are backed up first.</p></div>
-    <div><h3>Knows your stack</h3><p>About 650 rules for Xcode, Rust, Node, Python, Docker, AI tools and more.</p></div>
-    <div><h3>Works with your agent</h3><p>An MCP server and skill for Claude Code, Codex, Cursor and others.</p></div>
-  </section>
+  <main class="desk">
+    <section class="copy">
+      <div class="name"><img src="images/icon.png" alt="">Poo</div>
+      <h1>Get your disk back.</h1>
+      <p class="lede">DerivedData, <code style="font-size:.92em">node_modules</code>, Rust targets, simulators and old agent worktrees. Poo finds what nothing is using and frees it, safely.</p>
+      <div class="actions">
+        <a class="download" href="https://github.com/morajabi/poo/releases/latest/download/Poo.app.zip">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v9M4 7.5 8 11.5 12 7.5M3 14h10"/></svg>
+          Download for Mac
+        </a>
+        <button class="curl" type="button" data-copy="curl -fsSL poo.morajabi.com/install | sh" title="Copy">
+          <span class="d">$</span>curl -fsSL poo.morajabi.com/install | sh<span class="hint">Copy</span>
+        </button>
+      </div>
+      <p class="meta"><span>macOS 15+</span><span>Free and open source</span><span>Menu bar app, CLI and MCP</span><span id="version"></span></p>
+    </section>
 
-  <footer>
-    <span>Poo · MIT licensed · Updates itself</span>
-    <span><a href="https://github.com/morajabi/poo/releases">Releases</a> &nbsp; <a href="https://github.com/morajabi/poo/issues">Feedback</a></span>
-  </footer>
-</div>
+    <aside class="panel" aria-label="Poo's menu bar panel. Press Clean to see it work.">
+      <div class="p-head"><span class="p-free" id="p-free">86 GB</span><span class="p-of">free of 494 GB</span></div>
+      <button class="p-clean" id="clean" type="button"><span class="fill" id="fill"></span><span class="t" id="clean-t">Clean 28.4 GB…</span></button>
+      <div class="p-sub"><span>⌄ 9 areas</span><span>None</span></div>
+      <div class="rows" id="rows"></div>
+      <div class="p-foot"><span>Open Poo</span>
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="6.3"/><circle cx="5.2" cy="8" r=".7" fill="currentColor"/><circle cx="8" cy="8" r=".7" fill="currentColor"/><circle cx="10.8" cy="8" r=".7" fill="currentColor"/></svg>
+      </div>
+    </aside>
+
+    <nav class="links">
+      <a href="https://github.com/morajabi/poo">GitHub</a>
+      <a href="https://github.com/morajabi/poo#readme">Docs</a>
+      <a href="https://github.com/morajabi/poo/releases">Releases</a>
+      <a href="https://github.com/morajabi/poo/issues">Feedback</a>
+    </nav>
+  </main>
+
 <script>
-  document.querySelectorAll(".copy").forEach(function (b) {
+  var areas = [
+    ["DerivedData", "orbit-ios · used 2w ago", 8.4, "#3478f6"],
+    ["Rust build output", "atlas-api · used 2w ago", 6.8, "#f08a24"],
+    ["Swift build output", "orbit-ios · used 4d ago", 3.9, "#f08a24"],
+    ["Simulators", "used 2mo ago", 3.1, "#3478f6"],
+    ["Rust cache", "used 5d ago", 2.2, "#21b6a8"],
+    ["Worktrees", "atlas-api-search · used 1w ago", 1.4, "#9b5de5"],
+    ["3 more", "Next.js, Node, Logs", 2.56, "#8e8e93"]
+  ];
+  var check = '<svg viewBox="0 0 12 12" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6.2 5 8.6l4.5-5"/></svg>';
+  var rowsEl = document.getElementById("rows");
+  rowsEl.innerHTML = areas.map(function (a) {
+    return '<div class="row" style="--c:' + a[3] + '"><span class="chk">' + check + '</span><div><div class="t1">' + a[0] +
+      '</div><div class="t2">' + a[1] + '</div></div><span class="sz">' + a[2] + ' GB</span></div>';
+  }).join("");
+
+  var FREE = 86, total = areas.reduce(function (s, a) { return s + a[2]; }, 0);
+  var freeEl = document.getElementById("p-free"), statusEl = document.getElementById("status-free");
+  var btn = document.getElementById("clean"), label = document.getElementById("clean-t"), fill = document.getElementById("fill");
+  var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  function gb(x) { return (x >= 100 ? Math.round(x) : Math.round(x * 10) / 10) + " GB"; }
+  function setFree(x) { freeEl.textContent = gb(x); statusEl.textContent = Math.round(x) + " GB"; }
+
+  function tween(from, to, ms, step, done) {
+    if (reduce) { step(to); done(); return; }
+    var t0 = performance.now();
+    (function f(now) {
+      var k = Math.min(1, (now - t0) / ms), e = 1 - Math.pow(1 - k, 3);
+      step(from + (to - from) * e);
+      k < 1 ? requestAnimationFrame(f) : done();
+    })(t0);
+  }
+
+  var state = "idle";
+  btn.addEventListener("click", function () {
+    if (state === "busy") return;
+    if (state === "done") { reset(); return; }
+    state = "busy"; btn.disabled = true;
+    var rows = rowsEl.children, i = 0, freed = 0;
+    (function next() {
+      if (i >= rows.length) {
+        state = "done"; btn.disabled = false;
+        label.textContent = "Freed " + gb(total) + " · Again";
+        return;
+      }
+      var row = rows[i], size = areas[i][2];
+      row.classList.add("going");
+      label.textContent = "Cleaning " + (i + 1) + " of " + rows.length;
+      tween(freed, freed + size, reduce ? 0 : 280 + size * 70, function (v) {
+        setFree(FREE + v); fill.style.width = (v / total * 100) + "%";
+      }, function () {
+        freed += size; row.classList.remove("going"); row.classList.add("done"); i++; next();
+      });
+    })();
+  });
+  function reset() {
+    state = "idle"; setFree(FREE); fill.style.width = "0";
+    label.textContent = "Clean 28.4 GB…";
+    Array.prototype.forEach.call(rowsEl.children, function (r) { r.classList.remove("done", "going"); });
+  }
+
+  document.querySelectorAll("[data-copy]").forEach(function (b) {
     b.addEventListener("click", function () {
       navigator.clipboard.writeText(b.dataset.copy).then(function () {
-        b.textContent = "Copied";
-        setTimeout(function () { b.textContent = "Copy"; }, 1500);
+        var h = b.querySelector(".hint"); h.textContent = "Copied";
+        setTimeout(function () { h.textContent = "Copy"; }, 1500);
       });
     });
   });
+
+  (function clock() {
+    var d = new Date(), el = document.getElementById("clock");
+    el.textContent = d.toLocaleDateString(undefined, { weekday: "short" }) + " " + d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    setTimeout(clock, 30000);
+  })();
+
   fetch("https://api.github.com/repos/morajabi/poo/releases/latest")
     .then(function (r) { return r.ok ? r.json() : null; })
     .then(function (j) { if (j && j.tag_name) document.getElementById("version").textContent = j.tag_name; })
