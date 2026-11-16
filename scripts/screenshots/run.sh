@@ -97,8 +97,8 @@ shot freed        "Poo Cleaning" -                       3    -- --preview-clean
 kill $CAF 2>/dev/null || true
 
 mkdir -p "$OUT"
-"$W/compose" "$W/raw-menubar.png" "$OUT/menubar.png" light menubar 56 "86 GB"
-"$W/compose" "$W/raw-menubar-dark.png" "$OUT/menubar-dark.png" dark menubar 56 "86 GB"
-"$W/compose" "$W/raw-menubar-expanded.png" "$OUT/menubar-expanded.png" light menubar 56 "86 GB"
+"$W/compose" "$W/raw-menubar.png" "$OUT/menubar.png" light menubar 56 ""
+"$W/compose" "$W/raw-menubar-dark.png" "$OUT/menubar-dark.png" dark menubar 56 ""
+"$W/compose" "$W/raw-menubar-expanded.png" "$OUT/menubar-expanded.png" light menubar 56 ""
 for n in overview browse elsewhere cleaning freed; do "$W/compose" "$W/raw-$n.png" "$OUT/$n.png" light; done
 ls -l "$OUT"
