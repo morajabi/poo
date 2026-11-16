@@ -131,21 +131,25 @@ fn install(m: &Manifest, force: bool) -> Result<String> {
     }
     let dir = exe.parent().context("binary has no parent folder")?;
     let staging = dir.join(format!(".poo-update-{}", std::process::id()));
-    std::fs::create_dir_all(&staging)?;
-    let tarball = staging.join("poo.tar.gz");
-    std::fs::write(&tarball, &data)?;
-    let st = std::process::Command::new("tar")
-        .args(["-xzf", &tarball.to_string_lossy(), "-C", &staging.to_string_lossy()])
-        .status()?;
-    if !st.success() {
-        let _ = std::fs::remove_dir_all(&staging);
-        bail!("could not unpack the update");
-    }
-    let new_bin = find_binary(&staging).context("update archive has no poo binary")?;
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&new_bin, std::fs::Permissions::from_mode(0o755))?;
-    std::fs::rename(&new_bin, &exe).context("could not replace the poo binary (permissions?)")?;
+    // Staged next to the binary so the final rename is atomic; removed on every path.
+    let res = (|| -> Result<()> {
+        std::fs::create_dir_all(&staging).context("could not write next to the poo binary (try `sudo poo update`)")?;
+        let tarball = staging.join("poo.tar.gz");
+        std::fs::write(&tarball, &data)?;
+        let st = std::process::Command::new("tar")
+            .args(["-xzf", &tarball.to_string_lossy(), "-C", &staging.to_string_lossy()])
+            .status()?;
+        if !st.success() {
+            bail!("could not unpack the update");
+        }
+        let new_bin = find_binary(&staging).context("update archive has no poo binary")?;
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&new_bin, std::fs::Permissions::from_mode(0o755))?;
+        std::fs::rename(&new_bin, &exe).context("could not replace the poo binary (permissions?)")?;
+        Ok(())
+    })();
     let _ = std::fs::remove_dir_all(&staging);
+    res?;
     let _ = record_check(&m.version);
     Ok(m.version.clone())
 }
@@ -205,10 +209,8 @@ fn record_check(latest: &str) -> Result<()> {
 
 /// Whether this run may look for updates on its own: a person at a terminal, not CI,
 /// not a test, not the copy inside Poo.app (Sparkle owns that one).
-pub fn background_allowed(stdin_tty: bool, stderr_tty: bool) -> bool {
-    if !(stdin_tty || stderr_tty) {
-        return false;
-    }
+/// Agents and scripts count too: a CLI only an agent runs still updates itself.
+pub fn background_allowed() -> bool {
     if ["CI", "POO_NO_UPDATE_CHECK"].iter().any(|k| std::env::var_os(k).is_some_and(|v| !v.is_empty())) {
         return false;
     }
@@ -230,11 +232,21 @@ pub fn background(auto: bool) -> Option<String> {
     if st.latest.is_empty() || !newer(&st.latest, VERSION) {
         return None;
     }
-    match managed_by(&current_exe()) {
+    let exe = current_exe();
+    match managed_by(&exe) {
         Some(mgr) => Some(format!("poo {} is available (you have {}). Update with {}.", st.latest, VERSION, mgr)),
-        None if auto => None, // the background run installs it
+        // The background run installs it, unless it can't write next to the binary.
+        None if auto && exe.parent().is_some_and(writable) => None,
+        None if auto => Some(format!("poo {} is available (you have {}). Run `sudo poo update`.", st.latest, VERSION)),
         None => Some(format!("poo {} is available (you have {}). Run `poo update`.", st.latest, VERSION)),
     }
+}
+
+fn writable(dir: &Path) -> bool {
+    let probe = dir.join(format!(".poo-write-{}", std::process::id()));
+    let ok = std::fs::write(&probe, b"").is_ok();
+    let _ = std::fs::remove_file(&probe);
+    ok
 }
 
 fn spawn_background() {

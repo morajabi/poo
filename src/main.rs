@@ -882,17 +882,23 @@ fn real_main(cli: Cli) -> R {
         }
         // The daily update check still runs; its hint would be wiped by the full-screen UI.
         if let Ok(cfg) = poo::config::Config::load() {
-            if cfg.updates.check && poo::update::background_allowed(true, true) {
+            if cfg.updates.check && poo::update::background_allowed() {
                 let _ = poo::update::background(cfg.updates.auto);
             }
         }
         return poo::tui::run(poo::tui::UiOptions::detect(cli.no_animation)).map_err(Into::into);
     }
     if matches!(cmd, Cmd::Mcp) {
+        // Agents may be the only ones running poo: keep it current from here too (silently).
+        if let Ok(cfg) = poo::config::Config::load() {
+            if cfg.updates.check && poo::update::background_allowed() {
+                let _ = poo::update::background(cfg.updates.auto);
+            }
+        }
         return poo::mcp::serve().map_err(Into::into);
     }
     let mut ctx = Ctx::load().map_err(config_error)?;
-    if ctx.cfg.updates.check && !matches!(cmd, Cmd::Update { .. } | Cmd::Watch { .. }) && poo::update::background_allowed(is_tty(0), is_tty(2)) {
+    if ctx.cfg.updates.check && !matches!(cmd, Cmd::Update { .. } | Cmd::Watch { .. }) && poo::update::background_allowed() {
         if let Some(n) = poo::update::background(ctx.cfg.updates.auto) {
             if !out.json && is_tty(2) {
                 eprintln!("{}", n);
@@ -1398,7 +1404,9 @@ fn real_main(cli: Cli) -> R {
             }
         },
         Cmd::Update { background: true, .. } => {
-            let _ = poo::update::background_run(ctx.cfg.updates.auto);
+            if let Ok(Some(_)) = poo::update::background_run(ctx.cfg.updates.auto) {
+                refresh_skills();
+            }
         }
         Cmd::Update { check, quiet, force, .. } => {
             if check {
@@ -1415,10 +1423,7 @@ fn real_main(cli: Cli) -> R {
                 }
             } else {
                 let v = poo::update::run(force).map_err(|e| CliError::new("update_failed", 7, e.to_string()))?;
-                // Refresh skills we installed so they match the new binary.
-                for t in poo::agent::status().into_iter().filter(|t| t.skill_installed && !t.skill_current) {
-                    let _ = poo::agent::install(t.id, true, false);
-                }
+                refresh_skills();
                 if out.json {
                     emit(&out, &json!({"version": v}));
                 } else if v == poo::VERSION {
@@ -1872,3 +1877,10 @@ fn main() -> ExitCode {
 }
 
 mod contrib_cmd;
+
+/// Refreshes skills poo installed so they match the new binary.
+fn refresh_skills() {
+    for t in poo::agent::status().into_iter().filter(|t| t.skill_installed && !t.skill_current) {
+        let _ = poo::agent::install(t.id, true, false);
+    }
+}
