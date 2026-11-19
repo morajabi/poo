@@ -4,16 +4,19 @@
 id = "cocoapods"
 name = "CocoaPods"
 markers = ["Podfile"]
+tools = ["pod"]
 
 [[stack]]
 id = "carthage"
 name = "Carthage"
 markers = ["Cartfile"]
+tools = ["carthage"]
 
 [[stack]]
 id = "tuist"
 name = "Tuist"
 markers = ["Tuist.swift", "Tuist", "Workspace.swift"]
+tools = ["tuist"]
 
 [[stack]]
 id = "fastlane"

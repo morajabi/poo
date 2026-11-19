@@ -239,6 +239,8 @@ pub struct Stack {
     pub id: String,
     pub name: String,
     pub markers: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<String>,
     #[serde(skip)]
     pub set: NameSet,
 }
@@ -284,12 +286,46 @@ pub struct Catalog {
     pub stacks: Vec<Stack>,
     pub launchers: Vec<Launcher>,
     pub errors: Vec<String>,
+    /// Build tool names beyond the built-in list: stack tools and process guard names.
+    pub build_tools: Vec<String>,
+    /// The core mod's rules and stacks as shipped, before any mod or config changed them.
+    /// Only these scope running builds, so nothing a user adds can narrow that check.
+    pub core: CoreBuildScopes,
+}
+
+/// What the core mod says about build output, for `procs::build_touches`.
+#[derive(Debug, Default)]
+pub struct CoreBuildScopes {
+    /// Rule id -> its stacks, for rules in the build and xcode buckets.
+    pub outputs: HashMap<String, Vec<String>>,
+    /// Stack id -> (tools, isolated).
+    pub stacks: HashMap<String, (Vec<String>, bool)>,
 }
 
 impl Catalog {
     /// Stack ids whose markers appear among a folder's entries.
     pub fn stacks_for(&self, entries: &[String]) -> Vec<String> {
         self.stacks.iter().filter(|s| s.set.any(entries)).map(|s| s.id.clone()).collect()
+    }
+    /// Whether running build `p` may be using an item at `path` made by `rule`. `checkout`
+    /// is the checkout `p` counts for when the item belongs to it. See `procs::build_touches`.
+    pub fn build_touches(&self, p: &crate::procs::Proc, path: &Path, rule: Option<&Rule>, checkout: Option<&Path>) -> bool {
+        // A rule some mod or config changed may match other folders now: no scoping.
+        let scope = rule.filter(|r| r.source == "core").and_then(|r| {
+            let stacks = self.core.outputs.get(&r.id)?;
+            let known: Vec<&(Vec<String>, bool)> = stacks.iter().filter_map(|s| self.core.stacks.get(s)).collect();
+            Some(crate::procs::Scope {
+                rule: r.id.as_str(),
+                tools: known.iter().flat_map(|k| k.0.iter().map(String::as_str)).collect(),
+                isolated: !known.is_empty() && known.iter().all(|k| k.1),
+            })
+        });
+        crate::procs::build_touches(p, path, checkout, scope.as_ref())
+    }
+    /// Tool names that count as builds beyond the built-in list: stack tools and the names
+    /// process guards add.
+    pub fn build_tool_names(&self) -> Vec<String> {
+        self.build_tools.clone()
     }
     pub fn rule(&self, id: &str) -> Option<&Rule> {
         self.rules.iter().find(|r| r.id == id)
@@ -482,6 +518,18 @@ impl<T> Ordered<T> {
 pub fn load(cfg: &Config) -> Catalog {
     let mut errors = vec![];
     let mut all = vec![load_core(&mut errors)];
+    let mut core = CoreBuildScopes::default();
+    for (_, f) in &all[0].files {
+        for r in &f.rule {
+            if matches!(r.bucket.as_deref(), Some("build") | Some("xcode")) {
+                core.outputs.insert(r.id.clone(), r.stacks.clone().unwrap_or_default());
+            }
+        }
+        for st in &f.stack {
+            let tools = st.tools.clone().unwrap_or_default().into_iter().filter(|t| crate::procs::check_stack_tool(t).is_ok()).collect();
+            core.stacks.insert(st.id.clone(), (tools, st.isolated.unwrap_or(false)));
+        }
+    }
     all.extend(load_user_mods(&mut errors));
 
     let mut rules: Ordered<RuleSpec> = Ordered::new();
@@ -566,12 +614,23 @@ pub fn load(cfg: &Config) -> Catalog {
                 });
             }
             for st in &f.stack {
+                // Tools only grow: a mod that redefines a stack keeps the tools it had, so it
+                // cannot stop a running build from keeping that stack's items.
+                let mut tools: Vec<String> = stacks.iter().find(|x| x.id == st.id).map(|x| x.tools.clone()).unwrap_or_default();
+                for t in st.tools.iter().flatten() {
+                    if let Err(e) = crate::procs::check_stack_tool(t) {
+                        errors.push(format!("{}: stack `{}`: {}", label, st.id, e));
+                    } else if !tools.contains(t) {
+                        tools.push(t.clone());
+                    }
+                }
                 stacks.retain(|x| x.id != st.id);
                 match NameSet::new(&st.markers) {
                     Ok(set) => stacks.push(Stack {
                         id: st.id.clone(),
                         name: st.name.clone().unwrap_or_else(|| st.id.clone()),
                         markers: st.markers.clone(),
+                        tools,
                         set,
                     }),
                     Err(e) => errors.push(format!("{}: stack `{}`: {}", label, st.id, e)),
@@ -710,9 +769,16 @@ pub fn load(cfg: &Config) -> Catalog {
         rules: compiled,
         buckets: bucket_list,
         plans: plan_list,
-        guards,
         roots,
         worktree_homes: homes,
+        build_tools: {
+            let mut v: Vec<String> = stacks.iter().flat_map(|s| s.tools.iter().cloned()).collect();
+            v.extend(guards.iter().filter(|g| g.kind == "process").flat_map(|g| g.names.iter().cloned()));
+            v.sort();
+            v.dedup();
+            v
+        },
+        guards,
         stacks,
         launchers: {
             let mut l = launchers;
@@ -720,6 +786,7 @@ pub fn load(cfg: &Config) -> Catalog {
             l
         },
         errors,
+        core,
     }
 }
 

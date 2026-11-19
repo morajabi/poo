@@ -149,6 +149,35 @@ fn risks_gate_cleaning_modes() {
 }
 
 #[test]
+fn running_builds_veto_cleaning_even_with_the_guard_off() {
+    use poo::clean::{admit, CleanOptions};
+    use poo::procs::Proc;
+    let mut cfg = Config::default();
+    cfg.disabled_guards.push("core.build-processes".into());
+    let cat = catalog::load(&cfg);
+    let base = std::env::temp_dir().join(format!("poo-veto-{}", std::process::id()));
+    std::fs::create_dir_all(base.join("app/target/debug")).unwrap();
+    std::fs::write(base.join("app/Cargo.toml"), "[package]\n").unwrap();
+    std::fs::write(base.join("app/target/.rustc_info.json"), "{}").unwrap();
+    let app = base.join("app");
+    let mut it = item(&app.join("target").to_string_lossy(), ActionKind::Delete);
+    it.project = Some(app.to_string_lossy().to_string());
+    let opts = CleanOptions { mode: RiskLevel::Force, max_tier: Some(Tier::Warm), ..Default::default() };
+    let p = |name: &str, cwd: &std::path::Path, args: &[&str]| {
+        Proc::with_args(1, name, cwd, &args.iter().map(|s| s.to_string()).collect::<Vec<_>>(), &[])
+    };
+    // cargo in the project, and Xcode in it (it may link a Rust staticlib), both veto.
+    let cargo = p("cargo", &app, &["cargo", "build"]);
+    assert!(admit(&it, &cat, &opts, &[cargo]).unwrap_err().contains("cargo"));
+    let xb = p("xcodebuild", &app.join("apple"), &["xcodebuild", "-derivedDataPath", "/tmp/dd"]);
+    assert!(admit(&it, &cat, &opts, &[xb]).unwrap_err().contains("xcodebuild"));
+    // A build in another checkout does not.
+    let other = p("cargo", &base.join("other"), &["cargo", "build"]);
+    assert!(admit(&it, &cat, &opts, &[other]).is_ok());
+    std::fs::remove_dir_all(&base).unwrap();
+}
+
+#[test]
 fn plan_filters_by_bucket_and_tag() {
     use poo::plan::Filter;
     let mut it = item("/x/app/target", ActionKind::Delete);

@@ -356,6 +356,12 @@ pub struct StackSpec {
     pub id: String,
     pub name: Option<String>,
     pub markers: Vec<String>,
+    /// Build tools that write this stack's artifacts (cargo, rustc). A running one only keeps
+    /// items of rules with this stack in use; tools no stack names keep the whole checkout.
+    pub tools: Option<Vec<String>>,
+    /// Packages of this stack never read each other's build output (SwiftPM), so a
+    /// build in one leaves its siblings' alone. Only the core mod's value counts.
+    pub isolated: Option<bool>,
 }
 
 /// Recommended cleaning plans are data too.

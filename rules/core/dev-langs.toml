@@ -6,6 +6,7 @@
 id = "erlang"
 name = "Erlang"
 markers = ["rebar.config", "erlang.mk"]
+tools = ["rebar3"]
 
 [[stack]]
 id = "gleam"
@@ -16,16 +17,19 @@ markers = ["gleam.toml"]
 id = "ocaml"
 name = "OCaml"
 markers = ["dune-project", "*.opam"]
+tools = ["dune", "opam"]
 
 [[stack]]
 id = "nim"
 name = "Nim"
 markers = ["*.nimble", "nim.cfg", "config.nims"]
+tools = ["nimble", "nim"]
 
 [[stack]]
 id = "crystal"
 name = "Crystal"
 markers = ["shard.yml"]
+tools = ["shards", "crystal"]
 
 [[stack]]
 id = "julia"
@@ -56,6 +60,7 @@ markers = ["artisan"]
 id = "purescript"
 name = "PureScript"
 markers = ["spago.yaml", "spago.dhall"]
+tools = ["spago", "purs"]
 
 [[stack]]
 id = "rescript"
@@ -1041,6 +1046,7 @@ markers = ["lakefile.lean", "lakefile.toml", "lean-toolchain"]
 id = "dlang"
 name = "D"
 markers = ["dub.json", "dub.sdl"]
+tools = ["dub"]
 
 [[stack]]
 id = "racket"

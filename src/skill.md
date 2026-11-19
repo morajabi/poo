@@ -16,7 +16,7 @@ item gets a tier that says how much regret cleaning it causes.
 - Never delete files yourself (`rm`, `git clean`, `docker system prune`...).
   Clean through poo: it re-checks each item right before deleting, skips
   worktrees with uncommitted changes (with `--include-in-use` it stashes them
-  first), skips projects with running builds and never leaves its safety floor.
+  first), skips anything a running build may be using and never leaves its safety floor.
 - Junk and cold items may be cleaned when the user asked you to free space or clean.
   Idle and warm items need the user's OK unless `poo config get agents.auto_clean_max_tier`
   allows them. Hot, review and protected items: show them and let the user decide.

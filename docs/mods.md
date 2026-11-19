@@ -239,6 +239,35 @@ which rule packs the app offers: a rule whose `stacks` you never use stays out o
 Core ships about 96 stacks, from Rust, Swift and Node to Lean, PlatformIO and Electron;
 `poo catalog` lists them.
 
+`tools = ["cargo", "rustc"]` names the build tools that write a stack's build output. poo
+uses them to tell which items a running build is not using, and stays on the safe side
+whenever it cannot tell:
+
+- Anything the build runs in or names in its arguments is in use: its working folder, the
+  folders its flags point at (`make -C`, `--manifest-path`, `-project`), and every path it
+  passes (`-o`, `-I`, `-derivedDataPath`, `SYMROOT=`, compiler response files,
+  `CARGO_TARGET_DIR`).
+- Everything else in its checkout stays in use too, except build output of the build's own
+  toolchain (rules in the `build` and `xcode` buckets whose stacks name the tool):
+  - a tool that said where this kind of output goes does not use other copies of it:
+    `xcodebuild -derivedDataPath .dd-a` leaves `.dd-b` alone, `cargo --target-dir`
+    another `target/`, and a compiler with `-o` everything it did not name;
+  - in stacks marked `isolated = true` (SwiftPM), a build uses only output at or
+    above its folder: `swift build` in one package leaves its sibling's `.build`.
+- Another toolchain's output stays in use (Xcode may link a Rust staticlib from `target/`,
+  `go:embed` may read `web/dist`), and so do dependencies and caches (Xcode run-script
+  phases and Gradle read `node_modules` in React Native apps). So does everything near a
+  build whose arguments poo could not read, and everything in a checkout where a tool that
+  runs anything is at work (make, ninja, bazel, buck2, turbo, nx, fastlane).
+
+poo sees through interpreters: `node .../npm-cli.js` is npm, `ruby .../pod` is pod,
+`java ...GradleDaemon` is gradle, `python -m pip` is pip, `arm-none-eabi-gcc` is gcc. Name
+tools as they appear that way.
+
+Only the core mod narrows this check. Tools a mod adds to a stack count as builds but never
+free anything; a stack may not name an interpreter, shell or agent (node, zsh, claude) or a
+tool that runs anything; and a core rule that a mod or config changed is no longer scoped.
+
 ## Launchers
 
 `[[launcher]]` entries tell "Ask your agent" how to hand a prompt to a coding agent.
@@ -395,4 +424,6 @@ These checks run for every item and no mod or config can turn them off:
 - Project artifacts must not contain a `.git` entry; whole worktrees are only removed
   through `git worktree remove`, which refuses uncommitted changes.
 - The item is re-checked against its rule immediately before cleaning.
-- Items whose project hosts a running build process are skipped.
+- Items a running build process may be using are skipped (see Stacks for how poo tells),
+  whatever guards a mod or config turns off.
+  The process list is read again during long cleans.

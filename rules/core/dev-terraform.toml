@@ -5,6 +5,7 @@
 id = "terragrunt"
 name = "Terragrunt"
 markers = ["terragrunt.hcl"]
+tools = ["terragrunt"]
 
 [[rule]]
 id = "terraform.terragrunt-cache"

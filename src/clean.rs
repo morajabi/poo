@@ -1,7 +1,7 @@
 //! Cleaning. Every item carries risks; each risk names the mode (standard, force, danger)
 //! that may clean it anyway. Under all of that sits a floor no mode, mod or config lifts.
 
-use crate::catalog::{Catalog, Guard};
+use crate::catalog::Catalog;
 use crate::config::state_dir;
 use crate::fsutil::{names, read_entries};
 use crate::model::{ActionKind, Item, RiskLevel, RuleKind, Tier};
@@ -11,6 +11,7 @@ use crate::util::{expand, home, iso8601, now, run_capture, tilde};
 use serde::Serialize;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 #[derive(Debug, Clone)]
 pub struct CleanOptions {
@@ -406,17 +407,27 @@ fn still_matches(item: &Item, cat: &Catalog) -> Result<(), String> {
 const GUARD_TIMEOUT_SECS: u64 = 30;
 
 /// Guards veto cleaning. In danger mode they warn instead.
-fn run_guards(item: &Item, guards: &[Guard], procs_list: &[Proc]) -> Result<(), String> {
+fn run_guards(item: &Item, cat: &Catalog, procs_list: &[Proc]) -> Result<(), String> {
     let project = item.project.clone().unwrap_or_else(|| item.path.clone());
-    for g in guards {
+    let scope = Path::new(&project);
+    let path = Path::new(&item.path);
+    // Running builds: always checked, whatever guards mods or config disable. A build in this
+    // project keeps what it may be using (see procs::build_touches); one anywhere else keeps
+    // what it runs in or names.
+    let rule = cat.rule(&item.rule);
+    let build = procs_list.iter().find(|p| {
+        procs::is_build_tool(&p.tool, &cat.build_tools) && cat.build_touches(p, path, rule, p.works_in(scope).then_some(scope))
+    });
+    if let Some(p) = build {
+        return Err(format!("{} (pid {}) is building in {}", p.tool, p.pid, tilde(scope)));
+    }
+    for g in &cat.guards {
         match g.kind.as_str() {
             "process" => {
-                let scope = Path::new(&project);
-                let hit = procs_list.iter().find(|p| {
-                    p.cwd.starts_with(scope) && (procs::is_build_tool(&p.name, &[]) || g.names.contains(&p.name))
-                });
+                // A guard's own names keep the whole project.
+                let hit = procs_list.iter().find(|p| p.works_in(scope) && (g.names.contains(&p.name) || g.names.contains(&p.tool)));
                 if let Some(p) = hit {
-                    return Err(format!("{} (pid {}) is building in {}", p.name, p.pid, tilde(scope)));
+                    return Err(format!("{} (pid {}) is running in {}", p.tool, p.pid, tilde(scope)));
                 }
             }
             "file-nonempty" => {
@@ -886,7 +897,7 @@ pub fn admit(item: &Item, cat: &Catalog, opts: &CleanOptions, procs_list: &[Proc
             warnings.push(e);
         }
     }
-    if let Err(e) = run_guards(item, &cat.guards, procs_list) {
+    if let Err(e) = run_guards(item, cat, procs_list) {
         if opts.mode < RiskLevel::Danger {
             return Err(format!("{} (needs --dangerously-include-protected)", e));
         }
@@ -917,8 +928,10 @@ pub fn clean_with(items: &[Item], cat: &Catalog, opts: &CleanOptions, progress: 
     // Unknown means skip: without the process list poo cannot tell whether a build or an
     // app is using an item.
     let procs_known = procs::try_list();
-    let procs_unknown = procs_known.is_none();
-    let procs_list = procs_known.unwrap_or_default();
+    let mut procs_unknown = procs_known.is_none();
+    let mut procs_list = procs_known.unwrap_or_default();
+    // A long clean lists processes again, so a build started meanwhile is still seen.
+    let mut procs_at = Instant::now();
     let mut results = vec![];
     let mut freed = 0u64;
     let mut erasing_bytes = 0u64;
@@ -948,6 +961,12 @@ pub fn clean_with(items: &[Item], cat: &Catalog, opts: &CleanOptions, progress: 
             warnings: vec![],
             notes: vec![],
         };
+        if procs_at.elapsed() >= std::time::Duration::from_secs(2) {
+            let fresh = procs::try_list();
+            procs_unknown = fresh.is_none();
+            procs_list = fresh.unwrap_or_default();
+            procs_at = Instant::now();
+        }
         let admitted = if procs_unknown {
             Err("could not read the list of running processes, so poo cannot tell whether something is using this; skipped to be safe".to_string())
         } else {

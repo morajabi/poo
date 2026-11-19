@@ -847,7 +847,7 @@ fn worktree_git(p: &FoundProject, defaults: &Mutex<HashMap<PathBuf, Option<Strin
 
 /// What poo knows about the checkout an item belongs to.
 #[derive(Default)]
-struct CheckoutInfo {
+struct CheckoutInfo<'a> {
     last_activity: Option<i64>,
     policy: ProjectPolicy,
     /// 0 = most recently used checkout of its repo.
@@ -857,7 +857,9 @@ struct CheckoutInfo {
     /// Default branch the checkout's commits landed in, and whether leftover edits remain.
     landed: Option<(String, bool)>,
     presence: Vec<String>,
-    builds: Vec<String>,
+    /// Build tools running in this checkout (its innermost one).
+    builds: Vec<&'a Proc>,
+    path: PathBuf,
 }
 
 impl Default for ProjectPolicy {
@@ -882,7 +884,7 @@ fn tier_risks(tier: Tier, risks: &mut Vec<Risk>) {
     }
 }
 
-fn classify(raw: &Raw, rule: &Rule, cfg: &Config, info: Option<&CheckoutInfo>, procs_list: &[Proc], extra_tools: &[String]) -> Verdict {
+fn classify(raw: &Raw, rule: &Rule, cat: &Catalog, cfg: &Config, info: Option<&CheckoutInfo>, procs_list: &[Proc], extra_tools: &[String]) -> Verdict {
     let mut v = Verdict { tier: Tier::Warm, reasons: raw.reasons.clone(), risks: raw.risks.clone() };
     let cost = raw.cost.unwrap_or(rule.cost);
     let finish = |mut v: Verdict, t: Tier| {
@@ -896,10 +898,16 @@ fn classify(raw: &Raw, rule: &Rule, cfg: &Config, info: Option<&CheckoutInfo>, p
         v.risks.push(Risk::new("app-running", RiskLevel::Danger, format!("{} is open and may rewrite or crash on a missing cache", app)));
         return finish(v, Tier::Hot);
     }
-    let builds: Vec<String> = match info {
-        Some(i) => i.builds.clone(),
-        None if !raw.is_virtual => procs::builds_inside(procs_list, &raw.path, extra_tools).iter().map(|p| p.name.clone()).collect(),
-        None => vec![],
+    // Builds in this checkout that may use this item, plus any build anywhere that runs
+    // inside it or names a path inside it.
+    let builds: Vec<String> = if raw.is_virtual {
+        info.map(|i| i.builds.iter().map(|p| p.tool.clone()).collect()).unwrap_or_default()
+    } else {
+        let mut v: Vec<String> = info
+            .map(|i| i.builds.iter().filter(|p| cat.build_touches(p, &raw.path, Some(rule), Some(&i.path))).map(|p| p.tool.clone()).collect())
+            .unwrap_or_default();
+        v.extend(procs::builds_inside(procs_list, &raw.path, extra_tools).iter().map(|p| p.tool.clone()));
+        v
     };
     if let Some(b) = builds.first() {
         v.reasons.push(format!("{} is building here right now", b));
@@ -1021,12 +1029,7 @@ fn build_report(
         proj_paths.entry(fp.path.as_path()).or_insert(fp);
     }
     let find_project = |p: &Path| p.ancestors().find_map(|a| proj_paths.get(a).copied());
-    let extra_tools: Vec<String> = cat
-        .guards
-        .iter()
-        .filter(|g| g.kind == "process")
-        .flat_map(|g| g.names.clone())
-        .collect();
+    let extra_tools: Vec<String> = cat.build_tool_names();
 
     // Drop raws nested inside another non-worktree item (already counted there).
     let mut raws = raws;
@@ -1089,14 +1092,24 @@ fn build_report(
             (r.path.clone(), (branch, dirty))
         })
         .collect();
-    // Attribute each process to the innermost checkout it runs in.
+    // Attribute each build to the innermost checkout of every folder it works on (cwd, and
+    // `-C`, `--manifest-path`, `-project`...), and everything else to the one it runs in.
     let mut presence: HashMap<PathBuf, Vec<String>> = HashMap::new();
-    let mut builds: HashMap<PathBuf, Vec<String>> = HashMap::new();
+    let mut builds: HashMap<PathBuf, Vec<&Proc>> = HashMap::new();
     for p in procs_list {
+        if procs::is_build_tool(&p.tool, &extra_tools) {
+            for d in &p.dirs {
+                if let Some(fp) = find_project(d) {
+                    let e = builds.entry(fp.path.clone()).or_default();
+                    if !e.iter().any(|x| x.pid == p.pid) {
+                        e.push(p);
+                    }
+                }
+            }
+            continue;
+        }
         if let Some(fp) = find_project(&p.cwd) {
-            if procs::is_build_tool(&p.name, &extra_tools) {
-                builds.entry(fp.path.clone()).or_default().push(p.name.clone());
-            } else if procs::is_presence(&p.name) {
+            if procs::is_presence(&p.name) {
                 let e = presence.entry(fp.path.clone()).or_default();
                 if !e.contains(&p.name) {
                     e.push(p.name.clone());
@@ -1140,6 +1153,7 @@ fn build_report(
                 landed: landed.get(p).cloned(),
                 presence: presence.get(p).cloned().unwrap_or_default(),
                 builds: builds.get(p).cloned().unwrap_or_default(),
+                path: p.clone(),
             }
         });
         if raw.last_used.is_none() && sized.newest > 0 {
@@ -1154,7 +1168,7 @@ fn build_report(
                 }
             }
         }
-        let verdict = classify(&raw, rule, cfg, info.as_ref(), procs_list, &extra_tools);
+        let verdict = classify(&raw, rule, cat, cfg, info.as_ref(), procs_list, &extra_tools);
         let (tier, reasons, mut risks) = (verdict.tier, verdict.reasons, verdict.risks);
         // Removing a whole checkout is more disruptive than deleting its build output:
         // only cold (landed or long unused) worktrees go without --force.

@@ -11,11 +11,13 @@ markers = ["project.clj", "deps.edn", "build.boot", "shadow-cljs.edn", "bb.edn"]
 id = "mill"
 name = "Mill"
 markers = ["build.mill", "build.sc"]
+tools = ["mill"]
 
 [[stack]]
 id = "android"
 name = "Android"
 markers = ["local.properties", "proguard-rules.pro", "AndroidManifest.xml"]
+tools = ["gradlew", "gradle"]
 
 # ---------------------------------------------------------------------------
 # SDKMAN: old versions per candidate, keeping `current` and the newest other

@@ -198,32 +198,43 @@ names = []
 
 # ---------------------------------------------------------------------------
 # Stacks: marker files that tell poo what a project is built with.
+# `tools` are the build tools that write a stack's build output. While one runs, poo can
+# tell which outputs it is not using: another copy it did not name (`-derivedDataPath`,
+# `--target-dir`), or with `isolated = true` (SwiftPM) the output of a sibling package. Other
+# toolchains' output, dependencies and caches stay in use for every build in the checkout.
+# Tools that run anything (make, ninja, bazel, turbo, nx) always keep the whole checkout.
 # ---------------------------------------------------------------------------
 
 [[stack]]
 id = "rust"
 name = "Rust"
 markers = ["Cargo.toml"]
+tools = ["cargo", "rustc", "clippy-driver", "cargo-nextest"]
 
 [[stack]]
 id = "swift"
 name = "Swift package"
 markers = ["Package.swift"]
+tools = ["swift-build", "swift-test", "swift-run", "swift-package", "swift-frontend", "swift-driver", "swiftc", "clang", "clang++", "ld", "ld64"]
+isolated = true
 
 [[stack]]
 id = "xcode"
 name = "Xcode"
 markers = ["*.xcodeproj", "*.xcworkspace", "project.yml", "Project.swift"]
+tools = ["xcodebuild", "swift-frontend", "swift-driver", "swiftc", "clang", "clang++", "ld", "ld64", "ibtool", "actool", "codesign", "lipo", "dsymutil", "libtool", "xcrun", "pod", "carthage"]
 
 [[stack]]
 id = "node"
 name = "Node.js"
 markers = ["package.json"]
+tools = ["npm", "pnpm", "yarn", "tsc", "esbuild", "webpack", "rollup", "vite", "next-server", "next", "parcel", "tsup", "rspack", "rsbuild", "astro", "nuxi", "nuxt", "svelte-kit", "ng", "gatsby", "vitepress", "remix"]
 
 [[stack]]
 id = "bun"
 name = "Bun"
 markers = ["bun.lockb", "bun.lock", "bunfig.toml"]
+tools = ["bun-install", "bun-build"]
 
 [[stack]]
 id = "deno"
@@ -234,66 +245,79 @@ markers = ["deno.json", "deno.jsonc"]
 id = "python"
 name = "Python"
 markers = ["pyproject.toml", "requirements.txt", "setup.py", "Pipfile", "uv.lock", "poetry.lock"]
+tools = ["pip", "uv", "poetry", "pdm", "hatch"]
 
 [[stack]]
 id = "go"
 name = "Go"
 markers = ["go.mod"]
+tools = ["go"]
 
 [[stack]]
 id = "gradle"
 name = "Gradle / Android"
 markers = ["build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts"]
+tools = ["gradlew", "gradle"]
 
 [[stack]]
 id = "maven"
 name = "Maven"
 markers = ["pom.xml"]
+tools = ["mvn"]
 
 [[stack]]
 id = "scala"
 name = "Scala"
 markers = ["build.sbt"]
+tools = ["sbt", "mill"]
 
 [[stack]]
 id = "ruby"
 name = "Ruby"
 markers = ["Gemfile"]
+tools = ["bundle", "rake"]
 
 [[stack]]
 id = "php"
 name = "PHP"
 markers = ["composer.json"]
+tools = ["composer"]
 
 [[stack]]
 id = "elixir"
 name = "Elixir"
 markers = ["mix.exs"]
+tools = ["mix"]
 
 [[stack]]
 id = "haskell"
 name = "Haskell"
 markers = ["stack.yaml", "cabal.project", "*.cabal"]
+tools = ["cabal", "stack", "ghc"]
 
 [[stack]]
 id = "dotnet"
 name = ".NET"
 markers = ["*.csproj", "*.fsproj", "*.sln", "global.json"]
+tools = ["dotnet", "msbuild"]
 
 [[stack]]
 id = "flutter"
 name = "Dart / Flutter"
 markers = ["pubspec.yaml"]
+tools = ["flutter", "dart"]
 
 [[stack]]
 id = "zig"
 name = "Zig"
 markers = ["build.zig"]
+tools = ["zig"]
 
 [[stack]]
 id = "cmake"
 name = "C / C++"
 markers = ["CMakeLists.txt", "meson.build", "configure.ac"]
+tools = ["cmake", "clang", "clang++", "cc", "c++", "gcc", "g++", "ld", "ld64", "lld"]
 
 [[stack]]
 id = "bazel"
@@ -304,6 +328,7 @@ markers = ["WORKSPACE", "WORKSPACE.bazel", "MODULE.bazel"]
 id = "terraform"
 name = "Terraform"
 markers = ["*.tf"]
+tools = ["terraform"]
 
 [[stack]]
 id = "docker"
@@ -334,6 +359,7 @@ markers = ["elm.json"]
 id = "electron"
 name = "Electron"
 markers = ["electron-builder.yml", "electron-builder.json", "electron-builder.json5", "forge.config.js", "forge.config.ts", "forge.config.cjs", "electron.vite.config.ts", "electron.vite.config.mjs"]
+tools = ["electron-builder", "electron-forge"]
 
 [[stack]]
 id = "tauri"
