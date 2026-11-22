@@ -284,8 +284,17 @@ fn call(ctx: &mut Ctx, name: &str, a: &Value) -> Result<Value> {
             }
             let mut opts = CleanOptions::from_config(&ctx.cfg, mode, dry, "mcp");
             opts.max_tier = Some(if approved { Tier::Warm } else { limit });
-            let _lock = if dry { None } else {
-                Some(crate::schedule::RunLock::try_acquire().ok_or_else(|| anyhow!("another poo clean or scheduled run is in progress"))?)
+            // Waits a minute for another clean (the low-disk guard, the app) before giving up.
+            let _lock = if dry {
+                None
+            } else {
+                match crate::schedule::RunLock::acquire_wait("mcp", std::time::Duration::from_secs(60), &|_| {}, &|| false) {
+                    Ok(l) => Some(l),
+                    Err(b) => {
+                        crate::telemetry::busy("mcp", &b);
+                        return Ok(json!({"status": "busy", "message": format!("{}; nothing was cleaned. Try again in a few minutes.", b.message())}));
+                    }
+                }
             };
             let res = clean::clean(&items, &ctx.cat, &opts);
             if !dry {
@@ -597,10 +606,12 @@ pub fn serve() -> Result<()> {
                     }
                     Err(e) => {
                         let ej = error_json(&format!("{:#}", e));
+                        crate::telemetry::cli_error(&format!("mcp:{}", name), ej["error"]["kind"].as_str().unwrap_or("error"), &format!("{:#}", e));
                         let text = format!("error: {}{}", ej["error"]["message"].as_str().unwrap_or(""), ej["error"]["hint"].as_str().map(|h| format!("\nhint: {}", h)).unwrap_or_default());
                         json!({"content": [{"type": "text", "text": text}], "structuredContent": ej, "isError": true})
                     }
                 };
+                crate::telemetry::flush_in_background();
                 Some(Ok(r))
             }
             m if m.starts_with("notifications/") => None,

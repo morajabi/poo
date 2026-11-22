@@ -489,7 +489,10 @@ pub fn reap() -> Reaped {
                     out.freed += b;
                     out.entries += 1;
                 }
-                Err(_) => {
+                Err(e) => {
+                    if out.failed == 0 {
+                        crate::telemetry::warning("gc", &format!("erasing a graveyard entry failed: {}", e), &[]);
+                    }
                     out.failed += 1;
                     failed.insert(p);
                 }

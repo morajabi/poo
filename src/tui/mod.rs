@@ -139,11 +139,15 @@ fn start_clean(app: &mut App, tx: &Sender<Msg>, busy: &Arc<AtomicBool>, items: V
     let lock = if dry {
         None
     } else {
-        match crate::schedule::RunLock::try_acquire() {
+        match crate::schedule::RunLock::try_acquire("tui") {
             Some(l) => Some(l),
             None => {
                 if let Modal::Review(rv) = &mut app.modal {
-                    rv.error = Some("Another poo clean or scheduled run is in progress. Try again in a moment.".into());
+                    let mut m = crate::schedule::busy_message();
+                    if let Some(c) = m.get_mut(0..1) {
+                        c.make_ascii_uppercase();
+                    }
+                    rv.error = Some(format!("{}. Try again when it finishes.", m));
                 }
                 return;
             }

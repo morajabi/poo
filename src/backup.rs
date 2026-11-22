@@ -112,7 +112,7 @@ fn read_all() -> Vec<Backup> {
 
 fn write_all(list: &[Backup]) -> Result<()> {
     std::fs::create_dir_all(dir())?;
-    let tmp = index_path().with_extension("jsonl.tmp");
+    let tmp = index_path().with_extension(format!("jsonl.tmp-{}", std::process::id()));
     let mut text = String::new();
     for b in list {
         text.push_str(&serde_json::to_string(b)?);

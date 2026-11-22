@@ -833,12 +833,9 @@ fn run_clean_p(ctx: &Ctx, out: &Out, report: &mut poo::model::Report, items: Vec
         return Ok(());
     }
     let total: u64 = items.iter().map(|i| i.total_bytes).sum();
-    let mut opts = CleanOptions::from_config(&ctx.cfg, mode, dry, "cli");
+    let mut opts = CleanOptions::from_config(&ctx.cfg, mode, dry, poo::telemetry::client());
     opts.trash = trash || ctx.cfg.backup.use_trash;
     opts.max_tier = Some(max_tier.unwrap_or(Tier::Warm));
-    let _lock = if dry { None } else {
-        Some(poo::schedule::RunLock::try_acquire().ok_or_else(|| CliError::new("busy", 9, "another poo clean or scheduled run is in progress"))?)
-    };
     if !dry && !yes {
         if !is_tty(0) || out.json {
             return Err(CliError::new("needs_approval", 5, format!("cleaning {} ({}) needs confirmation", plural(items.len() as u64, "item"), bytes(total)))
@@ -889,7 +886,42 @@ fn run_clean_p(ctx: &Ctx, out: &Out, report: &mut poo::model::Report, items: Vec
             let _ = std::io::stderr().flush();
         }
     };
-    let res = clean::clean_with(&items, &ctx.cat, &opts, Some(&cb));
+    // One clean at a time. Another one running (the low-disk guard, an agent, the app) is
+    // waited for, with a progress line saying what, instead of failing at once.
+    let total_bytes = total;
+    let mut not_started = false;
+    let _lock = if dry {
+        None
+    } else {
+        let waiting = |h: &poo::schedule::Holder| {
+            cb(&clean::CleanProgress {
+                event: "clean-progress",
+                done: 0,
+                total: items.len(),
+                freed_bytes: 0,
+                total_bytes,
+                current: format!("Waiting for {} to finish", h.describe()),
+                status: "waiting".into(),
+            });
+        };
+        let stop = || clean::CANCEL.load(std::sync::atomic::Ordering::SeqCst);
+        match poo::schedule::RunLock::acquire_wait(&opts.actor, lock_wait(), &waiting, &stop) {
+            Ok(l) => Some(l),
+            // Cancel pressed while waiting: a cancelled clean that did nothing.
+            Err(b) if b.cancelled => {
+                not_started = true;
+                None
+            }
+            Err(b) => {
+                if human_progress {
+                    eprint!("\r\x1b[2K");
+                }
+                poo::telemetry::busy(&opts.actor, &b);
+                return Err(CliError::new("busy", 9, b.message()).hint("try again when it finishes; `poo history` shows what it cleaned"));
+            }
+        }
+    };
+    let res = if not_started { clean::not_started(&opts) } else { clean::clean_with(&items, &ctx.cat, &opts, Some(&cb)) };
     if human_progress {
         eprint!("\r\x1b[2K");
     }
@@ -922,6 +954,12 @@ fn run_clean_p(ctx: &Ctx, out: &Out, report: &mut poo::model::Report, items: Vec
         return Err(CliError::new("partial", 6, format!("{} failed", plural(res.failed as u64, "item"))));
     }
     Ok(())
+}
+
+/// How long a clean waits for another one to finish (POO_LOCK_WAIT_SECS overrides).
+fn lock_wait() -> std::time::Duration {
+    let secs = std::env::var("POO_LOCK_WAIT_SECS").ok().and_then(|v| v.parse().ok()).unwrap_or(15 * 60);
+    std::time::Duration::from_secs(secs)
 }
 
 fn real_main(cli: Cli) -> R {
@@ -1409,11 +1447,11 @@ fn real_main(cli: Cli) -> R {
                 emit(&out, &json!({"history": h}));
             } else {
                 for e in h {
-                    if e["status"].as_str() == Some("skipped") {
+                    if let Some(st @ ("skipped" | "failed")) = e["status"].as_str() {
                         println!(
                             "{}  {:>9}  {:<6} {}  ({})",
                             poo::util::iso8601(e["at"].as_i64().unwrap_or(0)),
-                            "skipped",
+                            st,
                             e["actor"].as_str().unwrap_or(""),
                             tilde(std::path::Path::new(e["path"].as_str().unwrap_or(""))),
                             e["reason"].as_str().unwrap_or("")
@@ -2139,12 +2177,30 @@ fn cli_command() -> clap::Command {
 }
 
 fn main() -> ExitCode {
-    let cli = match Cli::from_arg_matches(&cli_command().get_matches()) {
+    // The detached sender of queued error reports (see telemetry.rs).
+    if std::env::args().nth(1).as_deref() == Some(poo::telemetry::FLUSH_ARG) {
+        poo::telemetry::flush();
+        return ExitCode::SUCCESS;
+    }
+    poo::telemetry::install_panic_hook();
+    let matches = cli_command().get_matches();
+    let command = matches.subcommand_name().unwrap_or("overview").to_string();
+    let cli = match Cli::from_arg_matches(&matches) {
         Ok(c) => c,
         Err(e) => e.exit(),
     };
     let json_errors = cli.json || (!cli.text && !is_tty(1));
-    match real_main(cli) {
+    if !json_errors && is_tty(2) && command != "ui" && cli.cmd.is_some() {
+        if let Some(n) = poo::telemetry::notice_once() {
+            eprintln!("{}", render::Style::new().dim(&n));
+        }
+    }
+    let result = real_main(cli);
+    if let Err(e) = &result {
+        poo::telemetry::cli_error(&command, e.kind, &e.message);
+    }
+    poo::telemetry::flush_in_background();
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             if json_errors {

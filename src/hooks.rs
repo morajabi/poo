@@ -243,8 +243,8 @@ pub fn agent_done(agent: &str, cwd: Option<String>, detached: bool) -> Result<()
         log(&format!("{} {}: work not landed yet; left alone", agent, tilde(&wt)));
         return Ok(());
     }
-    let Some(_lock) = crate::schedule::RunLock::try_acquire() else {
-        log(&format!("{} {}: another clean is running; skipped", agent, tilde(&wt)));
+    let Some(_lock) = crate::schedule::RunLock::try_acquire(&format!("hook:{}", agent)) else {
+        log(&format!("{} {}: {}; skipped", agent, tilde(&wt), crate::schedule::busy_message()));
         return Ok(());
     };
     let wt = std::fs::canonicalize(&wt).unwrap_or(wt);

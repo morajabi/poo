@@ -284,6 +284,20 @@ pub struct Config {
     pub hooks: HooksConfig,
     pub menubar: MenubarConfig,
     pub schedule: Vec<Schedule>,
+    pub telemetry: TelemetryConfig,
+}
+
+/// Anonymous error reports: what failed and why, never paths, names or file contents.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct TelemetryConfig {
+    pub enabled: bool,
+}
+
+impl Default for TelemetryConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
 }
 
 /// Every setting with its default and a plain explanation, for `poo config keys`.
@@ -318,6 +332,7 @@ pub const KEYS: &[(&str, &str)] = &[
     ("menubar.notify", "Notify once when free space falls below menubar.warn_below (default off)."),
     ("menubar.sections", "Panel sections in order: health, disk, areas, buckets, freed, schedules (default [areas])."),
     ("menubar.area_order / menubar.max_areas", "Areas in the panel by size | bucket | name, and how many before the rest fold (default size, 6)."),
+    ("telemetry.enabled", "Send anonymous error reports when a clean fails or poo crashes: the rule, the error with every path removed, poo and macOS versions, and a random install id (default on). Off, or POO_NO_TELEMETRY=1 / DO_NOT_TRACK=1, sends nothing."),
     ("updates.check", "Check for new versions once a day, in the background, from an interactive terminal (default on)."),
     ("updates.auto", "Install new versions in the background when poo was installed by the script (default on). Off: print a one-line hint instead. Homebrew and Poo.app installs update through brew and the app."),
 ];

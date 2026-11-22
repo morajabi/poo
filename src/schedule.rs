@@ -50,7 +50,10 @@ pub fn load_state() -> ScheduleState {
 fn save_state(s: &ScheduleState) {
     let p = state_path();
     let _ = std::fs::create_dir_all(p.parent().unwrap());
-    let _ = std::fs::write(p, serde_json::to_vec_pretty(s).unwrap_or_default());
+    let tmp = p.with_extension(format!("json.tmp-{}", std::process::id()));
+    if std::fs::write(&tmp, serde_json::to_vec_pretty(s).unwrap_or_default()).is_ok() {
+        let _ = std::fs::rename(&tmp, &p);
+    }
 }
 
 pub fn parse_every(s: &str) -> Result<i64> {
@@ -273,24 +276,119 @@ fn log_line(line: &str) {
     }
 }
 
-/// One exclusive runner at a time (scheduler, app and CLI cleans).
+/// One exclusive runner at a time (scheduler, app and CLI cleans). The holder writes who it
+/// is into the lock file, so a clean that has to wait can say what it is waiting for.
 pub struct RunLock(#[allow(dead_code)] std::fs::File);
 
-impl RunLock {
-    pub fn try_acquire() -> Option<RunLock> {
-        use std::os::unix::io::AsRawFd;
-        let p = state_dir().join("run.lock");
-        let _ = std::fs::create_dir_all(state_dir());
-        let f = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(p).ok()?;
-        let r = unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
-        (r == 0).then_some(RunLock(f))
+/// Who holds the run lock, as its holder wrote it.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Holder {
+    pub pid: u32,
+    pub actor: String,
+    pub since: i64,
+}
+
+impl Holder {
+    /// "a scheduled clean (guard)", "a clean from an agent"...
+    pub fn describe(&self) -> String {
+        let (kind, rest) = self.actor.split_once(':').unwrap_or((self.actor.as_str(), ""));
+        let what = match kind {
+            "schedule" => format!("the scheduled clean `{}`", rest),
+            "hook" => format!("the {} agent hook", rest),
+            "mcp" => "a clean an agent started".to_string(),
+            "tui" => "a clean in poo's terminal UI".to_string(),
+            "app" => "a clean in the Poo app".to_string(),
+            _ => "another poo clean".to_string(),
+        };
+        let secs = (now() - self.since).max(0);
+        if self.since > 0 && secs >= 5 {
+            format!("{} (running for {})", what, crate::util::ago_secs(secs))
+        } else {
+            what
+        }
     }
+}
+
+fn run_lock_path() -> PathBuf {
+    state_dir().join("run.lock")
+}
+
+impl RunLock {
+    /// Takes the lock if nobody holds it.
+    pub fn try_acquire(actor: &str) -> Option<RunLock> {
+        use std::io::{Seek, Write};
+        use std::os::unix::io::AsRawFd;
+        let _ = std::fs::create_dir_all(state_dir());
+        let mut f = std::fs::OpenOptions::new().create(true).truncate(false).read(true).write(true).open(run_lock_path()).ok()?;
+        if unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+            return None;
+        }
+        let h = Holder { pid: std::process::id(), actor: actor.to_string(), since: now() };
+        if f.set_len(0).is_ok() && f.rewind().is_ok() {
+            let _ = f.write_all(serde_json::to_string(&h).unwrap_or_default().as_bytes());
+        }
+        Some(RunLock(f))
+    }
+
+    /// Waits up to `timeout` for the lock, calling `waiting` with the holder about once a
+    /// second. Gives up early when `stop` says so (cancel pressed while waiting).
+    pub fn acquire_wait(actor: &str, timeout: std::time::Duration, waiting: &dyn Fn(&Holder), stop: &dyn Fn() -> bool) -> Result<RunLock, Busy> {
+        let start = std::time::Instant::now();
+        let mut last_note: Option<std::time::Instant> = None;
+        loop {
+            if let Some(l) = Self::try_acquire(actor) {
+                return Ok(l);
+            }
+            let h = holder().unwrap_or_default();
+            if stop() {
+                return Err(Busy { holder: h, waited: start.elapsed().as_secs(), cancelled: true });
+            }
+            if start.elapsed() >= timeout {
+                return Err(Busy { holder: h, waited: start.elapsed().as_secs(), cancelled: false });
+            }
+            if last_note.is_none_or(|t| t.elapsed() >= std::time::Duration::from_secs(1)) {
+                waiting(&h);
+                last_note = Some(std::time::Instant::now());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+    }
+}
+
+/// The current holder of the run lock, if any. Only meaningful while the lock is held.
+pub fn holder() -> Option<Holder> {
+    let text = std::fs::read_to_string(run_lock_path()).ok()?;
+    serde_json::from_str(text.trim()).ok()
+}
+
+/// Why a clean could not take the run lock.
+#[derive(Debug, Clone)]
+pub struct Busy {
+    pub holder: Holder,
+    pub waited: u64,
+    pub cancelled: bool,
+}
+
+impl Busy {
+    pub fn message(&self) -> String {
+        if self.cancelled {
+            format!("cancelled while waiting for {} to finish", self.holder.describe())
+        } else if self.waited > 0 {
+            format!("waited {} for {} to finish; it is still running", crate::util::ago_secs(self.waited as i64), self.holder.describe())
+        } else {
+            format!("{} is in progress", self.holder.describe())
+        }
+    }
+}
+
+/// The message for a run that found the lock taken and did not wait.
+pub fn busy_message() -> String {
+    Busy { holder: holder().unwrap_or_default(), waited: 0, cancelled: false }.message()
 }
 
 /// Runs one schedule now. `dry_run` previews without deleting.
 pub fn run(ctx: &Ctx, s: &Schedule, dry_run: bool) -> Result<RunRecord> {
     let dry_run = dry_run || crate::clean::read_only();
-    let _lock = RunLock::try_acquire().ok_or_else(|| anyhow!("another poo clean or scheduled run is in progress"))?;
     let disk = crate::fsutil::disk_info(&crate::util::home());
     if let Some(b) = &s.when_free_below {
         let threshold = parse_amount(b, disk.total)?;
@@ -304,6 +402,10 @@ pub fn run(ctx: &Ctx, s: &Schedule, dry_run: bool) -> Result<RunRecord> {
             });
         }
     }
+    // Not needed is decided without the lock; a busy lock is retried on the next tick.
+    let Some(_lock) = RunLock::try_acquire(&format!("schedule:{}", s.id)) else {
+        return Ok(RunRecord { at: now(), status: "busy".into(), free_after: disk.free, message: busy_message(), ..Default::default() });
+    };
     // Always rescan (from the journal when possible): never act on an old picture of the disk.
     let report = crate::scan::scan_auto(&ctx.cfg, &ctx.cat, &ScanOptions::default());
     crate::scan::save_report(&report)?;
@@ -364,18 +466,25 @@ pub fn tick() -> Result<Vec<(String, RunRecord)>> {
             continue;
         }
         match run(&ctx, s, false) {
+            Ok(rec) if rec.status == "busy" => {
+                log_line(&format!("{}: {}; trying again next tick", s.id, rec.message));
+                done.push((s.id.clone(), rec));
+            }
             Ok(rec) => {
                 log_line(&format!("{}: {} freed {} ({} cleaned, {} skipped, {} failed)", s.id, rec.status, bytes(rec.freed_bytes), rec.cleaned, rec.skipped, rec.failed));
                 if s.notify && rec.status == "ran" && rec.freed_bytes > 0 {
                     notify("poo", &format!("{} freed {}. {} free now.", s.id, bytes(rec.freed_bytes), bytes(rec.free_after)));
                 }
-                if rec.status != "not-needed" || last.is_none() {
+                // Busy keeps the last real run, so the schedule tries again on the next tick
+                // instead of waiting a whole interval.
+                if rec.status != "busy" && (rec.status != "not-needed" || last.is_none()) {
                     state.last_run.insert(s.id.clone(), rec.clone());
                 }
                 done.push((s.id.clone(), rec));
             }
             Err(e) => {
                 log_line(&format!("{}: failed: {:#}", s.id, e));
+                crate::telemetry::error("schedule", &format!("schedule run failed: {:#}", e), &[("schedule", s.id.as_str())]);
                 state.last_run.insert(s.id.clone(), RunRecord { at: now(), status: "error".into(), message: format!("{:#}", e), ..Default::default() });
             }
         }

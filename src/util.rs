@@ -132,6 +132,18 @@ pub fn age(secs: i64) -> String {
     }
 }
 
+/// A short duration: 45s, 3m, 2h 5m.
+pub fn ago_secs(d: i64) -> String {
+    let d = d.max(0);
+    if d < 60 {
+        format!("{}s", d)
+    } else if d < 3600 {
+        format!("{}m", d / 60)
+    } else {
+        format!("{}h {}m", d / 3600, (d % 3600) / 60)
+    }
+}
+
 pub fn days_since(secs: i64) -> i64 {
     ((now() - secs).max(0)) / 86400
 }

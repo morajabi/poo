@@ -23,6 +23,7 @@ pub mod procs;
 pub mod providers;
 pub mod scan;
 pub mod schedule;
+pub mod telemetry;
 pub mod tui;
 pub mod update;
 pub mod util;

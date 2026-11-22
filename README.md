@@ -100,7 +100,12 @@ and `poo config set updates.auto false` turns that into a one-line hint.
   saved to a branch. `poo backups` lists and restores them.
 - **Full Disk Access is optional.** It is one switch in System Settings. Without it, poo
   skips the folders macOS guards and says so once, instead of prompting folder by folder.
-- **No account, no telemetry.** The only network calls are update checks to GitHub, and
+- **No account; anonymous error reports you can turn off.** When a clean fails or poo
+  crashes, it sends what failed (the rule and the error with every path, project and user
+  name removed), the poo and macOS versions, and a random install id, so failures nobody
+  reports still get fixed. Never your files, paths or project names. Turn it off with
+  `poo config set telemetry.enabled false`, `POO_NO_TELEMETRY=1` or `DO_NOT_TRACK=1`, or in
+  the app's Settings. The other network calls are update checks to GitHub, and
   [sharing a rule](#share-a-rule) when you ask for it.
 
 Under the hood, poo never deletes outside your home and temp folders (or a rule's
@@ -108,7 +113,7 @@ declared system path), never deletes through a symlink, never touches `.ssh`, `.
 Keychains or iCloud Drive, and never deletes a build folder that contains `.git`. Right
 before deleting it re-checks each item against its rule and skips projects where a build or
 coding agent is running. Worktrees are removed with `git worktree remove` and keep their
-branch. Every clean is logged (`poo history`).
+branch. Every clean is logged, along with any item that failed or was skipped because poo could not tell whether it was safe (`poo history`).
 
 ## What it finds
 

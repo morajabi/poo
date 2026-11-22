@@ -469,6 +469,11 @@ fn run_guards(item: &Item, cat: &Catalog, procs_list: &[Proc]) -> Result<(), Str
 /// folder that cannot be renamed there (another volume) is erased in place, in parallel.
 /// Returns whether erasing continues in the background.
 fn delete_path(p: &Path, contents_only: bool, background: bool, bytes: u64) -> Result<bool, String> {
+    let md = match std::fs::symlink_metadata(p) {
+        Ok(m) => m,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(GONE.into()),
+        Err(e) => return Err(e.to_string()),
+    };
     if contents_only {
         // One graveyard entry holds all the children; a child that cannot move is erased in place.
         let mut staging = crate::delete::Staging::grave(p, Some(bytes)).ok();
@@ -494,7 +499,6 @@ fn delete_path(p: &Path, contents_only: bool, background: bool, bytes: u64) -> R
             Some(e) => Err(e.clone()),
         };
     }
-    let md = std::fs::symlink_metadata(p).map_err(|e| e.to_string())?;
     if !md.is_dir() {
         return std::fs::remove_file(p).map(|_| false).map_err(|e| e.to_string());
     }
@@ -525,8 +529,36 @@ fn finish_burial(grave: Option<PathBuf>, background: bool, errors: &mut Vec<Stri
     }
 }
 
+/// Set as the error when an item vanished between poo's check and the delete: another clean
+/// or the tool that owns it got there first. Reported as skipped, not failed.
+pub const GONE: &str = "already gone: something else removed it after poo checked (another clean, or the tool that owns it)";
+
+/// The Trash for `p`: ~/.Trash on the home volume, the volume's own .Trashes/<uid> elsewhere
+/// (a rename cannot cross volumes).
+fn trash_dir_for(p: &Path) -> PathBuf {
+    use std::os::unix::fs::MetadataExt;
+    let dev = |x: &Path| std::fs::symlink_metadata(x).ok().map(|m| m.dev());
+    let pd = dev(p);
+    if pd.is_none() || pd == dev(&home()) {
+        return home().join(".Trash");
+    }
+    let mut root = p;
+    while let Some(parent) = root.parent() {
+        if dev(parent) != pd {
+            break;
+        }
+        root = parent;
+    }
+    root.join(".Trashes").join(unsafe { libc::getuid() }.to_string())
+}
+
 fn trash_path(p: &Path) -> Result<(), String> {
-    let trash = home().join(".Trash");
+    match std::fs::symlink_metadata(p) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(GONE.into()),
+        _ => {}
+    }
+    let trash = trash_dir_for(p);
+    let _ = std::fs::create_dir_all(&trash);
     let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "item".into());
     let mut target = trash.join(&name);
     let mut n = 1;
@@ -906,6 +938,27 @@ pub fn admit(item: &Item, cat: &Catalog, opts: &CleanOptions, procs_list: &[Proc
     Ok(warnings)
 }
 
+/// A clean cancelled before it started (while waiting for another clean): nothing done.
+pub fn not_started(opts: &CleanOptions) -> CleanResult {
+    let free = crate::fsutil::disk_info(&home()).free;
+    CleanResult {
+        cancelled: true,
+        background_delete: false,
+        erasing_bytes: 0,
+        dry_run: opts.dry_run,
+        mode: opts.mode,
+        freed_bytes: 0,
+        cleaned: 0,
+        skipped: 0,
+        failed: 0,
+        disk_free_before: free,
+        disk_free_after: free,
+        results: vec![],
+        snapshot_note: None,
+        read_only: None,
+    }
+}
+
 pub fn clean(items: &[Item], cat: &Catalog, opts: &CleanOptions) -> CleanResult {
     clean_with(items, cat, opts, None)
 }
@@ -976,6 +1029,7 @@ pub fn clean_with(items: &[Item], cat: &Catalog, opts: &CleanOptions, progress: 
             Err(e) => {
                 if !opts.dry_run && (e.contains("could not tell") || procs_unknown) {
                     log_skip(item, &opts.actor, opts.mode, &e);
+                    crate::telemetry::clean_skipped(item, &e, opts);
                 }
                 res.reason = Some(e);
                 results.push(res);
@@ -986,6 +1040,7 @@ pub fn clean_with(items: &[Item], cat: &Catalog, opts: &CleanOptions, progress: 
         if let Err(e) = probe_ok(item, cat) {
             if !opts.dry_run && e.contains("could not tell") {
                 log_skip(item, &opts.actor, opts.mode, &e);
+                crate::telemetry::clean_skipped(item, &e, opts);
             }
             res.reason = Some(e);
             results.push(res);
@@ -1000,6 +1055,16 @@ pub fn clean_with(items: &[Item], cat: &Catalog, opts: &CleanOptions, progress: 
         let mut notes = vec![];
         let mut erasing = false;
         match perform(item, cat, opts, &mut notes, &mut erasing) {
+            // The owner's command ran but its folder did not shrink: what is left is what the
+            // tool keeps on purpose (Homebrew keeps recent downloads). Not a clean, and not a
+            // failure; the item stays listed with the reason.
+            Ok(Some(0)) if item.total_bytes > 0 && item.meta.get("measure").and_then(|m| m.as_str()) == Some("path") => {
+                let cmd = command_argv(item).map(|a| shown(&a)).unwrap_or_else(|| "its command".into());
+                let why = format!("`{}` ran but removed nothing; what is left is what the tool keeps for now", cmd);
+                log_skip(item, &opts.actor, opts.mode, &why);
+                res.bytes = 0;
+                res.reason = Some(why);
+            }
             Ok(measured) => {
                 if let Some(m) = measured {
                     res.bytes = m;
@@ -1009,9 +1074,15 @@ pub fn clean_with(items: &[Item], cat: &Catalog, opts: &CleanOptions, progress: 
                 if erasing {
                     erasing_bytes += res.bytes;
                 }
-                log_history(item, &opts.actor, opts.mode, &notes);
+                log_history(item, &opts.actor, opts.mode, &notes, res.bytes);
+            }
+            Err(e) if e == GONE => {
+                res.bytes = 0;
+                res.reason = Some(e);
             }
             Err(e) => {
+                log_failure(item, &opts.actor, opts.mode, &e);
+                crate::telemetry::clean_failed(item, &e, opts);
                 res.status = "failed".into();
                 res.reason = Some(e);
             }
@@ -1086,16 +1157,17 @@ fn log_skip(item: &Item, actor: &str, mode: RiskLevel, reason: &str) {
     }));
 }
 
+/// Appends one line in a single write, so cleans running side by side never interleave.
 fn append_history(line: serde_json::Value) {
     let p = state_dir().join("history.jsonl");
     let _ = std::fs::create_dir_all(p.parent().unwrap());
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(p) {
-        let _ = writeln!(f, "{}", line);
+        let _ = f.write_all(format!("{}\n", line).as_bytes());
     }
 }
 
-fn log_history(item: &Item, actor: &str, mode: RiskLevel, notes: &[String]) {
-    let line = serde_json::json!({
+fn log_history(item: &Item, actor: &str, mode: RiskLevel, notes: &[String], bytes: u64) {
+    append_history(serde_json::json!({
         "at": now(),
         "actor": actor,
         "mode": mode,
@@ -1105,14 +1177,28 @@ fn log_history(item: &Item, actor: &str, mode: RiskLevel, notes: &[String]) {
         "rule": item.rule,
         "bucket": item.bucket,
         "tier": item.tier,
-        "bytes": item.total_bytes,
+        "bytes": bytes,
         "notes": notes,
-    });
-    let p = state_dir().join("history.jsonl");
-    let _ = std::fs::create_dir_all(p.parent().unwrap());
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(p) {
-        let _ = writeln!(f, "{}", line);
-    }
+    }));
+}
+
+/// Failed items are kept in the history with zero bytes and the error, so a clean that
+/// "did nothing" can be traced afterwards (`poo history`).
+fn log_failure(item: &Item, actor: &str, mode: RiskLevel, reason: &str) {
+    append_history(serde_json::json!({
+        "at": now(),
+        "actor": actor,
+        "mode": mode,
+        "status": "failed",
+        "reason": reason,
+        "id": item.id,
+        "path": item.path,
+        "name": item.name,
+        "rule": item.rule,
+        "bucket": item.bucket,
+        "tier": item.tier,
+        "bytes": 0,
+    }));
 }
 
 pub fn history(limit: usize) -> Vec<serde_json::Value> {
