@@ -68,6 +68,17 @@ struct GeneralSettings: View {
                 .disabled(!Onboarding.isBundled)
                 Button("Run Setup Again…") { AppDelegate.shared?.show("onboarding", title: "Set Up Poo") }
             }
+            Section("Privacy") {
+                Toggle(isOn: Binding(get: { store.telemetryEnabled ?? true }, set: { on in Task { await store.setTelemetry(on) } })) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Send anonymous error reports")
+                        Text("When a clean fails or Poo crashes: the rule, the error with every path and name removed, and the Poo and macOS versions. Never your files or projects.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .disabled(store.telemetryEnabled == nil)
+                .task { await store.loadTelemetry() }
+            }
             Section("Data") {
                 Button("Rescan Now") { Task { await store.scan() } }
                 Button("Open Config Folder") {

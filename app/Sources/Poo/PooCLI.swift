@@ -7,6 +7,9 @@ struct PooCLI {
         var kind: String
         var message: String
         var hint: String?
+        /// What the command printed before failing: `poo clean` still prints its result when
+        /// some items failed (kind "partial").
+        var output: Data? = nil
         var errorDescription: String? { hint.map { "\(message)\n\($0)" } ?? message }
     }
 
@@ -47,6 +50,10 @@ struct PooCLI {
             let p = Process()
             p.executableURL = bin
             p.arguments = args + ["--json"]
+            // Tells the CLI the app started it (history and anonymous error reports say "app").
+            var env = ProcessInfo.processInfo.environment
+            env["POO_CLIENT"] = "app"
+            p.environment = env
             let out = Pipe()
             let err = Pipe()
             p.standardOutput = out
@@ -70,7 +77,9 @@ struct PooCLI {
                 if proc.terminationStatus == 0 {
                     cont.resume(returning: result)
                 } else {
-                    cont.resume(throwing: collector.failure(status: proc.terminationStatus))
+                    var f = collector.failure(status: proc.terminationStatus)
+                    if !result.isEmpty { f.output = result }
+                    cont.resume(throwing: f)
                 }
             }
             do {

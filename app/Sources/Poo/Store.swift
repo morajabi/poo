@@ -343,12 +343,15 @@ final class Store {
             if let flag = mode.flag { args.append(flag) }
             if dryRun { args.append("--dry-run") }
             do {
-                let data: Data
+                var data: Data
                 do {
                     data = try await runStreaming(args + ["--progress"], session)
                 } catch let f as PooCLI.Failure where f.kind == "usage" && f.message.contains("--progress") {
                     // Older CLI without progress: same clean, no stream (it never started).
                     data = try await runStreaming(args, session)
+                } catch let f as PooCLI.Failure where f.kind == "partial" && f.output != nil {
+                    // Some items failed: the rest were cleaned, and the result says which and why.
+                    data = f.output!
                 }
                 let r = try JSONDecoder().decode(CleanResult.self, from: data)
                 if !r.dry_run { lastClean = r }
@@ -392,6 +395,7 @@ final class Store {
             let data = try await PooCLI.run(args)
             lastClean = try JSONDecoder().decode(CleanResult.self, from: data)
         } catch let f as PooCLI.Failure where f.kind == "partial" {
+            if let out = f.output, let r = try? JSONDecoder().decode(CleanResult.self, from: out) { lastClean = r }
             self.error = f.message
         } catch {
             self.error = error.localizedDescription
@@ -459,6 +463,23 @@ final class Store {
             self.error = error.localizedDescription
         }
         await loadBackups()
+    }
+
+    /// Anonymous error reports (`telemetry.enabled`), nil until loaded.
+    var telemetryEnabled: Bool?
+
+    func loadTelemetry() async {
+        struct T: Codable { var enabled: Bool? }
+        telemetryEnabled = (try? await PooCLI.json(T.self, ["config", "get", "telemetry"]))?.enabled ?? true
+    }
+
+    func setTelemetry(_ on: Bool) async {
+        do {
+            _ = try await PooCLI.run(["config", "set", "telemetry.enabled", on ? "true" : "false"])
+        } catch {
+            self.error = error.localizedDescription
+        }
+        await loadTelemetry()
     }
 
     func loadBackupConfig() async {
