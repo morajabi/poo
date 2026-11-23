@@ -2,6 +2,7 @@
 //! provider runs, with which parameters, and in which bucket results land.
 
 pub mod git;
+pub mod prs;
 pub mod snapshots;
 
 use crate::catalog::Rule;

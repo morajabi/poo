@@ -154,21 +154,149 @@ pub fn default_branch(repo: &Path) -> Option<String> {
     None
 }
 
+/// How a branch's work reached the default branch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Landed {
+    /// Its commits are ancestors of the default branch (fast-forward or merge commit).
+    Ancestor,
+    /// Merging it into the default branch changes nothing: squash or rebase merges.
+    Tree,
+    /// Every commit has an equivalent patch in the default branch (rebase merges).
+    Patch,
+    /// Its pull request merged. `extra` counts local commits made after the merged head;
+    /// None when that head is not in this clone, so poo cannot tell.
+    Pr { number: u64, extra: Option<u64> },
+    /// Its upstream branch was deleted (hosts do this on merge). A hint, not proof.
+    Gone,
+}
+
+impl Landed {
+    /// The work is in the default branch, so removing the checkout loses nothing.
+    pub fn complete(&self) -> bool {
+        match self {
+            Landed::Ancestor | Landed::Tree | Landed::Patch => true,
+            Landed::Pr { extra, .. } => *extra == Some(0),
+            Landed::Gone => false,
+        }
+    }
+    pub fn tag(&self) -> &'static str {
+        match self {
+            Landed::Ancestor => "ancestor",
+            Landed::Tree => "tree",
+            Landed::Patch => "patch",
+            Landed::Pr { .. } => "pr",
+            Landed::Gone => "gone",
+        }
+    }
+    /// What the user reads, after "its work".
+    pub fn describe(&self, default: &str) -> String {
+        match self {
+            Landed::Ancestor => format!("its commits are already in {}", default),
+            Landed::Tree | Landed::Patch => format!("its changes are already in {} (squash or rebase merge)", default),
+            Landed::Pr { number, extra: Some(0) } => format!("its pull request #{} merged into {}", number, default),
+            Landed::Pr { number, extra: Some(n) } => format!(
+                "its pull request #{} merged; {} local commit{} made after it never landed",
+                number,
+                n,
+                if *n == 1 { "" } else { "s" }
+            ),
+            Landed::Pr { number, extra: None } => format!("its pull request #{} merged; local commits may differ from what merged", number),
+            Landed::Gone => "its remote branch was deleted, usually after a merge".to_string(),
+        }
+    }
+}
+
+fn succeeds(repo: &Path, args: &[&str]) -> bool {
+    let d = repo.to_string_lossy().to_string();
+    std::process::Command::new("git")
+        .args(["--no-optional-locks", "-C", &d])
+        .args(args)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// The default branch refs that exist: the remote one first, it is the freshest.
+fn default_targets(repo: &Path, default: &str) -> Vec<String> {
+    let local = default.trim_start_matches("origin/").to_string();
+    let mut v = vec![];
+    for t in [format!("origin/{}", local), default.to_string(), local] {
+        if !v.contains(&t) && git(repo, &["rev-parse", "--verify", "--quiet", &format!("{}^{{commit}}", t)], 5).is_some() {
+            v.push(t);
+        }
+    }
+    v
+}
+
 /// Whether `head` is already contained in the default branch, locally or on the remote.
 pub fn is_merged(repo: &Path, head: &str, default: &str) -> bool {
-    let d = repo.to_string_lossy().to_string();
-    let ok = |target: &str| {
-        std::process::Command::new("git")
-            .args(["--no-optional-locks", "-C", &d, "merge-base", "--is-ancestor", head, target])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false)
-    };
-    let local = default.trim_start_matches("origin/").to_string();
-    let remote = format!("origin/{}", local);
-    [default.to_string(), local, remote].iter().any(|t| ok(t))
+    landed(repo, head, default, None).map_or(false, |l| l.complete())
+}
+
+/// Whether and how `head`'s work reached the default branch, from cheapest check to dearest.
+/// `branch` enables the upstream check; PR state is asked separately (see `merged_pr`).
+pub fn landed(repo: &Path, head: &str, default: &str, branch: Option<&str>) -> Option<Landed> {
+    let targets = default_targets(repo, default);
+    if targets.iter().any(|t| succeeds(repo, &["merge-base", "--is-ancestor", head, t])) {
+        return Some(Landed::Ancestor);
+    }
+    let target = targets.first()?;
+    // Commits only on this branch. Huge counts mean an unrelated or very old base: skip
+    // the content checks rather than make git chew on them.
+    let ahead: u64 = git(repo, &["rev-list", "--count", &format!("{}..{}", target, head)], 10)?.trim().parse().ok()?;
+    if ahead > 0 && ahead <= 500 {
+        let merged_tree = git(repo, &["merge-tree", "--write-tree", target, head], 20).and_then(|o| o.lines().next().map(|l| l.trim().to_string()));
+        let main_tree = git(repo, &["rev-parse", &format!("{}^{{tree}}", target)], 5).map(|o| o.trim().to_string());
+        if merged_tree.is_some() && merged_tree == main_tree {
+            return Some(Landed::Tree);
+        }
+        if let Some(out) = git(repo, &["cherry", target, head], 20) {
+            let lines: Vec<&str> = out.lines().filter(|l| !l.trim().is_empty()).collect();
+            if !lines.is_empty() && lines.iter().all(|l| l.starts_with('-')) {
+                return Some(Landed::Patch);
+            }
+        }
+    }
+    let b = branch?;
+    let track = git(repo, &["for-each-ref", "--format=%(upstream)|%(upstream:track)", &format!("refs/heads/{}", b)], 5)?;
+    let (upstream, state) = track.trim().split_once('|')?;
+    (!upstream.is_empty() && state.contains("gone")).then_some(Landed::Gone)
+}
+
+/// A merged pull request for `branch`, through the GitHub CLI: (number, merged head sha).
+/// Outer None: gh could not answer (not installed, signed out, offline, not on GitHub).
+pub fn merged_pr(repo: &Path, branch: &str) -> Option<Option<(u64, String)>> {
+    let slug = github_slug(repo)?;
+    let out = run_capture(
+        &["gh", "pr", "list", "-R", &slug, "--head", branch, "--state", "merged", "--limit", "1", "--json", "number,headRefOid"],
+        15,
+    )?;
+    let v: serde_json::Value = serde_json::from_str(&out).ok()?;
+    let Some(pr) = v.as_array()?.first() else { return Some(None) };
+    Some(Some((pr.get("number")?.as_u64()?, pr.get("headRefOid")?.as_str()?.to_string())))
+}
+
+/// `owner/name` of the origin remote when it is on github.com.
+pub fn github_slug(repo: &Path) -> Option<String> {
+    let url = git(repo, &["remote", "get-url", "origin"], 5)?;
+    let url = url.trim().trim_end_matches('/').trim_end_matches(".git");
+    let rest = url
+        .strip_prefix("git@github.com:")
+        .or_else(|| url.strip_prefix("https://github.com/"))
+        .or_else(|| url.strip_prefix("ssh://git@github.com/"))?;
+    let mut parts = rest.split('/');
+    let (owner, name) = (parts.next()?, parts.next()?);
+    (!owner.is_empty() && !name.is_empty() && parts.next().is_none()).then(|| format!("{}/{}", owner, name))
+}
+
+/// Local commits made after `merged_head`; None when that commit is not in this clone.
+pub fn commits_after(repo: &Path, merged_head: &str, head: &str) -> Option<u64> {
+    if !succeeds(repo, &["cat-file", "-e", &format!("{}^{{commit}}", merged_head)]) {
+        return None;
+    }
+    git(repo, &["rev-list", "--count", &format!("{}..{}", merged_head, head)], 10)?.trim().parse().ok()
 }
 
 /// Whether a commit is reachable from any branch or remote branch.

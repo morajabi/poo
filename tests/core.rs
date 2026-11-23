@@ -79,6 +79,19 @@ fn config_overrides_merge_by_field() {
 }
 
 #[test]
+fn scan_pace_scales_windows_and_is_settable() {
+    let cfg = Config::default();
+    assert_eq!(cfg.scan.window(3600), 3600);
+    let cfg = poo::ops::set_config_key(&cfg, "scan.pace", "eager").unwrap();
+    assert_eq!(cfg.scan.window(3600), 1800);
+    let cfg = poo::ops::set_config_key(&cfg, "scan.pace", "relaxed").unwrap();
+    assert_eq!(cfg.scan.window(3600), 7200);
+    assert!(poo::ops::set_config_key(&cfg, "scan.pace", "sometimes").is_err());
+    let cfg = poo::ops::set_config_key(&cfg, "scan.worktree_idle_hours", "8").unwrap();
+    assert_eq!(cfg.scan.worktree_idle_hours, 8);
+}
+
+#[test]
 fn safety_floor_refuses_dangerous_paths() {
     let home = poo::util::home();
     let h = home.to_string_lossy();

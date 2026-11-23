@@ -707,6 +707,13 @@ fn path_label(path: &Path, rule: &Rule) -> String {
 }
 
 fn worktree_items(rule: &Rule, projects: &[FoundProject], raws: &[Raw], ctx: &SizeCtx, cfg: &Config) -> Vec<Raw> {
+    let prs = providers::prs::PrCache::load(cfg.scan.pr_lookup);
+    let items = worktree_items_with(rule, projects, raws, ctx, cfg, &prs);
+    prs.save();
+    items
+}
+
+fn worktree_items_with(rule: &Rule, projects: &[FoundProject], raws: &[Raw], ctx: &SizeCtx, cfg: &Config, prs: &providers::prs::PrCache) -> Vec<Raw> {
     let repos: HashMap<PathBuf, &FoundProject> = projects
         .iter()
         .filter(|p| p.kind == "repo")
@@ -724,7 +731,7 @@ fn worktree_items(rule: &Rule, projects: &[FoundProject], raws: &[Raw], ctx: &Si
             let nested_bytes: u64 = nested.iter().map(|r| r.sized.as_ref().map_or(0, |s| s.0.bytes)).sum();
             let artifacts: Vec<PathBuf> = nested.iter().map(|r| r.path.clone()).collect();
             // git status and ls-files walk the checkout too: ask git while measuring it.
-            let (sized, git) = rayon::join(|| ctx.size_path(&p.path, &exclude), || worktree_git(p, &defaults, &artifacts, cfg));
+            let (sized, git) = rayon::join(|| ctx.size_path(&p.path, &exclude), || worktree_git(p, &defaults, &artifacts, cfg, prs));
             let (s, children) = sized?;
             let pname = p.path.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
             let repo_name = p.repo.as_ref().and_then(|r| r.file_name()).map(|s| s.to_string_lossy().to_string());
@@ -766,8 +773,15 @@ fn worktree_items(rule: &Rule, projects: &[FoundProject], raws: &[Raw], ctx: &Si
                 raw.reasons.push("could not find its repository".into());
                 return Some(raw);
             }
-            let WorktreeGit { default, merged, config_files, dirty, reachable } = git.unwrap_or_default();
+            let WorktreeGit { default, landed, config_files, dirty, reachable } = git.unwrap_or_default();
+            let merged = landed.as_ref().map_or(false, |l| l.complete());
             raw.meta.insert("merged".into(), Value::Bool(merged));
+            if let Some(l) = &landed {
+                raw.meta.insert("landed_by".into(), Value::String(l.tag().into()));
+                if let git::Landed::Pr { number, .. } = l {
+                    raw.meta.insert("pr".into(), Value::from(*number));
+                }
+            }
             if let Some(d) = &default {
                 raw.meta.insert("default_branch".into(), Value::String(d.trim_start_matches("origin/").to_string()));
             }
@@ -799,9 +813,13 @@ fn worktree_items(rule: &Rule, projects: &[FoundProject], raws: &[Raw], ctx: &Si
                     raw.meta.insert("dirty".into(), Value::Bool(false));
                 }
             }
+            let default_name = default.clone().unwrap_or_default().trim_start_matches("origin/").to_string();
             if merged {
-                raw.reasons.push(format!("its commits are already in {}", default.clone().unwrap_or_default().trim_start_matches("origin/")));
+                raw.reasons.push(landed.as_ref().map(|l| l.describe(&default_name)).unwrap_or_default());
             } else if p.branch.is_some() {
+                if let Some(l) = &landed {
+                    raw.reasons.push(l.describe(&default_name));
+                }
                 raw.reasons.push("its branch stays after removal, so no commits are lost".into());
                 raw.risks.push(Risk::new("unmerged", RiskLevel::Standard, "branch not merged yet; it is kept"));
             } else if reachable {
@@ -820,14 +838,14 @@ fn worktree_items(rule: &Rule, projects: &[FoundProject], raws: &[Raw], ctx: &Si
 #[derive(Default)]
 struct WorktreeGit {
     default: Option<String>,
-    merged: bool,
+    landed: Option<git::Landed>,
     config_files: Option<usize>,
     dirty: Option<git::DirtyState>,
     reachable: bool,
 }
 
 /// None for orphans and worktrees whose repository is unknown (git has nothing to say).
-fn worktree_git(p: &FoundProject, defaults: &Mutex<HashMap<PathBuf, Option<String>>>, artifacts: &[PathBuf], cfg: &Config) -> Option<WorktreeGit> {
+fn worktree_git(p: &FoundProject, defaults: &Mutex<HashMap<PathBuf, Option<String>>>, artifacts: &[PathBuf], cfg: &Config, prs: &providers::prs::PrCache) -> Option<WorktreeGit> {
     if p.kind == "orphan" {
         return None;
     }
@@ -837,12 +855,22 @@ fn worktree_git(p: &FoundProject, defaults: &Mutex<HashMap<PathBuf, Option<Strin
         d.entry(repo.clone()).or_insert_with(|| git::default_branch(&repo)).clone()
     };
     let head_ref = p.branch.clone().or_else(|| p.head.clone()).unwrap_or_else(|| "HEAD".into());
-    let merged = default.as_ref().map_or(false, |d| git::is_merged(&repo, &head_ref, d));
+    let mut landed = default.as_ref().and_then(|d| git::landed(&repo, &head_ref, d, p.branch.as_deref()));
+    // Squash merges of a branch that moved on after merging only show up in the PR.
+    if !landed.as_ref().map_or(false, |l| l.complete()) {
+        if let Some(b) = &p.branch {
+            if let Some((number, merged_head)) = prs.merged(&repo, b) {
+                let extra = git::commits_after(&repo, &merged_head, &head_ref);
+                landed = Some(git::Landed::Pr { number, extra });
+            }
+        }
+    }
+    let merged = landed.as_ref().map_or(false, |l| l.complete());
     let config_files = cfg.backup.config_files.then(|| git::small_ignored_files(&p.path, cfg.backup.max_file_bytes).len());
     let dirty = git::dirty_state(&p.path, artifacts);
     // Only asked when it decides something: not merged and not on a branch.
     let reachable = !merged && p.branch.is_none() && git::reachable(&repo, &head_ref);
-    Some(WorktreeGit { default, merged, config_files, dirty, reachable })
+    Some(WorktreeGit { default, landed, config_files, dirty, reachable })
 }
 
 /// What poo knows about the checkout an item belongs to.
@@ -854,8 +882,10 @@ struct CheckoutInfo<'a> {
     rank: Option<usize>,
     siblings: usize,
     repo_name: String,
-    /// Default branch the checkout's commits landed in, and whether leftover edits remain.
+    /// How the checkout's work landed, and whether leftover edits or commits remain.
     landed: Option<(String, bool)>,
+    /// A linked worktree an agent made (one task per worktree).
+    agent_worktree: Option<String>,
     presence: Vec<String>,
     /// Build tools running in this checkout (its innermost one).
     builds: Vec<&'a Proc>,
@@ -956,22 +986,39 @@ fn classify(raw: &Raw, rule: &Rule, cat: &Catalog, cfg: &Config, info: Option<&C
         v.reasons.push("project marked active".into());
         return finish(v, Tier::Warm);
     }
-    let idle_hours = cfg.scan.idle_hours as i64 * 3600;
+    let sc = &cfg.scan;
+    let idle_hours = sc.window(sc.idle_hours as i64 * 3600);
+    let proj_t = info.and_then(|i| i.last_activity);
     if let (Some(i), Some(age)) = (info, item_age) {
-        if let Some((branch, dirty)) = &i.landed {
-            if presence.is_empty() && age >= cfg.scan.landed_idle_hours as i64 * 3600 {
-                if *dirty {
-                    v.reasons.push(format!("this worktree's commits landed in {}; only leftover edits remain; built {}", branch, crate::util::age(item_t.unwrap())));
+        // Quiet since the newer of this item's last use and the checkout's last edit: a
+        // fresh branch an agent just started in a landed worktree is not done.
+        let since = age.min((t - proj_t.unwrap_or(0)).max(0));
+        // The worktree item already says how its work landed.
+        let own = raw.path == i.path;
+        if let Some((what, leftover)) = &i.landed {
+            if presence.is_empty() && since >= sc.window(sc.landed_idle_hours as i64 * 3600) {
+                let quiet = format!("quiet since {}", crate::util::age(t - since));
+                let say = if own { quiet } else { format!("{}; {}", what, quiet) };
+                if *leftover {
+                    v.reasons.push(format!("{}; leftover edits or commits remain", say));
                     return finish(v, Tier::Idle);
                 }
-                v.reasons.push(format!("this worktree's commits already landed in {}; built {}", branch, crate::util::age(item_t.unwrap())));
+                v.reasons.push(say);
                 return finish(v, Tier::Cold);
             }
         }
+        // Agents make a worktree per task: once nobody has it open for a few hours, the
+        // task is usually done, and its build is only worth a rebuild if they come back.
+        if let Some(agent) = &i.agent_worktree {
+            if presence.is_empty() && since >= sc.window(sc.worktree_idle_hours as i64 * 3600) {
+                v.reasons.push(format!("{} worktree nobody has open; last touched {}", agent, crate::util::age(t - since)));
+                return finish(v, Tier::Idle);
+            }
+        }
     }
-    let warm_days = if rule.warm_days > 0 { rule.warm_days } else { cfg.scan.warm_days } as i64;
-    let idle_days = if rule.idle_days > 0 { rule.idle_days } else { cfg.scan.idle_days } as i64;
-    let proj_t = info.and_then(|i| i.last_activity);
+    let warm_days = if rule.warm_days > 0 { rule.warm_days } else { sc.warm_days } as i64;
+    let idle_days = if rule.idle_days > 0 { rule.idle_days } else { sc.idle_days } as i64;
+    let (warm_secs, idle_secs) = (sc.window(warm_days * 86400), sc.window(idle_days * 86400));
     let activity = match (item_t, proj_t) {
         (Some(a), Some(b)) => Some(a.max(b)),
         (a, b) => a.or(b),
@@ -982,8 +1029,8 @@ fn classify(raw: &Raw, rule: &Rule, cat: &Catalog, cfg: &Config, info: Option<&C
     };
     let age = (t - activity).max(0);
     let which = if proj_t == Some(activity) && item_t.map_or(true, |i| i < activity) { "checkout used" } else { "last used" };
-    if age >= warm_days * 86400 && presence.is_empty() {
-        v.reasons.push(format!("{} {} (cold after {}d)", which, crate::util::age(activity), warm_days));
+    if age >= warm_secs && presence.is_empty() {
+        v.reasons.push(format!("{} {} (cold after {})", which, crate::util::age(activity), if warm_secs % 86400 == 0 { format!("{}d", warm_secs / 86400) } else { format!("{}h", warm_secs / 3600) }));
         return finish(v, Tier::Cold);
     }
     if !presence.is_empty() {
@@ -1003,7 +1050,7 @@ fn classify(raw: &Raw, rule: &Rule, cat: &Catalog, cfg: &Config, info: Option<&C
             }
         }
     }
-    if age >= idle_days * 86400 {
+    if age >= idle_secs {
         v.reasons.push(format!("{} {}, nobody working there", which, crate::util::age(activity)));
         return finish(v, Tier::Idle);
     }
@@ -1082,14 +1129,22 @@ fn build_report(
             rank.insert(p, (i, n, name.clone()));
         }
     }
-    // Worktrees whose commits already landed (flag true when leftover edits remain).
+    // Worktrees whose work landed: what to say, and whether leftover edits or commits remain.
     let landed: HashMap<PathBuf, (String, bool)> = kept
         .iter()
-        .filter(|r| r.action == Some(ActionKind::WorktreeRemove) && r.meta.get("merged").and_then(|v| v.as_bool()) == Some(true))
+        .filter(|r| r.action == Some(ActionKind::WorktreeRemove) && r.meta.contains_key("landed_by"))
         .map(|r| {
-            let branch = r.meta.get("default_branch").and_then(|v| v.as_str()).unwrap_or("main").to_string();
+            let branch = r.meta.get("default_branch").and_then(|v| v.as_str()).unwrap_or("main");
             let dirty = r.meta.get("dirty").and_then(|v| v.as_bool()).unwrap_or(true);
-            (r.path.clone(), (branch, dirty))
+            let merged = r.meta.get("merged").and_then(|v| v.as_bool()) == Some(true);
+            let pr = r.meta.get("pr").and_then(|v| v.as_u64());
+            let what = match (r.meta.get("landed_by").and_then(|v| v.as_str()), pr) {
+                (Some("gone"), _) => "this worktree's remote branch was deleted, usually after a merge".to_string(),
+                (_, Some(n)) if merged => format!("this worktree's pull request #{} merged into {}", n, branch),
+                (_, Some(n)) => format!("this worktree's pull request #{} merged; local commits after it never landed", n),
+                _ => format!("this worktree's work already landed in {}", branch),
+            };
+            (r.path.clone(), (what, dirty || !merged))
         })
         .collect();
     // Attribute each build to the innermost checkout of every folder it works on (cwd, and
@@ -1151,6 +1206,7 @@ fn build_report(
                 siblings: r.map_or(1, |x| x.1),
                 repo_name: r.map(|x| x.2.clone()).unwrap_or_default(),
                 landed: landed.get(p).cloned(),
+                agent_worktree: fp.filter(|f| f.kind == "worktree").and_then(|f| f.agent.clone()),
                 presence: presence.get(p).cloned().unwrap_or_default(),
                 builds: builds.get(p).cloned().unwrap_or_default(),
                 path: p.clone(),

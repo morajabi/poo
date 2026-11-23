@@ -89,6 +89,34 @@ pub struct ScanConfig {
     pub idle_hours: u32,
     /// Builds of a worktree whose commits already landed go cold after this many idle hours.
     pub landed_idle_hours: u32,
+    /// Builds of an agent worktree nobody has open go idle after this many hours: agents
+    /// make one worktree per task and rarely come back once it is done.
+    pub worktree_idle_hours: u32,
+    /// Ask GitHub (through an installed, signed-in `gh`) whether a worktree's pull request
+    /// merged. Catches squash merges of branches that changed after the merge.
+    pub pr_lookup: bool,
+    /// relaxed | default | eager: scales every warm and idle window (x2, x1, x0.5).
+    pub pace: Pace,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Pace {
+    Relaxed,
+    #[default]
+    Default,
+    Eager,
+}
+
+impl ScanConfig {
+    /// A window in seconds after the pace is applied.
+    pub fn window(&self, secs: i64) -> i64 {
+        match self.pace {
+            Pace::Relaxed => secs * 2,
+            Pace::Default => secs,
+            Pace::Eager => secs / 2,
+        }
+    }
 }
 
 impl Default for ScanConfig {
@@ -97,13 +125,16 @@ impl Default for ScanConfig {
             max_depth: 14,
             exclude: vec![],
             min_item_bytes: 1_000_000,
-            warm_days: 14,
+            warm_days: 7,
             fresh_seconds: 20,
             cache_minutes: 60,
             idle_days: 3,
             keep_recent_checkouts: 2,
             idle_hours: 6,
-            landed_idle_hours: 2,
+            landed_idle_hours: 1,
+            worktree_idle_hours: 4,
+            pr_lookup: true,
+            pace: Pace::Default,
         }
     }
 }
@@ -309,11 +340,14 @@ pub const KEYS: &[(&str, &str)] = &[
     ("plan_overrides.<id>", "Change a plan's tiers, max_cost, exclude_buckets or target."),
     ("projects.<path>.policy", "auto | active (keep warm) | stale (treat as unused) | protected (never touch)."),
     ("agents.auto_clean_max_tier", "Highest tier an agent may clean through MCP without asking (default cold)."),
-    ("scan.warm_days", "Unused this many days counts as unused (default 14, rules can override)."),
+    ("scan.pace", "relaxed | default | eager: scales every warm and idle window below, rules' own included (x2, x1, x0.5)."),
+    ("scan.warm_days", "Unused this many days counts as unused (default 7, rules can override)."),
     ("scan.idle_days", "Untouched this many days with nobody working there counts as idle (default 3)."),
     ("scan.keep_recent_checkouts", "Per repo, this many most recent checkouts keep their builds in use (default 2)."),
     ("scan.idle_hours", "Builds of other checkouts go idle after this many hours (default 6)."),
-    ("scan.landed_idle_hours", "Builds of worktrees whose work landed go unused after this many hours (default 2)."),
+    ("scan.landed_idle_hours", "Builds of worktrees whose work landed (merged, squash-merged, rebased, PR merged) go unused after this many hours (default 1)."),
+    ("scan.worktree_idle_hours", "Builds of agent worktrees nobody has open go idle after this many hours (default 4)."),
+    ("scan.pr_lookup", "Ask GitHub through `gh` whether a worktree's pull request merged (default on; answers cached)."),
     ("scan.max_depth / scan.exclude / scan.min_item_bytes / scan.fresh_seconds / scan.cache_minutes", "How deep and where poo walks, the smallest item shown, how long a report is reused before it updates from the file-change journal, and how long it is reused when a full walk would be needed."),
     ("backup.config_files", "Copy small ignored files (.env, Local.xcconfig) before removing a worktree (default on)."),
     ("backup.max_file_bytes / backup.max_total_bytes", "Largest file and most per worktree copied (1 MB / 50 MB)."),

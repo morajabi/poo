@@ -154,6 +154,11 @@ Every item gets a tier. Plans (`quick`, `stale` shown as "not in use", `deep`,
 
 Mark projects `active`, `stale` or `protected` with `poo projects set`. Tune
 `scan.keep_recent_checkouts` and `scan.idle_hours` to how many checkouts you build at once.
+A worktree's work counts as landed when its commits are in the default branch, when it was
+squash- or rebase-merged, or (through `gh`, `scan.pr_lookup`) when its pull request merged;
+its builds go unused `scan.landed_idle_hours` (1) after the checkout goes quiet. Builds of
+agent worktrees nobody has open go idle after `scan.worktree_idle_hours` (4). `scan.pace =
+"relaxed" | "eager"` doubles or halves every window at once.
 `--include-in-use` also cleans things in use (worktrees with uncommitted work are stashed
 first); `--dangerously-include-protected` goes further and asks you to confirm.
 

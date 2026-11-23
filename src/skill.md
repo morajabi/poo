@@ -126,7 +126,8 @@ Before adding or enabling one, show `poo schedule presets` for it and `poo plan 
   exactly `poo clean --plan stale`, and `poo plan stale --include-in-use` previews that
   mode (worktrees with uncommitted work, stashed first; items used in the last hour).
 - What takes space: `poo`, then `poo ls <bucket>` and `poo show <id>`.
-- After a feature lands: `poo worktrees`; propose removing merged worktrees. Their
+- After a feature lands: `poo worktrees`; propose removing merged worktrees (squash and
+  rebase merges and merged PRs count; `landed_by` on the item says how). Their
   build output goes with them and the branch stays. Worktrees with uncommitted changes
   are skipped by default; with `--include-in-use` poo stashes the changes first
   (recoverable from `git stash list` and `poo backups`).

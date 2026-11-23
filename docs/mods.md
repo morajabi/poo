@@ -152,8 +152,8 @@ poo combines cost with activity into a tier for each item:
 | tier | meaning | in plans |
 |---|---|---|
 | `junk` | cost `none` | Quick, Not in use, Deep, Emergency |
-| `cold` | untouched for longer than `warm_days`, orphaned, or its worktree's commits already landed | Not in use, Deep, Emergency |
-| `idle` | nothing uses it now: builds of checkouts other than your `scan.keep_recent_checkouts` newest per repo, untouched for `scan.idle_hours`; or anything untouched for `idle_days` with nobody working there | Not in use, Deep, Emergency |
+| `cold` | untouched for longer than `warm_days`, orphaned, or its worktree's work already landed (merged, squash- or rebase-merged, or its PR merged) and the checkout has been quiet for `scan.landed_idle_hours` | Not in use, Deep, Emergency |
+| `idle` | nothing uses it now: builds of agent worktrees nobody has open for `scan.worktree_idle_hours`; builds of checkouts other than your `scan.keep_recent_checkouts` newest per repo, untouched for `scan.idle_hours`; landed worktrees with leftover commits or edits; or anything untouched for `idle_days` with nobody working there | Not in use, Deep, Emergency |
 | `warm` | in active use (recent, or an agent, editor or shell is open in that checkout) | Deep, Emergency |
 | `hot` | in use now (a build tool runs there, an app that owns it is open, touched in the last hour) | never |
 | `review` | needs a human look (unknown ignored folder, worktree with uncommitted work) | never |
