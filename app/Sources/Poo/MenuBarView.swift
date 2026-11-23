@@ -151,6 +151,21 @@ struct MenuBarView: View {
                                open(.browse)
                            })
             }
+            if store.menuSession == nil, store.spaceLevel != .ok, let extra = inUseExtra(r) {
+                Button {
+                    nav.review(plan: "deep")
+                    open(nav.section ?? .overview)
+                } label: {
+                    Text("\(Fmt.bytes(extra)) more in builds you'd rebuild…")
+                        .monospacedDigit()
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(store.busy)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 10)
+                .help("Space is low. Also cleans builds and caches still in use but not running; they come back when rebuilt or redownloaded. Opens a review first.")
+            }
         case .buckets:
             Divider()
             buckets(r)
@@ -247,6 +262,14 @@ struct MenuBarView: View {
         }
         .frame(width: 18, height: 18)
         .help(store.report.map { "Updated \(FreshnessLabel.age($0.scannedAt, now: .now)). ⌘R to refresh, ⌥-click to rescan everything." } ?? "Refresh (⌘R)")
+    }
+
+    /// What the deep plan frees beyond what nothing uses, when that is worth a second button.
+    private func inUseExtra(_ r: Report) -> UInt64? {
+        guard let deep = r.plan("deep")?.bytes else { return nil }
+        let base = r.plan("stale")?.bytes ?? 0
+        let extra = deep > base ? deep - base : 0
+        return extra >= 2_000_000_000 ? extra : nil
     }
 
     /// Reviewing and cleaning happen in the window: a menu bar panel closes on the first
