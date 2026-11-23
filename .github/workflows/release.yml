@@ -281,3 +281,37 @@ jobs:
             sleep $((i * 20))
           done
           echo "::error::could not publish $TAG"; exit 1
+
+  # Points the Homebrew tap (morajabi/homebrew-tap) at this release. Needs a write deploy
+  # key on the tap, its private half in HOMEBREW_TAP_DEPLOY_KEY (docs/releasing.md).
+  homebrew:
+    needs: [version, publish]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+      - name: update the tap
+        run: |
+          set -eu
+          if [ -z "$DEPLOY_KEY" ]; then
+            echo "::warning::HOMEBREW_TAP_DEPLOY_KEY is not set: the Homebrew tap still points at the previous release."
+            exit 0
+          fi
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/tap && chmod 600 ~/.ssh/tap
+          export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/tap -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+          git clone --depth 1 git@github.com:morajabi/homebrew-tap.git tap
+          # latest.json can take a moment to be served after the upload.
+          for i in 1 2 3 4 5; do scripts/homebrew.sh "$VERSION" tap && break; [ "$i" = 5 ] && exit 1; sleep $((i * 15)); done
+          cd tap
+          git add -A
+          if git diff --cached --quiet; then echo "tap already at $VERSION"; exit 0; fi
+          git -c user.name="poo release" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -m "poo $VERSION"
+          git push origin HEAD
+          echo "### Homebrew tap updated to $VERSION" >> "$GITHUB_STEP_SUMMARY"

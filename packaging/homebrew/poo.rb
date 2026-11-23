@@ -1,10 +1,9 @@
 # Homebrew formula template. `scripts/homebrew.sh <version>` fills in urls and sha256
-# from the release's latest.json. Publish in a tap (morajabi/homebrew-tap) first,
-# then submit to homebrew-core once poo has users and a stable release.
+# from the release's latest.json; the release workflow publishes it to
+# morajabi/homebrew-tap. Submit to homebrew-core once poo meets its notability bar.
 class Poo < Formula
-  desc "Find and safely free disk space eaten by dev builds, worktrees, caches and simulators"
+  desc "Safely free disk space eaten by dev builds, worktrees, caches and simulators"
   homepage "https://github.com/morajabi/poo"
-  version "VERSION"
   license "MIT"
 
   on_macos do

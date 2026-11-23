@@ -44,6 +44,7 @@ release still publishes, with less in it.
 | `APPLE_TEAM_ID` | 10-character team id | |
 | `APPLE_APP_PASSWORD` | App-specific password from appleid.apple.com | |
 | `APPLE_API_KEY_P8` / `APPLE_API_KEY_ID` / `APPLE_API_ISSUER` | Instead of the three above: an App Store Connect API key (`.p8`, base64), its key id and issuer id | |
+| `HOMEBREW_TAP_DEPLOY_KEY` | Private SSH key whose public half is a write deploy key on `morajabi/homebrew-tap` (below) | The tap keeps pointing at the previous release |
 
 ## Sparkle key
 
@@ -107,3 +108,20 @@ or `xattr -dr com.apple.quarantine /Applications/Poo.app`), and macOS ties priva
 such as Full Disk Access to the exact build, so each ad-hoc update asks for them again.
 Ad-hoc builds are signed without the hardened runtime, which would refuse to load the
 ad-hoc signed Sparkle framework.
+
+## Homebrew tap
+
+[`morajabi/homebrew-tap`](https://github.com/morajabi/homebrew-tap) holds the `poo` formula
+and the `poo-app` cask. The templates live in `packaging/homebrew`; after each release the
+`homebrew` job renders them with `scripts/homebrew.sh` (versions and sha256 from the
+release's `latest.json`) and pushes to the tap. Once, to let it push:
+
+```sh
+ssh-keygen -t ed25519 -N '' -C poo-release -f tap-key
+gh repo deploy-key add tap-key.pub -R morajabi/homebrew-tap --allow-write -t poo-release
+gh secret set HOMEBREW_TAP_DEPLOY_KEY -R morajabi/poo < tap-key
+rm tap-key tap-key.pub
+```
+
+To update the tap by hand: `scripts/homebrew.sh 0.1.16 path/to/homebrew-tap`, then commit
+and push there.

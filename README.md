@@ -53,6 +53,15 @@ Installs `poo` into `~/.local/bin` (sha256-verified). Add `POO_APP=1` before `sh
 install Poo.app too. Already have the app? Use **Poo › Install Command-Line Tool** instead:
 it links the app's own CLI, which updates with the app. The CLI also runs on Linux.
 
+**Homebrew:**
+
+```sh
+brew install morajabi/tap/poo             # CLI (macOS and Linux)
+brew install --cask morajabi/tap/poo-app  # Poo.app, with its CLI linked as `poo`
+```
+
+Install one or the other: both put `poo` on your PATH, and the app's copy updates with the app.
+
 <details>
 <summary>Direct downloads</summary>
 
@@ -273,8 +282,6 @@ cargo build --release          # CLI
 - [CONTRIBUTING.md](CONTRIBUTING.md): rules, fixtures, checks and code layout.
 - [docs/mods.md](docs/mods.md): the mod and rule format.
 - [docs/releasing.md](docs/releasing.md): the release pipeline, signing and Sparkle keys.
-
-Homebrew formula and cask are in progress (`packaging/homebrew`).
 
 ## License
 
