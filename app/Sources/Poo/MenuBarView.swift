@@ -67,6 +67,12 @@ struct MenuBarView: View {
                 .padding(.vertical, 8)
         }
         .frame(width: 320)
+        .overlay {
+            if let s = store.menuSession, s.phase == .finished, !s.dryRun,
+               (s.result?.freed_bytes ?? 0) > 0 {
+                ConfettiView().id(s.id)
+            }
+        }
         .onAppear {
             store.live?.panelOpened()
             updater.isIdle = { [store] in !store.busy && !store.scanning && store.menuSession == nil }
@@ -142,6 +148,7 @@ struct MenuBarView: View {
             if store.menuSession == nil {
                 AreaPicker(areas: areas, limit: max(config.max_areas, 1), disabled: store.busy,
                            onReview: { openReview(areas: $0) },
+                           onClean: { quickClean(areas: $0) },
                            onOpen: { a in
                                nav.browse(bucket: a.bucket.id, group: a.group, statuses: [.notInUse])
                                open(.browse)
@@ -197,7 +204,7 @@ struct MenuBarView: View {
                 MenuBucketRow(
                     bucket: b,
                     onOpen: { open(.bucket(b.id)) },
-                    onClean: b.notInUseBytes > 0 && store.menuSession == nil && !store.busy ? { openReview(bucket: b.id) } : nil
+                    onClean: b.notInUseBytes > 0 && store.menuSession == nil && !store.busy ? { quickClean(bucket: b.id) } : nil
                 )
             }
         }
@@ -272,8 +279,20 @@ struct MenuBarView: View {
         return extra >= 2_000_000_000 ? extra : nil
     }
 
-    /// Reviewing and cleaning happen in the window: a menu bar panel closes on the first
-    /// click elsewhere, so it only ever hands off with one click.
+    /// The panel's Clean buttons clean on the spot: only what nothing is using, and only what
+    /// needs no review (safe mode). Anything riskier goes through the window's review.
+    private func quickClean(bucket: String? = nil, areas: Set<String>? = nil) {
+        guard store.menuSession == nil, !store.busy else { return }
+        var items = store.notInUse
+        if let bucket { items = items.filter { $0.bucket == bucket } }
+        if let areas { items = items.filter { areas.contains(AreaSummary.key($0)) } }
+        items = items.filter { ($0.risks ?? []).allSatisfy { ($0.mode ?? .safe) == .safe } }
+        guard !items.isEmpty else { return openReview(bucket: bucket, areas: areas) }
+        withAnimation(.smooth) { store.menuSession = store.startClean(items, mode: .safe) }
+    }
+
+    /// Reviewing happens in the window: a menu bar panel closes on the first click
+    /// elsewhere, so it only ever hands off with one click.
     private func openReview(bucket: String? = nil, areas: Set<String>? = nil) {
         guard let r = store.report else { return }
         let notInUse = store.notInUse
@@ -341,6 +360,7 @@ struct MenuCleaningView: View {
     @Bindable var session: CleanSession
     var onShowBackups: () -> Void
     @Environment(Store.self) private var store
+    @State private var celebrate = false
 
     var body: some View {
         Group {
@@ -372,9 +392,11 @@ struct MenuCleaningView: View {
                 let r = session.result
                 let backups = (r?.results ?? []).contains { !($0.notes ?? []).isEmpty }
                 HStack(spacing: 8) {
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.title3)
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.title2)
+                        .symbolEffect(.bounce, options: .nonRepeating, value: celebrate)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text("\(session.dryRun ? "Would free" : "Freed") \(Fmt.bytes(r?.freed_bytes ?? 0))").font(.callout.weight(.medium))
+                        Text("\(session.dryRun ? "Would free" : "Freed") \(Fmt.bytes(r?.freed_bytes ?? 0))")
+                            .font(.title3.weight(.semibold)).monospacedDigit()
                         Text([r.map { "\($0.cleaned) cleaned" }, (r?.skipped ?? 0) > 0 ? "\(r!.skipped) skipped" : nil].compactMap { $0 }.joined(separator: " · "))
                             .font(.caption).foregroundStyle(.secondary)
                         if session.erasingBytes > 0 {
@@ -389,6 +411,7 @@ struct MenuCleaningView: View {
                     Spacer()
                     if backups { Button("Backups", action: onShowBackups).controlSize(.small) }
                 }
+                .onAppear { celebrate = true }
                 .task {
                     try? await Task.sleep(for: .seconds(6))
                     if session.erasingBytes > 0 {

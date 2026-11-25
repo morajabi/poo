@@ -398,6 +398,8 @@ struct AreaPicker: View {
     var limit = 6
     var disabled: Bool
     var onReview: (Set<String>?) -> Void
+    /// The big button: cleans the ticked areas right away (nil = all of them).
+    var onClean: (Set<String>?) -> Void
     var onOpen: (AreaSummary) -> Void
     var onOpenAll: () -> Void
     @AppStorage("menuAreasExpanded") private var expanded = false
@@ -421,8 +423,8 @@ struct AreaPicker: View {
                     .padding(.horizontal, 14)
                     .padding(.bottom, 12)
             } else {
-                Button { onReview(selected.count == areas.count ? nil : Set(selected.map(\.id))) } label: {
-                    Text(total > 0 ? "Clean \(Fmt.bytes(total))…" : "Pick what to clean")
+                Button { onClean(selected.count == areas.count ? nil : Set(selected.map(\.id))) } label: {
+                    Text(total > 0 ? "Clean \(Fmt.bytes(total))" : "Pick what to clean")
                         .monospacedDigit()
                         .contentTransition(.numericText())
                         .frame(maxWidth: .infinity)
@@ -432,7 +434,7 @@ struct AreaPicker: View {
                 .disabled(disabled || total == 0)
                 .animation(.snappy, value: total)
                 .padding(.horizontal, 14)
-                .help("Opens a review first. Only items nothing is using are included.")
+                .help("Cleans right away. Only items nothing is using, and only what's safe without a review.")
                 disclosure(shown: shown, rest: rest)
                 if expanded {
                     VStack(spacing: 0) {
