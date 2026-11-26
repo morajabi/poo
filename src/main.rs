@@ -1880,7 +1880,7 @@ fn schedule_cmd(ctx: &mut Ctx, out: &Out, cmd: ScheduleCmd) -> R {
                 .iter()
                 .map(|s| {
                     let last = state.last_run.get(&s.id);
-                    json!({"schedule": s, "last_run": last, "next_run": s.enabled.then(|| sch::next_run(s, last.map(|l| l.at)))})
+                    json!({"schedule": s, "last_run": last, "next_run": s.enabled.then(|| sch::next_run(s, &state))})
                 })
                 .collect();
             if out.json {

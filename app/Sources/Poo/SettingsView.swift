@@ -380,7 +380,7 @@ struct AutomationSettings: View {
         if let c = e.schedule.when_free_below { parts.append("when free < \(c)") }
         if let t = e.schedule.target_free { parts.append("free up to \(t)") }
         if let l = e.last_run {
-            let what = l.status == "ok" ? "freed \(Fmt.bytes(l.freed_bytes))" : l.status
+            let what = l.status == "ran" ? "freed \(Fmt.bytes(l.freed_bytes))" : l.status
             parts.append("Last ran \(Fmt.ago(Date(timeIntervalSince1970: TimeInterval(l.at)))), \(what)")
         } else {
             parts.append("Hasn't run yet")
@@ -607,7 +607,7 @@ struct GuardSection: View {
             }
             .disabled(entry?.schedule.enabled != true)
             if let l = entry?.last_run {
-                Text("Last ran \(Fmt.ago(Date(timeIntervalSince1970: TimeInterval(l.at)))), \(l.status == "ok" ? "freed \(Fmt.bytes(l.freed_bytes))" : l.status)")
+                Text("Last ran \(Fmt.ago(Date(timeIntervalSince1970: TimeInterval(l.at)))), \(l.status == "ran" ? "freed \(Fmt.bytes(l.freed_bytes))" : l.status)")
                     .font(.caption).foregroundStyle(.secondary)
             }
         } header: {
