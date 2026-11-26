@@ -184,6 +184,9 @@ fn log(line: &str) {
     }
 }
 
+/// How long a hook waits for another clean to finish before it gives up on its worktree.
+const HOOK_WAIT: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+
 /// Called by the agent. Returns at once; the work happens in a detached poo.
 pub fn agent_done(agent: &str, cwd: Option<String>, detached: bool) -> Result<()> {
     if !detached {
@@ -243,9 +246,16 @@ pub fn agent_done(agent: &str, cwd: Option<String>, detached: bool) -> Result<()
         log(&format!("{} {}: work not landed yet; left alone", agent, tilde(&wt)));
         return Ok(());
     }
-    let Some(_lock) = crate::schedule::RunLock::try_acquire(&format!("hook:{}", agent)) else {
-        log(&format!("{} {}: {}; skipped", agent, tilde(&wt), crate::schedule::busy_message()));
-        return Ok(());
+    // Agents often finish together (parallel sessions, a batch of worktrees), and only one
+    // clean runs at a time. Nothing retries a hook, so wait for the clean ahead of this one:
+    // this process is detached, and the agent is not waiting on it.
+    let lock = crate::schedule::RunLock::acquire_wait(&format!("hook:{}", agent), HOOK_WAIT, &|_| {}, &|| false);
+    let _lock = match lock {
+        Ok(l) => l,
+        Err(busy) => {
+            log(&format!("{} {}: {}; skipped", agent, tilde(&wt), busy.message()));
+            return Ok(());
+        }
     };
     let wt = std::fs::canonicalize(&wt).unwrap_or(wt);
     let report = crate::scan::scan(
