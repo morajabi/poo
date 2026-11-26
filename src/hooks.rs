@@ -236,13 +236,15 @@ pub fn agent_done(agent: &str, cwd: Option<String>, detached: bool) -> Result<()
         .and_then(|c| c.parent().map(|p| p.to_path_buf()))
         .ok_or_else(|| anyhow!("could not find the repository of {}", wt.display()))?;
     let default = crate::providers::git::default_branch(&repo).unwrap_or_else(|| "main".into());
-    let landed = crate::providers::git::is_merged(&repo, "HEAD", &default) || {
+    // The worktree's HEAD: `HEAD` in the main checkout is that checkout's branch, usually
+    // the default branch itself, which is always landed.
+    let is_landed = || {
         let head = crate::providers::git::git(&wt, &["rev-parse", "HEAD"], 5).unwrap_or_default();
         !head.trim().is_empty() && crate::providers::git::is_merged(&repo, head.trim(), &default)
     };
     // Codex fires Stop after every turn, so only landed work is cleaned for it.
-    let allowed = landed || (mode == "always" && agent == "claude");
-    if !allowed {
+    let allowed = |landed: bool| landed || (mode == "always" && agent == "claude");
+    if !allowed(is_landed()) {
         log(&format!("{} {}: work not landed yet; left alone", agent, tilde(&wt)));
         return Ok(());
     }
@@ -257,6 +259,13 @@ pub fn agent_done(agent: &str, cwd: Option<String>, detached: bool) -> Result<()
             return Ok(());
         }
     };
+    // The wait can be long enough for a new session to start in this worktree and commit
+    // work that has not landed, so decide again now that nothing else is cleaning.
+    let landed = is_landed();
+    if !allowed(landed) {
+        log(&format!("{} {}: new work arrived while waiting; left alone", agent, tilde(&wt)));
+        return Ok(());
+    }
     let wt = std::fs::canonicalize(&wt).unwrap_or(wt);
     let report = crate::scan::scan(
         &ctx.cfg,
