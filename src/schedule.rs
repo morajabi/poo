@@ -18,6 +18,9 @@ use std::path::PathBuf;
 
 pub const LABEL: &str = "com.morajabi.poo.scheduler";
 
+/// How often launchd wakes the scheduler (the agent's `StartInterval`).
+pub const TICK_SECS: i64 = 900;
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RunRecord {
     pub at: i64,
@@ -37,6 +40,10 @@ pub struct ScheduleState {
     pub last_run: BTreeMap<String, RunRecord>,
     #[serde(default)]
     pub last_tick: i64,
+    /// When the scheduler first saw each enabled schedule that has not run yet, so a schedule
+    /// with `at` runs at the first HH:MM after it was added, even if that tick came late.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub first_seen: BTreeMap<String, i64>,
 }
 
 fn state_path() -> PathBuf {
@@ -93,15 +100,38 @@ fn parse_at(s: &str) -> Result<(i64, i64)> {
     Ok((h, m))
 }
 
-/// Unix time of today's HH:MM in local time.
-fn local_today_at(h: i64, m: i64) -> i64 {
-    let t = now() as libc::time_t;
+/// Unix time of HH:MM local time, `days` after the local day of `t`.
+fn local_at(t: i64, days: i64, h: i64, m: i64) -> i64 {
+    let t = t as libc::time_t;
     let mut tm: libc::tm = unsafe { std::mem::zeroed() };
     unsafe { libc::localtime_r(&t, &mut tm) };
+    tm.tm_mday += days as i32;
     tm.tm_hour = h as i32;
     tm.tm_min = m as i32;
     tm.tm_sec = 0;
+    // Let mktime work out daylight saving for the new day.
+    tm.tm_isdst = -1;
     unsafe { libc::mktime(&mut tm) as i64 }
+}
+
+/// The first HH:MM at or after `t`.
+fn slot_from(t: i64, h: i64, m: i64) -> i64 {
+    let s = local_at(t, 0, h, m);
+    if s >= t {
+        s
+    } else {
+        local_at(t, 1, h, m)
+    }
+}
+
+/// The last HH:MM at or before `t`.
+fn slot_before(t: i64, h: i64, m: i64) -> i64 {
+    let s = local_at(t, 0, h, m);
+    if s <= t {
+        s
+    } else {
+        local_at(t, -1, h, m)
+    }
 }
 
 pub fn validate(s: &Schedule, cat: &Catalog) -> Result<()> {
@@ -121,19 +151,46 @@ pub fn validate(s: &Schedule, cat: &Catalog) -> Result<()> {
     Ok(())
 }
 
-/// When a schedule should run next (unix time).
-pub fn next_run(s: &Schedule, last: Option<i64>) -> i64 {
+/// When a schedule is due (unix time); a tick at or after it runs the schedule. `last` is its
+/// last recorded run and `since` when the scheduler first saw it (for one that never ran).
+///
+/// A schedule with `at` is due at the first HH:MM after its last run's slot plus `every`.
+/// The scheduler only wakes every 15 minutes and not at all while the Mac sleeps, so the
+/// slot stays due until a tick catches it: 03:30 runs at the 03:33 tick, or on wake.
+pub fn due_at(s: &Schedule, last: Option<i64>, since: i64, now: i64) -> i64 {
     let every = parse_every(&s.every).unwrap_or(86400);
-    let base = last.map(|l| l + every).unwrap_or_else(now);
-    if let Some((h, m)) = s.at.as_deref().and_then(|a| parse_at(a).ok()) {
-        let mut t = local_today_at(h, m);
-        let earliest = last.map(|l| l + every - 3600).unwrap_or(0);
-        while t < earliest.max(now() - 60) {
-            t += 86400;
-        }
-        return t;
+    let Some((h, m)) = s.at.as_deref().and_then(|a| parse_at(a).ok()) else {
+        return last.map_or(now, |l| l + every);
+    };
+    let from = match last {
+        // Counted from the slot the last run served, so a late run (the Mac slept through
+        // 03:30 and ran at 09:00) does not push the next night out. The hour of slack keeps
+        // a daylight saving change from skipping a day.
+        Some(l) => slot_before(l, h, m) + every - 3600,
+        None => since,
+    };
+    slot_from(from, h, m)
+}
+
+/// When a schedule runs next, for display: when it is due, but never before the
+/// scheduler's next wake. Overdue schedules run at that wake.
+pub fn next_run(s: &Schedule, state: &ScheduleState) -> i64 {
+    let t = now();
+    let last = state.last_run.get(&s.id).map(|r| r.at);
+    let since = state.first_seen.get(&s.id).copied().unwrap_or(t);
+    let next_tick = if state.last_tick > 0 { state.last_tick + TICK_SECS } else { t };
+    due_at(s, last, since, t).max(next_tick).max(t)
+}
+
+/// Whether a run's record replaces the stored one. Busy runs keep the last real run so the
+/// schedule tries again on the next tick; a not-needed check does not count as a run, but
+/// it does replace an old error, which would otherwise show as the schedule's state forever.
+pub fn records(prev: Option<&RunRecord>, rec: &RunRecord) -> bool {
+    match rec.status.as_str() {
+        "busy" => false,
+        "not-needed" => prev.is_none_or(|p| p.status == "error"),
+        _ => true,
     }
-    base
 }
 
 pub fn presets() -> Vec<(&'static str, &'static str, Schedule)> {
@@ -455,14 +512,17 @@ pub fn run(ctx: &Ctx, s: &Schedule, dry_run: bool) -> Result<RunRecord> {
 pub fn tick() -> Result<Vec<(String, RunRecord)>> {
     let ctx = Ctx::load().context("loading config")?;
     let mut state = load_state();
-    state.last_tick = now();
+    let t = now();
+    state.last_tick = t;
+    // Only enabled schedules that have not run yet keep a first-seen time.
+    let waiting: Vec<&str> = ctx.cfg.schedule.iter().filter(|s| s.enabled && !state.last_run.contains_key(&s.id)).map(|s| s.id.as_str()).collect();
+    state.first_seen.retain(|id, _| waiting.contains(&id.as_str()));
     let mut done = vec![];
     for s in ctx.cfg.schedule.iter().filter(|s| s.enabled) {
-        let last = state.last_run.get(&s.id).map(|r| r.at);
-        if now() < next_run(s, last) && last.is_some() {
-            continue;
-        }
-        if last.is_none() && s.at.is_some() && now() < next_run(s, None) {
+        let prev = state.last_run.get(&s.id).cloned();
+        let last = prev.as_ref().map(|r| r.at);
+        let since = if last.is_none() { *state.first_seen.entry(s.id.clone()).or_insert(t) } else { t };
+        if t < due_at(s, last, since, t) {
             continue;
         }
         match run(&ctx, s, false) {
@@ -475,10 +535,9 @@ pub fn tick() -> Result<Vec<(String, RunRecord)>> {
                 if s.notify && rec.status == "ran" && rec.freed_bytes > 0 {
                     notify("poo", &format!("{} freed {}. {} free now.", s.id, bytes(rec.freed_bytes), bytes(rec.free_after)));
                 }
-                // Busy keeps the last real run, so the schedule tries again on the next tick
-                // instead of waiting a whole interval.
-                if rec.status != "busy" && (rec.status != "not-needed" || last.is_none()) {
+                if records(prev.as_ref(), &rec) {
                     state.last_run.insert(s.id.clone(), rec.clone());
+                    state.first_seen.remove(&s.id);
                 }
                 done.push((s.id.clone(), rec));
             }
@@ -486,6 +545,7 @@ pub fn tick() -> Result<Vec<(String, RunRecord)>> {
                 log_line(&format!("{}: failed: {:#}", s.id, e));
                 crate::telemetry::error("schedule", &format!("schedule run failed: {:#}", e), &[("schedule", s.id.as_str())]);
                 state.last_run.insert(s.id.clone(), RunRecord { at: now(), status: "error".into(), message: format!("{:#}", e), ..Default::default() });
+                state.first_seen.remove(&s.id);
             }
         }
     }

@@ -459,7 +459,7 @@ fn schedules_tool(ctx: &mut Ctx, a: &Value) -> Result<Value> {
             let state = sch::load_state();
             Ok(json!({"schedules": ctx.cfg.schedule.iter().map(|x| {
                 let last = state.last_run.get(&x.id);
-                json!({"schedule": x, "last_run": last, "next_run": sch::next_run(x, last.map(|l| l.at))})
+                json!({"schedule": x, "last_run": last, "next_run": sch::next_run(x, &state)})
             }).collect::<Vec<_>>(), "agent_loaded": sch::agent_loaded()}))
         }
         "presets" => Ok(json!({"presets": sch::presets().into_iter().map(|(id, d, x)| json!({"id": id, "description": d, "schedule": x})).collect::<Vec<_>>()})),
