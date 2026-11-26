@@ -42,10 +42,10 @@ fn hook_waits_for_a_running_clean() {
     let log_path = home.join(".poo/state/hooks.log");
 
     // Another clean holds the run lock and finishes a moment after the hook starts.
-    let (out, waited) = hook_behind_a_clean(&home, &wt, || {});
+    let out = hook_behind_a_clean(&home, &wt, || {});
     let log = std::fs::read_to_string(&log_path).unwrap_or_default();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    assert!(waited >= Duration::from_millis(1500), "the hook did not wait for the clean ahead of it: {}", log);
+    assert!(log.contains("app-wt: waiting for the scheduled clean `guard` to finish"), "the hook did not wait for the clean ahead of it: {}", log);
     assert!(log.contains("(1 cleaned, 0 skipped)"), "{}", log);
     assert!(!wt.join("node_modules").exists(), "the worktree's build output is still there: {}", log);
 
@@ -57,7 +57,7 @@ fn hook_waits_for_a_running_clean() {
     std::fs::create_dir_all(&deps).unwrap();
     std::fs::write(deps.join("index.js"), vec![b'x'; 1 << 20]).unwrap();
     let during = wt2.clone();
-    let (out, _) = hook_behind_a_clean(&home, &wt2, move || {
+    let out = hook_behind_a_clean(&home, &wt2, move || {
         std::fs::write(during.join("feature.txt"), "new work\n").unwrap();
         git(&during, &["add", "feature.txt"]);
         git(&during, &["commit", "-q", "-m", "new work"]);
@@ -69,17 +69,20 @@ fn hook_waits_for_a_running_clean() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
-/// Runs the hook for `wt` while another clean holds the run lock. The holder runs `during`,
-/// then lets go 1.5 s in. Returns the hook's output and how long it took.
-fn hook_behind_a_clean(home: &Path, wt: &Path, during: impl FnOnce() + Send + 'static) -> (std::process::Output, Duration) {
+/// Runs the hook for `wt` while another clean holds the run lock. Once the hook says it is
+/// waiting, the holder runs `during` and lets go.
+fn hook_behind_a_clean(home: &Path, wt: &Path, during: impl FnOnce() + Send + 'static) -> std::process::Output {
     let held = RunLock::try_acquire("schedule:guard").expect("lock");
+    let log_path = home.join(".poo/state/hooks.log");
+    let mark = format!("{}: waiting for", wt.file_name().unwrap().to_string_lossy());
     let releaser = std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(500));
+        let t = Instant::now();
+        while t.elapsed() < Duration::from_secs(60) && !std::fs::read_to_string(&log_path).unwrap_or_default().contains(&mark) {
+            std::thread::sleep(Duration::from_millis(50));
+        }
         during();
-        std::thread::sleep(Duration::from_millis(1000));
         drop(held);
     });
-    let t = Instant::now();
     let out = Command::new(env!("CARGO_BIN_EXE_poo"))
         .args(["hook", "agent-done", "--agent", "claude", "--cwd", wt.to_str().unwrap(), "--detached"])
         .env("HOME", home)
@@ -88,7 +91,6 @@ fn hook_behind_a_clean(home: &Path, wt: &Path, during: impl FnOnce() + Send + 's
         .env("POO_NO_TELEMETRY", "1")
         .output()
         .unwrap();
-    let waited = t.elapsed();
     releaser.join().unwrap();
-    (out, waited)
+    out
 }

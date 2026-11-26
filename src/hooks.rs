@@ -251,7 +251,13 @@ pub fn agent_done(agent: &str, cwd: Option<String>, detached: bool) -> Result<()
     // Agents often finish together (parallel sessions, a batch of worktrees), and only one
     // clean runs at a time. Nothing retries a hook, so wait for the clean ahead of this one:
     // this process is detached, and the agent is not waiting on it.
-    let lock = crate::schedule::RunLock::acquire_wait(&format!("hook:{}", agent), HOOK_WAIT, &|_| {}, &|| false);
+    let noted = std::cell::Cell::new(false);
+    let waiting = |h: &crate::schedule::Holder| {
+        if !noted.replace(true) {
+            log(&format!("{} {}: waiting for {} to finish", agent, tilde(&wt), h.describe()));
+        }
+    };
+    let lock = crate::schedule::RunLock::acquire_wait(&format!("hook:{}", agent), HOOK_WAIT, &waiting, &|| false);
     let _lock = match lock {
         Ok(l) => l,
         Err(busy) => {
