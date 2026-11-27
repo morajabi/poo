@@ -920,6 +920,11 @@ pub fn admit(item: &Item, cat: &Catalog, opts: &CleanOptions, procs_list: &[Proc
     if snapshot_cmd && !report_only && (opts.actor.starts_with("schedule") || opts.actor.starts_with("hook")) {
         return Err("Time Machine snapshots are only removed when you ask, never on a schedule".into());
     }
+    // Check-first and kept items (simulator runtimes, SDKs, models, data) are only removed
+    // when someone picks them: never by a schedule or a hook, whatever plan or mode it runs.
+    if matches!(item.tier, Tier::Review | Tier::Protected) && (opts.actor.starts_with("schedule") || opts.actor.starts_with("hook")) {
+        return Err(format!("{}; only removed when you pick it, never on a schedule", if item.tier == Tier::Review { "marked check first" } else { "kept" }));
+    }
     let mut warnings = admit_static(item, cat, opts.mode, opts.max_tier)?;
     if !item.path.contains("://") {
         if let Err(e) = still_matches(item, cat) {

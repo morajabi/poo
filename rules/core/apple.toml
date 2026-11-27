@@ -467,9 +467,9 @@ provider = "simulator-runtimes"
 tags = ["xcode", "simulator", "sdk"]
 stacks = ["xcode"]
 cost = "redownload"
+tier = "review"
 rebuild = "xcodebuild -downloadPlatform iOS"
-warm_days = 60
-description = "Installed simulator OS images (5-10 GB each)."
+description = "Installed simulator OS images (5-10 GB each). A long download to get back, so poo only removes the ones you pick."
 recommend = "Keep the runtime you test on; old betas and duplicate builds can go."
 
 [[rule]]

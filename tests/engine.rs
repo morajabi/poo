@@ -174,6 +174,17 @@ recommend = "Manage it in Fake.app"
     let sched = CleanOptions { mode: RiskLevel::Force, actor: "schedule:nightly".into(), ..Default::default() };
     assert!(clean::admit(&tm("2020-01-01-000000"), &cat, &sched, &[]).unwrap_err().contains("schedule"));
 
+    // Check-first items (simulator runtimes, SDKs, models) are never cleaned by a schedule
+    // or a hook, in any mode; a person can still pick them.
+    let mut runtime = item("simruntime://abc", ActionKind::Command, Some(vec!["xcrun".into(), "simctl".into(), "runtime".into(), "delete".into(), "abc".into()]));
+    runtime.tier = Tier::Review;
+    for actor in ["schedule:guard", "hook:claude"] {
+        let o = CleanOptions { mode: RiskLevel::Danger, actor: actor.into(), ..Default::default() };
+        assert!(clean::admit(&runtime, &cat, &o, &[]).unwrap_err().contains("check first"), "{actor}");
+    }
+    let rt_rule = cat.rule("simulator.runtimes").unwrap();
+    assert_eq!(rt_rule.tier, Some(Tier::Review));
+
     // C18: every saved report adds a growth sample.
     scan::save_report(&report).unwrap();
     assert_eq!(poo::growth::load().len(), 1);
