@@ -579,8 +579,8 @@ struct SafetySettings: View {
 
 struct GuardSection: View {
     @Environment(Store.self) private var store
-    @State private var below = "20G"
-    @State private var target = "50G"
+    @State private var below = "5G"
+    @State private var target = "20G"
 
     private var entry: ScheduleEntry? { store.schedules.first { $0.id == "guard" } }
 
@@ -599,10 +599,10 @@ struct GuardSection: View {
             }
             Group {
                 LabeledContent("When free space is below") {
-                    sizePicker($below, ["10G", "20G", "30G", "50G"], current: entry?.schedule.when_free_below)
+                    sizePicker($below, ["5G", "10G", "20G", "30G"], current: entry?.schedule.when_free_below)
                 }
                 LabeledContent("Free up until") {
-                    sizePicker($target, ["30G", "50G", "75G", "100G"], current: entry?.schedule.target_free)
+                    sizePicker($target, ["10G", "20G", "30G", "50G", "100G"], current: entry?.schedule.target_free)
                 }
             }
             .disabled(entry?.schedule.enabled != true)
@@ -613,7 +613,7 @@ struct GuardSection: View {
         } header: {
             Text("Low-disk guard")
         } footer: {
-            Text("Cleans only what nothing is using, oldest and cheapest first. Checks every minute while Poo runs.")
+            Text("Cleans only what nothing is using, oldest and cheapest first. Never removes big downloads like simulator runtimes or models; those wait for you. Checks every minute while Poo runs.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .onAppear {

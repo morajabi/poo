@@ -212,7 +212,7 @@ pub fn presets() -> Vec<(&'static str, &'static str, Schedule)> {
     vec![
         ("nightly", "Every night at 03:30, clean everything nothing is using (plan `stale`).", mk("nightly", "stale", "1d", Some("03:30"), None, None)),
         ("quick", "Every 6 hours, clean junk only: logs, temp, crash reports.", mk("quick", "quick", "6h", None, None, None)),
-        ("guard", "Low-disk guard: every 15 minutes, if free space drops below 20 GB, clean what is not in use until 50 GB are free.", mk("guard", "emergency", "15m", None, Some("20G"), Some("50G"))),
+        ("guard", "Low-disk guard: every 15 minutes, if free space drops below 5 GB, clean what is not in use until 20 GB are free. Never removes items marked check first.", mk("guard", "emergency", "15m", None, Some("5G"), Some("20G"))),
         ("weekly", "Every Sunday-ish, a weekly `stale` run for machines that sleep at night.", mk("weekly", "stale", "7d", Some("12:00"), None, None)),
     ]
 }

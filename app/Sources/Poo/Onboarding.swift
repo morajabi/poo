@@ -350,7 +350,7 @@ struct OnboardingView: View {
             VStack(spacing: 0) {
                 toggleRow("moon.stars", "Nightly cleanup", "Every night at 03:30", $nightly)
                 Divider().padding(.leading, 44)
-                toggleRow("gauge.with.dots.needle.0percent", "Low-disk guard", "Below 20 GB free, clean until 50 GB are free", $guardOn)
+                toggleRow("gauge.with.dots.needle.0percent", "Low-disk guard", "Below 5 GB free, clean until 20 GB are free", $guardOn)
                 Divider().padding(.leading, 44)
                 toggleRow("bell", "Tell me when it cleans", "A short notification with what was freed", $notify)
                     .disabled(!nightly && !guardOn)
@@ -670,7 +670,7 @@ struct OnboardingView: View {
             await store.configure(["schedule", "add", "nightly"])
         }
         if guardOn && !existing.contains("guard") {
-            await store.configure(["schedule", "add", "guard", "--preset", "guard", "--when-free-below", "20G", "--target-free", "50G"])
+            await store.configure(["schedule", "add", "guard", "--preset", "guard", "--when-free-below", "5G", "--target-free", "20G"])
         }
         if notify && (nightly || guardOn) && Onboarding.isBundled {
             _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])
