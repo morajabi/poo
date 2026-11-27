@@ -16,6 +16,9 @@ struct MainWindow: View {
                         if s.section == .elsewhere, let r = store.report, case let b = ElsewhereView.bytes(r, items: store.reportOnly, purgeable: store.purgeable), b > 0 {
                             Text(Fmt.bytes(b)).font(.caption).monospacedDigit().foregroundStyle(.secondary)
                         }
+                        if s.section == .downloads, case let b = store.bigDownloads.reduce(0, { $0 + $1.total_bytes }), b > 0 {
+                            Text(Fmt.bytes(b)).font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                        }
                     }
                     .tag(s.section)
                 }
@@ -44,10 +47,11 @@ struct MainWindow: View {
                 case .worktrees: WorktreesView()
                 case .elsewhere: ElsewhereView()
                 case .backups: BackupsView()
+                case .downloads: BigDownloadsView()
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if nav.section != .backups { SelectionBar() }
+                if nav.section != .backups, nav.section != .downloads { SelectionBar() }
             }
             .safeAreaInset(edge: .top, spacing: 0) {
                 // Something the CLI refused or failed: say it once, quietly, until dismissed.
@@ -75,7 +79,7 @@ struct MainWindow: View {
                 if nav.section != .backups { nav.review(items: store.selectedItems) }
             }
             .sheet(item: $nav.review) { r in
-                CleanConfirmView(planID: r.planID, free: r.free, items: r.items, onShowBackups: {
+                CleanConfirmView(planID: r.planID, free: r.free, items: r.items, initialMode: r.mode, onShowBackups: {
                     nav.review = nil
                     nav.section = .backups
                 })
@@ -90,6 +94,7 @@ struct MainWindow: View {
                     case "worktrees": nav.section = .worktrees
                     case "backups": nav.section = .backups
                     case "elsewhere": nav.section = .elsewhere
+                    case "downloads": nav.section = .downloads
                     default: if p.hasPrefix("bucket:") { nav.section = .bucket(String(p.dropFirst(7))) }
                     }
                 }

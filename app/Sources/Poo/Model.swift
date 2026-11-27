@@ -230,6 +230,8 @@ struct Item: Codable, Hashable, Identifiable {
     var lastUsedDate: Date? { last_used.map { Date(timeIntervalSince1970: TimeInterval($0)) } }
     var isWorktree: Bool { action.kind == "worktree-remove" }
     var isReportOnly: Bool { report_only == true }
+    /// A heavy download Poo marks check first: only ever removed when the user picks it.
+    var isBigDownload: Bool { tier == .review && cost == "redownload" && isCleanable }
     /// What cleaning gives back: the APFS private size when the CLI knows it.
     var freeable: UInt64 { frees ?? bytes }
     /// "frees 3.1 GB" is worth showing when sharing makes it differ by 10% and 50 MB.

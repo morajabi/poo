@@ -173,6 +173,21 @@ struct MenuBarView: View {
                 .padding(.bottom, 10)
                 .help("Space is low. Also cleans builds and caches still in use but not running; they come back when rebuilt or redownloaded. Opens a review first.")
             }
+            if store.menuSession == nil, let big = bigDownloadsHint(r) {
+                Button {
+                    open(.downloads)
+                } label: {
+                    Label("\(Fmt.bytes(big)) in big downloads to check…", systemImage: "arrow.down.circle")
+                        .monospacedDigit()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.borderless)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 10)
+                .help("Simulator runtimes, SDKs and models. Poo never removes these on its own; pick what can go.")
+            }
         case .buckets:
             Divider()
             buckets(r)
@@ -277,6 +292,18 @@ struct MenuBarView: View {
         let base = r.plan("stale")?.bytes ?? 0
         let extra = deep > base ? deep - base : 0
         return extra >= 2_000_000_000 ? extra : nil
+    }
+
+    /// Big downloads are offered only when safe cleaning isn't enough: space is low, or
+    /// nothing is left that can go safely. Otherwise the panel stays as it is.
+    private func bigDownloadsHint(_ r: Report) -> UInt64? {
+        let big = store.bigDownloads.reduce(0) { $0 + $1.total_bytes }
+        guard big >= 1_000_000_000 else { return nil }
+        let safe = store.areas.reduce(0) { $0 + $1.reclaim }
+        // The low-space threshold from Settings (10% by default), even with the tint off.
+        let low = store.lowDisk || store.spaceLevel != .ok
+            || config.threshold(total: r.disk.total).map { r.disk.free < $0 } == true
+        return low || safe < 1_000_000_000 ? big : nil
     }
 
     /// The panel's Clean buttons clean on the spot: only what nothing is using, and only what

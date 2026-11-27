@@ -166,11 +166,13 @@ final class Navigation {
         var planID: String?
         var free: UInt64?
         var items: [Item]?
+        /// Preselected clean mode, for selections the user already reviewed item by item.
+        var mode: CleanMode?
     }
 
-    func review(items: [Item]) {
+    func review(items: [Item], mode: CleanMode? = nil) {
         guard !items.isEmpty else { return }
-        review = Review(items: items)
+        review = Review(items: items, mode: mode)
     }
 
     func review(plan: String, free: UInt64? = nil) {
@@ -187,6 +189,7 @@ final class Navigation {
         case worktrees
         case elsewhere
         case backups
+        case downloads
         case bucket(String)
     }
 
@@ -196,6 +199,7 @@ final class Navigation {
         ("Browse", "list.bullet.indent", .browse),
         ("Projects", "folder", .projects),
         ("Worktrees", "arrow.triangle.branch", .worktrees),
+        ("Big Downloads", "arrow.down.circle", .downloads),
         ("Elsewhere", "macbook", .elsewhere),
         ("Backups", "archivebox", .backups),
     ]

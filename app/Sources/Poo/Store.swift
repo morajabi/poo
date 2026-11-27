@@ -66,6 +66,9 @@ final class Store {
     private(set) var largest: [Item] = []
     /// Report-only items (Elsewhere on This Mac), biggest first.
     private(set) var reportOnly: [Item] = []
+    /// Big downloads marked check first (simulator runtimes, SDKs, models), biggest first.
+    /// Nothing removes these on its own; the Big Downloads section lets the user pick.
+    private(set) var bigDownloads: [Item] = []
     /// Items by id, for selection and inspector lookups.
     @ObservationIgnored private var itemIndex: [String: Int] = [:]
     /// Bumps with every new report, so caches keyed on it go stale.
@@ -78,11 +81,12 @@ final class Store {
         groupsCache = nil
         projectItemsCache = nil
         guard let r = report else {
-            areas = []; notInUse = []; reportOnly = []; largest = []; itemIndex = [:]
+            areas = []; notInUse = []; reportOnly = []; bigDownloads = []; largest = []; itemIndex = [:]
             return
         }
         largest = Array(r.items.filter { !$0.isReportOnly }.sorted { $0.total_bytes > $1.total_bytes }.prefix(12))
         reportOnly = r.items.filter(\.isReportOnly).sorted { $0.total_bytes > $1.total_bytes }
+        bigDownloads = r.items.filter(\.isBigDownload).sorted { $0.total_bytes > $1.total_bytes }
         areas = AreaSummary.notInUse(r)
         notInUse = r.items.filter { $0.status == .notInUse && $0.isCleanable }.sorted { $0.total_bytes > $1.total_bytes }
         var idx: [String: Int] = [:]

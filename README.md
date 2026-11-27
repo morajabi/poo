@@ -158,8 +158,12 @@ Every item gets a tier. Plans (`quick`, `stale` shown as "not in use", `deep`,
 | idle | builds of checkouts other than your 2 newest per repo, untouched for hours | not in use, deep, emergency |
 | warm | in active use: recent, or an agent, editor or shell is open in that checkout | deep, emergency |
 | hot | a build or the owning app is running, or touched in the last hour | never |
-| review | needs a human look: unknown ignored folders, worktrees with uncommitted work | never |
+| review | needs a human look: big downloads (simulator runtimes, SDKs, toolchains, models), unknown ignored folders, worktrees with uncommitted work | never |
 | protected | data, Docker volumes, projects you protected | never |
+
+Schedules, the low-disk guard and agent hooks never remove `review` or `protected` items, in
+any mode, even when the disk is full. The app lists big downloads under Big Downloads (and
+offers them from the menu bar when space is low) so you pick which ones go.
 
 Mark projects `active`, `stale` or `protected` with `poo projects set`. Tune
 `scan.keep_recent_checkouts` and `scan.idle_hours` to how many checkouts you build at once.
@@ -175,7 +179,7 @@ first); `--dangerously-include-protected` goes further and asks you to confirm.
 
 ```sh
 poo schedule add nightly    # 03:30 every night: clean what nothing is using
-poo schedule add guard      # below 20 GB free, clean what is not in use until 50 GB are free
+poo schedule add guard      # below 5 GB free, clean what is not in use until 20 GB are free
 ```
 
 A launchd agent wakes poo every 15 minutes. Due schedules rescan first, notify you, and log

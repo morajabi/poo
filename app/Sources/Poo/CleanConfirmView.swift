@@ -12,6 +12,8 @@ struct CleanConfirmView: View {
     var bucket: String? = nil
     /// Limits a plan to these areas (bucket/group keys), from the menu bar picker.
     var areas: Set<String>? = nil
+    /// Starts in this mode (Big Downloads: the user already picked each item).
+    var initialMode: CleanMode? = nil
     /// When set, the caller shows the progress (menu bar panel) and the sheet closes on start.
     var onStart: ((CleanSession) -> Void)? = nil
     @State private var plan: PlanResult?
@@ -117,6 +119,7 @@ struct CleanConfirmView: View {
         .padding(20)
         .frame(width: 620)
         .task {
+            if let initialMode, initialMode != .dangerous { mode = initialMode.rank <= needed.rank ? initialMode : needed }
             if items == nil, let planID {
                 plan = await store.plan(planID, free: free, bucket: bucket)
             }
